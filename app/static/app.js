@@ -60,6 +60,27 @@ async function recheck(id) {
   if (r.ok) location.reload();
   else alert("Не удалось перепроверить: " + (await r.text()));
 }
+async function syncTime(id) {
+  const r = await fetch(`/api/devices/${id}/sync-time`, { method: "POST" });
+  if (r.ok) { alert("Время синхронизировано"); location.reload(); }
+  else alert("Ошибка: " + (await r.text()));
+}
+async function rebootDevice(id) {
+  if (!confirm("Перезагрузить регистратор? Запись и просмотр прервутся на пару минут.")) return;
+  const r = await fetch(`/api/devices/${id}/reboot`, { method: "POST" });
+  alert(r.ok ? "Команда перезагрузки отправлена" : "Ошибка: " + (await r.text()));
+}
+function showSnap(deviceId, channelId, btn) {
+  const cell = btn.parentElement;
+  const url = `/api/devices/${deviceId}/channels/${channelId}/snapshot?t=` + Date.now();
+  const img = document.createElement("img");
+  img.className = "snap";
+  img.src = url;
+  img.onerror = () => { cell.innerHTML = "<span class='muted'>нет кадра</span>"; };
+  img.onclick = () => window.open(url, "_blank");
+  cell.innerHTML = "";
+  cell.appendChild(img);
+}
 async function archiveCheck(id) {
   const r = await fetch(`/api/devices/${id}/archive-check`, { method: "POST" });
   const j = await r.json();

@@ -256,3 +256,28 @@ class DahuaClient(NVRClient):
         raw = kv.get("result") or resp.text.strip()
         raw = urllib.parse.unquote(raw)
         return _parse_dahua_time(raw)
+
+    # ── Действия ───────────────────────────────────────────────────────────────
+    async def get_snapshot(self, channel_id: int) -> bytes:
+        resp = await self._request(
+            "GET", "/cgi-bin/snapshot.cgi", params={"channel": channel_id}
+        )
+        if resp.status_code != 200 or not resp.content:
+            raise FeatureUnavailable(f"snapshot: HTTP {resp.status_code}")
+        return resp.content
+
+    async def sync_time(self) -> None:
+        now = dt.datetime.now().strftime(_DAHUA_TIME_FMT)
+        resp = await self._request(
+            "GET", "/cgi-bin/global.cgi",
+            params={"action": "setCurrentTime", "time": now},
+        )
+        if resp.status_code != 200 or "ok" not in resp.text.lower():
+            raise FeatureUnavailable(f"setCurrentTime: HTTP {resp.status_code}")
+
+    async def reboot(self) -> None:
+        resp = await self._request(
+            "GET", "/cgi-bin/magicBox.cgi", params={"action": "reboot"}
+        )
+        if resp.status_code != 200:
+            raise FeatureUnavailable(f"reboot: HTTP {resp.status_code}")

@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import base64
 import datetime as dt
 import itertools
 import json
@@ -17,6 +18,13 @@ from mock.state import MockNVR
 
 _HIK_TIME = "%Y-%m-%dT%H:%M:%SZ"
 _DAHUA_TIME = "%Y-%m-%d %H:%M:%S"
+
+# Минимальный валидный JPEG 1x1 — заглушка для снапшотов в mock-режиме.
+_FAKE_JPEG = base64.b64decode(
+    "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRof"
+    "Hh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAAB"
+    "AAAAAAAAAAAAAAAAAAAAAv/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AfwD/2Q=="
+)
 
 
 # ── Генерация записей архива ────────────────────────────────────────────────
@@ -185,6 +193,27 @@ def make_mock_app(nvr: MockNVR | None = None, profile: str = "both") -> FastAPI:
                 "<timeZone>CST-8:00:00</timeZone></Time>"
             )
 
+        @app.put("/ISAPI/System/time")
+        async def set_time(request: Request):
+            n = state()
+            require_auth(request, n.username, n.password)
+            n.time_offset_seconds = 0  # «синхронизировали» часы
+            return _xml("<ResponseStatus><statusCode>1</statusCode>"
+                        "<statusString>OK</statusString></ResponseStatus>")
+
+        @app.put("/ISAPI/System/reboot")
+        async def reboot(request: Request):
+            n = state()
+            require_auth(request, n.username, n.password)
+            return _xml("<ResponseStatus><statusCode>1</statusCode>"
+                        "<statusString>OK</statusString></ResponseStatus>")
+
+        @app.get("/ISAPI/Streaming/channels/{cid}/picture")
+        async def picture(request: Request, cid: int):
+            n = state()
+            require_auth(request, n.username, n.password)
+            return Response(content=_FAKE_JPEG, media_type="image/jpeg")
+
     # ──────────────────────────── CGI (Dahua) ──────────────────────────────
     if profile in ("dahua", "both"):
 
@@ -196,11 +225,19 @@ def make_mock_app(nvr: MockNVR | None = None, profile: str = "both") -> FastAPI:
                 return _txt(f"type={n.model}")
             if action == "getSoftwareVersion":
                 return _txt(f"version={n.firmware}")
+            if action == "reboot":
+                return _txt("OK")
             # getSystemInfo
             return _txt(
                 f"deviceType={n.model}\nserialNumber={n.serial}\n"
                 f"hardwareVersion=1.00\nprocessor=ARM\n"
             )
+
+        @app.get("/cgi-bin/snapshot.cgi")
+        async def snapshot(request: Request, channel: int = 1):
+            n = state()
+            require_auth(request, n.username, n.password)
+            return Response(content=_FAKE_JPEG, media_type="image/jpeg")
 
         @app.post("/cgi-bin/api/LogicDeviceManager/getCameraState")
         async def camera_state(request: Request):
@@ -296,6 +333,9 @@ def make_mock_app(nvr: MockNVR | None = None, profile: str = "both") -> FastAPI:
         async def global_cgi(request: Request, action: str = ""):
             n = state()
             require_auth(request, n.username, n.password)
+            if action == "setCurrentTime":
+                n.time_offset_seconds = 0  # «синхронизировали» часы
+                return _txt("OK")
             return _txt(f"result={n.device_now().strftime(_DAHUA_TIME)}")
 
     return app

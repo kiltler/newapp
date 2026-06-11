@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Вход — NVR Monitor</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="login-wrap">
+  <form class="login-card" method="post" action="/login">
+    <h2>📹 NVR Monitor</h2>
+    {% if error %}<div class="login-error">{{ error }}</div>{% endif %}
+    <label>Логин<input name="username" value="admin" autofocus></label>
+    <label>Пароль<input name="password" type="password" required></label>
+    <button type="submit">Войти</button>
+  </form>
+</div>
+</body>
+</html>

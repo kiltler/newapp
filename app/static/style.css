@@ -76,3 +76,18 @@ table.calendar th.day { color: var(--muted); }
 .modal-card .row { display: flex; gap: 12px; } .modal-card .row label { flex: 1; }
 .modal-card .actions { display: flex; gap: 10px; margin-top: 16px; }
 .test-result { white-space: pre-wrap; color: var(--muted); font-size: 12px; margin-top: 10px; }
+
+button.mini { padding: 3px 8px; font-size: 12px; background: var(--line); }
+img.snap { width: 160px; height: auto; border-radius: 6px; border: 1px solid var(--line); cursor: pointer; }
+
+/* Страница входа */
+.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+.login-card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 32px; width: 340px; max-width: 92vw; }
+.login-card h2 { margin: 0 0 18px; text-align: center; }
+.login-card label { display: block; margin: 10px 0; font-size: 13px; color: var(--muted); }
+.login-card input { width: 100%; padding: 9px; margin-top: 4px; background: var(--bg);
+  border: 1px solid var(--line); border-radius: 6px; color: var(--text); }
+.login-card button { width: 100%; margin-top: 16px; padding: 10px; }
+.login-error { background: rgba(231,76,60,.15); color: var(--err); padding: 8px 12px;
+  border-radius: 6px; font-size: 13px; text-align: center; }

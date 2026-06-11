@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import crud, schemas
@@ -125,6 +125,50 @@ async def poll_now(device_id: int, session: AsyncSession = Depends(get_session))
     if device is None:
         raise HTTPException(404, "Устройство не найдено")
     await poller.poll_device(device_id)
+    return {"ok": True}
+
+
+@router.get("/devices/{device_id}/channels/{channel_id}/snapshot")
+async def channel_snapshot(
+    device_id: int, channel_id: int, session: AsyncSession = Depends(get_session)
+):
+    """Текущий кадр канала (JPEG)."""
+    device = await crud.get_device(session, device_id)
+    if device is None:
+        raise HTTPException(404, "Устройство не найдено")
+    client = build_client(device)
+    try:
+        data = await client.get_snapshot(channel_id)
+    except NVRError as exc:
+        raise HTTPException(502, f"Снимок недоступен: {exc}")
+    return Response(content=data, media_type="image/jpeg")
+
+
+@router.post("/devices/{device_id}/sync-time")
+async def sync_time(device_id: int, session: AsyncSession = Depends(get_session)):
+    device = await crud.get_device(session, device_id)
+    if device is None:
+        raise HTTPException(404, "Устройство не найдено")
+    client = build_client(device)
+    try:
+        await client.sync_time()
+    except NVRError as exc:
+        raise HTTPException(502, f"Не удалось синхронизировать время: {exc}")
+    # сразу пересчитаем дрейф
+    await poller.poll_device(device_id)
+    return {"ok": True}
+
+
+@router.post("/devices/{device_id}/reboot")
+async def reboot_device(device_id: int, session: AsyncSession = Depends(get_session)):
+    device = await crud.get_device(session, device_id)
+    if device is None:
+        raise HTTPException(404, "Устройство не найдено")
+    client = build_client(device)
+    try:
+        await client.reboot()
+    except NVRError as exc:
+        raise HTTPException(502, f"Не удалось перезагрузить: {exc}")
     return {"ok": True}
 
 

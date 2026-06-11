@@ -206,3 +206,34 @@ class HikvisionClient(NVRClient):
         if not local:
             raise FeatureUnavailable("нет localTime")
         return _parse_hik_time(local)
+
+    # ── Действия ───────────────────────────────────────────────────────────────
+    async def get_snapshot(self, channel_id: int) -> bytes:
+        # Основной поток канала: /Streaming/channels/<ch*100+1>/picture
+        resp = await self._request(
+            "GET", f"/ISAPI/Streaming/channels/{channel_id * 100 + 1}/picture"
+        )
+        if resp.status_code != 200 or not resp.content:
+            raise FeatureUnavailable(f"snapshot: HTTP {resp.status_code}")
+        return resp.content
+
+    async def sync_time(self) -> None:
+        # Берём текущий XML времени, подменяем localTime на локальное время сервера
+        # (с поясным смещением) и режим на ручной, затем PUT обратно.
+        cur = await self._request("GET", "/ISAPI/System/time")
+        if cur.status_code != 200:
+            raise FeatureUnavailable(f"time GET: HTTP {cur.status_code}")
+        now_iso = dt.datetime.now().astimezone().replace(microsecond=0).isoformat()
+        body = re.sub(r"<localTime>.*?</localTime>", f"<localTime>{now_iso}</localTime>", cur.text)
+        body = re.sub(r"<timeMode>.*?</timeMode>", "<timeMode>manual</timeMode>", body)
+        resp = await self._request(
+            "PUT", "/ISAPI/System/time", data=body,
+            headers={"Content-Type": "application/xml"},
+        )
+        if resp.status_code not in (200, 201):
+            raise FeatureUnavailable(f"time PUT: HTTP {resp.status_code}")
+
+    async def reboot(self) -> None:
+        resp = await self._request("PUT", "/ISAPI/System/reboot")
+        if resp.status_code not in (200, 201):
+            raise FeatureUnavailable(f"reboot: HTTP {resp.status_code}")

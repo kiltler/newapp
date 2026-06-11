@@ -8,6 +8,8 @@
     <button onclick="pollNow({{ device.id }})">Опросить сейчас</button>
     <button onclick="recheck({{ device.id }})">Перепроверить возможности</button>
     <button onclick="archiveCheck({{ device.id }})">Проверить архив (вчера)</button>
+    <button onclick="syncTime({{ device.id }})">Синхр. время</button>
+    <button class="danger" onclick="rebootDevice({{ device.id }})">Перезагрузить</button>
     <button class="danger" onclick="deleteDevice({{ device.id }})">Удалить</button>
   </div>
 </div>
@@ -30,7 +32,7 @@
 
 <h2>Каналы</h2>
 <table class="grid">
-  <thead><tr><th>#</th><th>Имя</th><th>Тип</th><th>Статус</th><th>Изменён</th></tr></thead>
+  <thead><tr><th>#</th><th>Имя</th><th>Тип</th><th>Статус</th><th>Изменён</th><th>Кадр</th></tr></thead>
   <tbody>
   {% for c in device.channels|sort(attribute='channel_id') %}
     <tr>
@@ -42,8 +44,9 @@
         <span class="badge {{ m[c.status] }}">{{ c.status }}</span>
       </td>
       <td class="muted">{{ c.last_status_change.strftime('%d.%m %H:%M') if c.last_status_change else '—' }}</td>
+      <td><button class="mini" onclick="showSnap({{ device.id }},{{ c.channel_id }},this)">📷 кадр</button></td>
     </tr>
-  {% else %}<tr><td colspan="5" class="muted">Каналов нет (опросите устройство).</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="6" class="muted">Каналов нет (опросите устройство).</td></tr>{% endfor %}
   </tbody>
 </table>
 

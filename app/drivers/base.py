@@ -226,6 +226,19 @@ class NVRClient(abc.ABC):
     @abc.abstractmethod
     async def get_device_time(self) -> dt.datetime: ...
 
+    # ── Действия (необязательные; по умолчанию — «не поддерживается») ──────────
+    async def get_snapshot(self, channel_id: int) -> bytes:
+        """Возвращает текущий кадр канала (JPEG)."""
+        raise FeatureUnavailable("снимок не поддерживается")
+
+    async def sync_time(self) -> None:
+        """Выставляет на устройстве текущее локальное время сервера."""
+        raise FeatureUnavailable("синхронизация времени не поддерживается")
+
+    async def reboot(self) -> None:
+        """Перезагружает устройство."""
+        raise FeatureUnavailable("перезагрузка не поддерживается")
+
     async def test_connection(self) -> DeviceInfo:
         """Базовый тест: получить инфо об устройстве (бросает при ошибке)."""
         return await self.get_device_info()

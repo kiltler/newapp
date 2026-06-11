@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     telegram_chat_id: str = ""
     telegram_enabled: bool = True
 
+    # Вход в панель (если admin_password пуст — вход отключён, панель открыта)
+    admin_username: str = "admin"
+    admin_password: str = ""
+
     # Прочее
     log_level: str = "INFO"
     mock_mode: bool = False
