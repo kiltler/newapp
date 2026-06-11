@@ -162,7 +162,10 @@ async def raw_request(
         resp = await client._request("GET", path)
     except NVRError as exc:
         raise HTTPException(502, f"Ошибка запроса: {exc}")
-    text = resp.content.decode("utf-8", "replace")
+    try:
+        text = resp.content.decode("utf-8")
+    except UnicodeDecodeError:
+        text = resp.content.decode("cp1251", errors="replace")
     return Response(content=text, media_type="text/plain; charset=utf-8")
 
 

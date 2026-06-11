@@ -119,7 +119,7 @@ def make_mock_app(nvr: MockNVR | None = None, profile: str = "both") -> FastAPI:
                 if c.kind != "analog":
                     continue
                 enabled = "true"
-                res = "" if c.video_loss else "1920*1080"
+                res = "NO VIDEO" if c.video_loss else "1080P25"
                 items.append(
                     f"<VideoInputChannel><id>{c.id}</id><name>{c.name}</name>"
                     f"<videoInputEnabled>{enabled}</videoInputEnabled>"

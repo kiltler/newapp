@@ -31,9 +31,17 @@ def _strip_ns(xml_text: str) -> ET.Element:
 
 
 def _body(resp) -> str:
-    """Декодирует тело ответа как UTF-8 (ISAPI отдаёт UTF-8; имена камер часто
-    на кириллице — httpx иногда угадывает кодировку неверно и портит текст)."""
-    return resp.content.decode("utf-8", "replace")
+    """Декодирует тело ответа в текст.
+
+    ISAPI заявляет UTF-8, но многие прошивки Hikvision отдают имена камер в
+    Windows-1251 (кириллица). Поэтому: пробуем строгий UTF-8, при ошибке —
+    откатываемся на cp1251.
+    """
+    raw = resp.content
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("cp1251", errors="replace")
 
 
 def _text(el: ET.Element | None, tag: str) -> str | None:
@@ -107,8 +115,11 @@ class HikvisionClient(NVRClient):
                     if cid_i in result:
                         continue  # уже учтён как IP
                     enabled = (_text(ch, "videoInputEnabled") or "true").lower() == "true"
-                    res_desc = _text(ch, "resDesc")  # пусто => нет сигнала
-                    video_loss = (not enabled) or not res_desc
+                    if not enabled:
+                        continue  # вход административно отключён — не мониторим
+                    # Нет сигнала: пустое разрешение или явный маркер "NO VIDEO"
+                    res_desc = (_text(ch, "resDesc") or "").strip().upper()
+                    video_loss = (not res_desc) or "NO VIDEO" in res_desc
                     result[cid_i] = ChannelStatus(
                         channel_id=cid_i,
                         name=_text(ch, "name"),

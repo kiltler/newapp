@@ -47,6 +47,17 @@ async def test_cyrillic_channel_name(nvr):
     assert statuses[1].name == "Камера 1 Вход"  # кириллица не должна ломаться
 
 
+def test_body_decodes_cp1251_names():
+    """NVR заявляет UTF-8, но имена в cp1251 — должны корректно декодироваться."""
+    from app.drivers.hikvision import _body
+
+    class FakeResp:
+        # «Камера1» в Windows-1251 (как отдают некоторые прошивки Hikvision)
+        content = "<name>Камера1</name>".encode("cp1251")
+
+    assert _body(FakeResp()) == "<name>Камера1</name>"
+
+
 async def test_hdd_ok(nvr):
     client = make_driver("hikvision", nvr)
     hdds = await client.get_hdd_info()
