@@ -55,6 +55,11 @@ async function pollNow(id) {
   await fetch(`/api/devices/${id}/poll`, { method: "POST" });
   location.reload();
 }
+async function recheck(id) {
+  const r = await fetch(`/api/devices/${id}/recheck`, { method: "POST" });
+  if (r.ok) location.reload();
+  else alert("Не удалось перепроверить: " + (await r.text()));
+}
 async function archiveCheck(id) {
   const r = await fetch(`/api/devices/${id}/archive-check`, { method: "POST" });
   const j = await r.json();

@@ -7,6 +7,8 @@ services:
       # В Compose по умолчанию используем PostgreSQL из сервиса db.
       # Чтобы перейти на SQLite — закомментируйте строку ниже и задайте DATABASE_URL в .env.
       DATABASE_URL: postgresql+psycopg://nvrmon:nvrmon@db:5432/nvrmon
+      # Часовой пояс контейнера = пояс ваших регистраторов (берётся из .env, по умолчанию UTC).
+      TZ: ${TZ:-UTC}
     ports:
       - "8000:8000"
     volumes:

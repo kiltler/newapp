@@ -128,6 +128,16 @@ async def poll_now(device_id: int, session: AsyncSession = Depends(get_session))
     return {"ok": True}
 
 
+@router.post("/devices/{device_id}/recheck", response_model=schemas.DeviceDetail)
+async def recheck(device_id: int, session: AsyncSession = Depends(get_session)):
+    """Заново тянет модель/прошивку и перепроверяет возможности устройства."""
+    device = await crud.get_device(session, device_id)
+    if device is None:
+        raise HTTPException(404, "Устройство не найдено")
+    await _enrich_device(session, device)
+    return await crud.get_device(session, device_id)
+
+
 @router.post("/devices/{device_id}/archive-check")
 async def archive_check_now(
     device_id: int, day: str | None = None, session: AsyncSession = Depends(get_session)

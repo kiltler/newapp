@@ -8,7 +8,7 @@ WORKDIR /app
 
 # Системные зависимости (для psycopg/cryptography обычно достаточно slim)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ca-certificates && rm -rf /var/lib/apt/lists/*
+    curl ca-certificates tzdata && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt

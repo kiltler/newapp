@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import re
+import uuid
 import xml.etree.ElementTree as ET
 
 import httpx
@@ -149,6 +150,9 @@ class HikvisionClient(NVRClient):
         self, channel_id: int, start: dt.datetime, end: dt.datetime
     ) -> list[ArchiveSegment]:
         track_id = channel_id * 100 + 1  # 1 → 101 (основной поток)
+        # Часть прошивок Hikvision требует searchID строго в формате UUID,
+        # иначе отвечают 400/невалидным XML. Используем настоящий UUID.
+        search_id = str(uuid.uuid4())
         segments: list[ArchiveSegment] = []
         position = 0
         page = 100
@@ -156,7 +160,7 @@ class HikvisionClient(NVRClient):
             body = (
                 '<?xml version="1.0" encoding="utf-8"?>'
                 "<CMSearchDescription>"
-                f"<searchID>NVRMON-{channel_id}</searchID>"
+                f"<searchID>{search_id}</searchID>"
                 f"<trackList><trackID>{track_id}</trackID></trackList>"
                 "<timeSpanList><timeSpan>"
                 f"<startTime>{start.strftime('%Y-%m-%dT%H:%M:%SZ')}</startTime>"

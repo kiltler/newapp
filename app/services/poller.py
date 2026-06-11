@@ -251,10 +251,15 @@ async def _update_hdds(session: AsyncSession, device: Device, hdds) -> None:
 
 # ── Время ──────────────────────────────────────────────────────────────────────
 async def _check_time_drift(session: AsyncSession, device: Device, device_time: dt.datetime) -> None:
-    server_time = dt.datetime.now()  # локальное время сервера (naive)
+    # Корректно учитываем часовой пояс:
+    #  - если NVR вернул время со смещением (напр. +03:00) — сравниваем абсолютные
+    #    моменты в UTC (разница поясов сама по себе НЕ считается дрейфом);
+    #  - если время «наивное» (без пояса) — сравниваем со «стенными» часами сервера
+    #    (для этого задайте TZ контейнера под пояс регистраторов, см. .env).
     if device_time.tzinfo is not None:
-        device_time = device_time.replace(tzinfo=None)
-    drift = int(abs((device_time - server_time).total_seconds()))
+        drift = int(abs((device_time - dt.datetime.now(dt.timezone.utc)).total_seconds()))
+    else:
+        drift = int(abs((device_time - dt.datetime.now()).total_seconds()))
     device.time_drift_seconds = drift
 
     scope = f"device:{device.id}:timedrift"

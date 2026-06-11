@@ -6,6 +6,7 @@
   <h1>{{ device.name }}</h1>
   <div class="device-actions">
     <button onclick="pollNow({{ device.id }})">Опросить сейчас</button>
+    <button onclick="recheck({{ device.id }})">Перепроверить возможности</button>
     <button onclick="archiveCheck({{ device.id }})">Проверить архив (вчера)</button>
     <button class="danger" onclick="deleteDevice({{ device.id }})">Удалить</button>
   </div>
