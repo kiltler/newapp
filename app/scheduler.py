@@ -28,12 +28,12 @@ def start_scheduler() -> None:
         replace_existing=True,
     )
     scheduler.add_job(
-        archive.check_archive_all,
+        archive.daily_archive_job,
         trigger=CronTrigger(
             hour=settings.archive_check_hour, minute=settings.archive_check_minute
         ),
         id="archive_check",
-        name="Суточная проверка архива",
+        name="Суточная проверка архива + глубина",
         max_instances=1,
         coalesce=True,
         replace_existing=True,

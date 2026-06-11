@@ -79,6 +79,17 @@ table.calendar th.day { color: var(--muted); }
 
 button.mini { padding: 3px 8px; font-size: 12px; background: var(--line); }
 img.snap { width: 160px; height: auto; border-radius: 6px; border: 1px solid var(--line); cursor: pointer; }
+tr.row-muted { opacity: .45; }
+
+.bulkbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+.bulkbar select { padding: 7px; background: var(--bg); border: 1px solid var(--line);
+  border-radius: 6px; color: var(--text); }
+
+/* Стена камер */
+.wall { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.wall-cell { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.wall-img { width: 100%; aspect-ratio: 16/9; object-fit: cover; background: #000; display: block; }
+.wall-cell figcaption { padding: 6px 8px; font-size: 13px; display: flex; gap: 6px; align-items: center; }
 
 /* Страница входа */
 .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; }

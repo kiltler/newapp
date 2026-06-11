@@ -4,13 +4,14 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Response
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import crud, schemas
 from app.database import get_session
 from app.drivers import build_client, detect_api_type
 from app.drivers.base import NVRError
-from app.models import ApiType, Device
+from app.models import ApiType, Channel, Device
 from app.services import archive, poller
 
 log = logging.getLogger(__name__)
@@ -195,6 +196,65 @@ async def reboot_device(device_id: int, session: AsyncSession = Depends(get_sess
     except NVRError as exc:
         raise HTTPException(502, f"Не удалось перезагрузить: {exc}")
     return {"ok": True}
+
+
+@router.post("/devices/{device_id}/archive-depth")
+async def archive_depth_now(device_id: int, session: AsyncSession = Depends(get_session)):
+    """Измерить реальную глубину архива (сколько дней хранится)."""
+    device = await crud.get_device(session, device_id)
+    if device is None:
+        raise HTTPException(404, "Устройство не найдено")
+    await archive.measure_device_depth(device_id)
+    return {"ok": True}
+
+
+@router.post("/devices/{device_id}/channels/{channel_id}/toggle")
+async def toggle_channel(
+    device_id: int, channel_id: int, session: AsyncSession = Depends(get_session)
+):
+    """Включить/выключить мониторинг канала (заглушка)."""
+    ch = (
+        await session.execute(
+            select(Channel).where(
+                Channel.device_id == device_id, Channel.channel_id == channel_id
+            )
+        )
+    ).scalar_one_or_none()
+    if ch is None:
+        raise HTTPException(404, "Канал не найден")
+    ch.enabled = not ch.enabled
+    await session.commit()
+    return {"ok": True, "enabled": ch.enabled}
+
+
+# ── Массовые операции (по группе или по всем) ──────────────────────────────────
+async def _bulk_targets(session: AsyncSession, group_id: int | None) -> list[int]:
+    query = select(Device.id).where(Device.enabled.is_(True))
+    if group_id is not None:
+        query = query.where(Device.group_id == group_id)
+    return list((await session.execute(query)).scalars())
+
+
+@router.post("/bulk/poll")
+async def bulk_poll(group_id: int | None = None, session: AsyncSession = Depends(get_session)):
+    ids = await _bulk_targets(session, group_id)
+    for did in ids:
+        await poller.poll_device(did)
+    return {"ok": True, "count": len(ids)}
+
+
+@router.post("/bulk/sync-time")
+async def bulk_sync_time(group_id: int | None = None, session: AsyncSession = Depends(get_session)):
+    ids = await _bulk_targets(session, group_id)
+    done = 0
+    for did in ids:
+        device = await crud.get_device(session, did)
+        try:
+            await build_client(device).sync_time()
+            done += 1
+        except NVRError:
+            pass
+    return {"ok": True, "synced": done, "total": len(ids)}
 
 
 @router.post("/devices/{device_id}/recheck", response_model=schemas.DeviceDetail)

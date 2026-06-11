@@ -12,6 +12,7 @@ function formData() {
     password: f.password.value,
     api_type: f.api_type.value,
     timeout: parseFloat(f.timeout.value || "15"),
+    archive_retention_days: parseInt(f.archive_retention_days.value || "0", 10),
   };
 }
 
@@ -69,6 +70,31 @@ async function rebootDevice(id) {
   if (!confirm("Перезагрузить регистратор? Запись и просмотр прервутся на пару минут.")) return;
   const r = await fetch(`/api/devices/${id}/reboot`, { method: "POST" });
   alert(r.ok ? "Команда перезагрузки отправлена" : "Ошибка: " + (await r.text()));
+}
+async function archiveDepth(id) {
+  if (!confirm("Измерить реальную глубину архива? Это может занять до минуты.")) return;
+  const r = await fetch(`/api/devices/${id}/archive-depth`, { method: "POST" });
+  alert(r.ok ? "Глубина архива измерена" : "Ошибка: " + (await r.text()));
+  if (r.ok) location.reload();
+}
+async function toggleChannel(deviceId, channelId, btn) {
+  const r = await fetch(`/api/devices/${deviceId}/channels/${channelId}/toggle`, { method: "POST" });
+  if (r.ok) location.reload();
+  else alert("Ошибка: " + (await r.text()));
+}
+async function bulkPoll(groupId) {
+  const q = groupId ? `?group_id=${groupId}` : "";
+  const r = await fetch(`/api/bulk/poll${q}`, { method: "POST" });
+  const j = await r.json();
+  alert(`Опрошено устройств: ${j.count}`);
+  location.reload();
+}
+async function bulkSyncTime(groupId) {
+  if (!confirm("Синхронизировать время на выбранных регистраторах?")) return;
+  const q = groupId ? `?group_id=${groupId}` : "";
+  const r = await fetch(`/api/bulk/sync-time${q}`, { method: "POST" });
+  const j = await r.json();
+  alert(`Время синхронизировано: ${j.synced}/${j.total}`);
 }
 function diag(id) {
   const p = prompt(

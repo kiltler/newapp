@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Отчёт — {{ device.name }}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    @media print { .noprint { display: none; } body { background: #fff; color: #000; } }
+    .report { max-width: 900px; margin: 0 auto; padding: 24px; }
+    .report table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+    .report th, .report td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; }
+  </style>
+</head>
+<body>
+<div class="report">
+  <div class="noprint" style="margin-bottom:16px">
+    <a href="/devices/{{ device.id }}" class="muted">← назад</a>
+    <button onclick="window.print()">🖨 Печать / Сохранить в PDF</button>
+  </div>
+
+  <h1>Отчёт по объекту: {{ device.name }}</h1>
+  <p class="muted">
+    {{ device.address or '' }} · {{ device.host }} · {{ device.model or '' }}<br>
+    Период: {{ period_from.strftime('%d.%m.%Y') }} — {{ period_to.strftime('%d.%m.%Y') }} ·
+    сформирован {{ now.strftime('%d.%m.%Y %H:%M') }}
+  </p>
+
+  <h2>Контроль архива</h2>
+  <p>
+    Обещано клиенту: <b>{{ device.archive_retention_days or '—' }}</b> дн.
+  </p>
+  <table>
+    <thead><tr><th>#</th><th>Камера</th><th>Текущий статус</th><th>Глубина архива</th></tr></thead>
+    <tbody>
+    {% for c in channels %}
+      <tr>
+        <td>{{ c.channel_id }}</td>
+        <td>{{ c.name or '—' }}</td>
+        <td>{{ c.status }}{% if not c.enabled %} (не мониторится){% endif %}</td>
+        <td>
+          {% if c.archive_depth_days is not none %}{{ c.archive_depth_days }} дн.
+            {% if device.archive_retention_days and c.archive_depth_days < device.archive_retention_days %}
+              ⚠️ ниже нормы{% endif %}
+          {% else %}—{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Инциденты за период</h2>
+  {% if incidents %}
+    <table>
+      <thead><tr><th>Тип события</th><th>Количество</th></tr></thead>
+      <tbody>
+      {% set names = {'camera_down':'Камера offline / нет видео','nvr_unreachable':'NVR недоступен',
+        'hdd_fault':'Проблема с диском','archive_missing':'Нет архива','archive_gap':'Дыры в архиве',
+        'time_drift':'Расхождение времени','archive_depth_low':'Глубина архива ниже нормы',
+        'nvr_auth_error':'Ошибка авторизации','hdd_full':'Диск переполнен'} %}
+      {% for t, n in incidents.items() %}
+        <tr><td>{{ names.get(t, t) }}</td><td>{{ n }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>За период инцидентов не зафиксировано. ✅</p>
+  {% endif %}
+
+  <h2>Диски</h2>
+  <table>
+    <thead><tr><th>Диск</th><th>Объём</th><th>Заполнено</th><th>Статус</th></tr></thead>
+    <tbody>
+    {% for h in device.hdds %}
+      <tr><td>{{ h.hdd_id }}</td><td>{{ (h.capacity_mb/1024)|round(1) }} ГБ</td>
+          <td>{{ h.usage_percent }}%</td><td>{{ h.status }}</td></tr>
+    {% else %}<tr><td colspan="4">нет данных</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+</body>
+</html>

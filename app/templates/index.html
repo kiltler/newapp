@@ -9,6 +9,14 @@
 </section>
 
 <h2>Объекты</h2>
+<div class="bulkbar">
+  <select id="bulk-group">
+    <option value="">Все объекты</option>
+    {% for gid, g in groups.items() %}<option value="{{ gid }}">{{ g.name }}</option>{% endfor %}
+  </select>
+  <button onclick="bulkPoll(document.getElementById('bulk-group').value)">Опросить</button>
+  <button onclick="bulkSyncTime(document.getElementById('bulk-group').value)">Синхр. время</button>
+</div>
 <table class="grid">
   <thead><tr><th></th><th>Объект</th><th>Клиент/адрес</th><th>Host</th><th>Тип</th><th>Каналы</th><th>Статус</th></tr></thead>
   <tbody>

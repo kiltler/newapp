@@ -41,9 +41,31 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
+# Лёгкие миграции: новые колонки, которые create_all НЕ добавит к уже
+# существующим таблицам. (table, column, DDL-тип). Без Alembic для простоты.
+_NEW_COLUMNS = [
+    ("devices", "archive_retention_days", "INTEGER DEFAULT 0"),
+    ("channels", "archive_depth_days", "INTEGER"),
+]
+
+
+def _lightweight_migrate(sync_conn) -> None:
+    from sqlalchemy import inspect, text
+
+    insp = inspect(sync_conn)
+    tables = set(insp.get_table_names())
+    for table, column, ddl in _NEW_COLUMNS:
+        if table not in tables:
+            continue
+        existing = {c["name"] for c in insp.get_columns(table)}
+        if column not in existing:
+            sync_conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+
+
 async def init_db() -> None:
-    """Создаёт таблицы (для MVP — без Alembic)."""
+    """Создаёт таблицы и добавляет недостающие колонки (для MVP — без Alembic)."""
     from app import models  # noqa: F401  (регистрация моделей)
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_lightweight_migrate)

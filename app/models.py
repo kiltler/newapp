@@ -106,6 +106,9 @@ class Device(Base):
     # Возможности (результат capability-check): {"channels": true, "hdd": ..., "archive": ..., "time": ...}
     capabilities: Mapped[dict] = mapped_column(JSON, default=dict)
 
+    # Обещанная клиенту глубина архива (дней). 0 = не задано (не контролируем).
+    archive_retention_days: Mapped[int] = mapped_column(Integer, default=0)
+
     # Рантайм-состояние
     reachable: Mapped[bool] = mapped_column(Boolean, default=True)
     consecutive_failures: Mapped[int] = mapped_column(Integer, default=0)
@@ -141,7 +144,9 @@ class Channel(Base):
         DateTime(timezone=True), default=None
     )
     last_seen: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), default=None)
-    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)  # False = не мониторить (заглушка)
+    # Реальная глубина архива по каналу (дней), измеряется суточной задачей.
+    archive_depth_days: Mapped[int | None] = mapped_column(Integer, default=None)
 
     device: Mapped["Device"] = relationship(back_populates="channels")
 

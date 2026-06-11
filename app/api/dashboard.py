@@ -54,6 +54,50 @@ async def index(request: Request, session: AsyncSession = Depends(get_session)):
     )
 
 
+@router.get("/devices/{device_id}/wall", response_class=HTMLResponse)
+async def camera_wall(
+    device_id: int, request: Request, session: AsyncSession = Depends(get_session)
+):
+    device = await crud.get_device(session, device_id)
+    if device is None:
+        return HTMLResponse("Устройство не найдено", status_code=404)
+    channels = sorted(
+        [c for c in device.channels if c.enabled], key=lambda c: c.channel_id
+    )
+    return templates.TemplateResponse(
+        "wall.html", {"request": request, "device": device, "channels": channels}
+    )
+
+
+@router.get("/devices/{device_id}/report", response_class=HTMLResponse)
+async def device_report(
+    device_id: int, request: Request, session: AsyncSession = Depends(get_session)
+):
+    device = await crud.get_device(session, device_id)
+    if device is None:
+        return HTMLResponse("Устройство не найдено", status_code=404)
+    since = dt.datetime.utcnow() - dt.timedelta(days=30)
+    events = await crud.list_events(session, device_id=device_id, limit=1000)
+    period_events = [e for e in events if e.created_at.replace(tzinfo=None) >= since]
+    # Сводка инцидентов по типам за период
+    incidents: dict[str, int] = {}
+    for e in period_events:
+        if not e.type.endswith("_resolved"):
+            incidents[e.type] = incidents.get(e.type, 0) + 1
+    return templates.TemplateResponse(
+        "report.html",
+        {
+            "request": request,
+            "device": device,
+            "incidents": incidents,
+            "period_from": since.date(),
+            "period_to": dt.date.today(),
+            "now": dt.datetime.now(),
+            "channels": sorted(device.channels, key=lambda c: c.channel_id),
+        },
+    )
+
+
 @router.get("/devices/{device_id}", response_class=HTMLResponse)
 async def device_page(
     device_id: int, request: Request, session: AsyncSession = Depends(get_session)

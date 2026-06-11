@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Стена камер — {{ device.name }}{% endblock %}
+{% block content %}
+<a href="/devices/{{ device.id }}" class="muted">← к устройству</a>
+<div class="device-head">
+  <h1>Стена камер — {{ device.name }}</h1>
+  <div class="device-actions">
+    <label class="muted">Обновлять каждые
+      <select id="refresh-int">
+        <option value="5">5 c</option>
+        <option value="10" selected>10 c</option>
+        <option value="30">30 c</option>
+        <option value="0">выкл</option>
+      </select>
+    </label>
+  </div>
+</div>
+
+<div class="wall">
+  {% for c in channels %}
+    {% set m = {'online':'ok','offline':'err','no_video':'warn','unknown':'muted'} %}
+    <figure class="wall-cell">
+      <img class="wall-img" data-url="/api/devices/{{ device.id }}/channels/{{ c.channel_id }}/snapshot"
+           alt="кан. {{ c.channel_id }}">
+      <figcaption>
+        <span class="badge {{ m[c.status] }}">{{ c.status }}</span>
+        {{ c.channel_id }}. {{ c.name or '—' }}
+      </figcaption>
+    </figure>
+  {% else %}
+    <p class="muted">Активных каналов нет. Опросите устройство.</p>
+  {% endfor %}
+</div>
+
+<script>
+function refreshWall() {
+  document.querySelectorAll(".wall-img").forEach(img => {
+    img.src = img.dataset.url + "?t=" + Date.now();
+  });
+}
+let timer = null;
+function applyInterval() {
+  if (timer) clearInterval(timer);
+  const sec = parseInt(document.getElementById("refresh-int").value, 10);
+  if (sec > 0) timer = setInterval(refreshWall, sec * 1000);
+}
+document.getElementById("refresh-int").addEventListener("change", applyInterval);
+refreshWall();
+applyInterval();
+</script>
+{% endblock %}

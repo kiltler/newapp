@@ -181,6 +181,14 @@ async def _update_channels(session: AsyncSession, device: Device, statuses) -> N
             ch.last_status_change = now
 
         scope = f"device:{device.id}:channel:{st.channel_id}:down"
+        if ch.enabled is False:  # именно False (None у свежесозданного = ещё не выключен)
+            # Канал снят с мониторинга («заглушка») — гасим активный алерт и не тревожим
+            await alerts.resolve_alert(
+                session, scope_key=scope, device_id=device.id, channel_id=st.channel_id,
+                message=f"«{device.name}» канал {st.channel_id}: снят с мониторинга",
+                notify=False,
+            )
+            continue
         if new_state == ChannelState.ONLINE:
             await alerts.resolve_alert(
                 session, scope_key=scope, device_id=device.id, channel_id=st.channel_id,

@@ -77,6 +77,83 @@ async def test_poll_raises_camera_alert(db, monkeypatch):
         assert alert is not None and alert.active is True
 
 
+async def test_channel_mute_suppresses_alert(db, monkeypatch):
+    nvr = MockNVR.default(channels=3)
+    _patch_build_client(monkeypatch, nvr)
+    async with SessionLocal() as session:
+        device_id = await _make_device(session)
+    await poller.poll_device(device_id)  # создаёт каналы
+
+    async with SessionLocal() as session:
+        ch = (
+            await session.execute(
+                select(Channel).where(Channel.device_id == device_id, Channel.channel_id == 2)
+            )
+        ).scalar_one()
+        ch.enabled = False
+        await session.commit()
+
+    nvr.get_channel(2).online = False  # канал упал, но он заглушён
+    await poller.poll_device(device_id)
+
+    async with SessionLocal() as session:
+        alert = (
+            await session.execute(
+                select(AlertState).where(
+                    AlertState.scope_key == f"device:{device_id}:channel:2:down"
+                )
+            )
+        ).scalar_one_or_none()
+        assert alert is None or alert.active is False  # заглушённый канал не тревожит
+
+
+async def test_archive_depth_alert(db, monkeypatch):
+    from app.services import archive as archive_mod
+
+    nvr = MockNVR.default(channels=2)
+    nvr.get_channel(1).archive = "none"  # по каналу 1 архива нет → глубина 0
+    app = make_mock_app(nvr, "hikvision")
+
+    def fake_build(device, *, semaphore=None, client=None, password=None):
+        from app.drivers.hikvision import HikvisionClient
+
+        return HikvisionClient(
+            host="t", port=80, username=nvr.username, password=nvr.password,
+            client=make_http(app, nvr.username, nvr.password),
+        )
+
+    monkeypatch.setattr(archive_mod, "build_client", fake_build)
+
+    async with SessionLocal() as session:
+        device = Device(
+            name="D", host="t", http_port=80, username="admin",
+            api_type=ApiType.HIKVISION, capabilities={"archive": True},
+            archive_retention_days=10,
+        )
+        session.add(device)
+        await session.commit()
+        did = device.id
+        session.add(Channel(device_id=did, channel_id=1))
+        session.add(Channel(device_id=did, channel_id=2))
+        await session.commit()
+
+    await archive_mod.measure_device_depth(did)
+
+    async with SessionLocal() as session:
+        chs = (
+            await session.execute(select(Channel).where(Channel.device_id == did))
+        ).scalars().all()
+        assert all(c.archive_depth_days is not None for c in chs)
+        depths = {c.channel_id: c.archive_depth_days for c in chs}
+        assert depths[1] == 0  # нет архива
+        alert = (
+            await session.execute(
+                select(AlertState).where(AlertState.scope_key == f"device:{did}:archive_depth")
+            )
+        ).scalar_one_or_none()
+        assert alert is not None and alert.active is True  # 0 < 10 → алерт
+
+
 async def test_poll_unreachable(db, monkeypatch):
     """Устройство недоступно по сети → алерт nvr_unreachable (порог=1)."""
     def fake_build_client(device, *, semaphore=None, client=None, password=None):

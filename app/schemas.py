@@ -34,6 +34,7 @@ class DeviceCreate(BaseModel):
     timeout: float = 15.0
     retries: int = 2
     enabled: bool = True
+    archive_retention_days: int = 0
 
 
 class DeviceUpdate(BaseModel):
@@ -50,6 +51,7 @@ class DeviceUpdate(BaseModel):
     timeout: float | None = None
     retries: int | None = None
     enabled: bool | None = None
+    archive_retention_days: int | None = None
 
 
 class ChannelOut(BaseModel):
@@ -58,6 +60,8 @@ class ChannelOut(BaseModel):
     name: str | None = None
     kind: str
     status: str
+    enabled: bool = True
+    archive_depth_days: int | None = None
     last_status_change: dt.datetime | None = None
     last_seen: dt.datetime | None = None
 
@@ -86,6 +90,7 @@ class DeviceOut(BaseModel):
     enabled: bool
     reachable: bool
     consecutive_failures: int
+    archive_retention_days: int = 0
     capabilities: dict = Field(default_factory=dict)
     last_seen: dt.datetime | None = None
     last_error: str | None = None
