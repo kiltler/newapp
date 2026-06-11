@@ -77,6 +77,11 @@ async function archiveDepth(id) {
   alert(r.ok ? "Глубина архива измерена" : "Ошибка: " + (await r.text()));
   if (r.ok) location.reload();
 }
+async function qualityCheck(id) {
+  const r = await fetch(`/api/devices/${id}/quality-check`, { method: "POST" });
+  alert(r.ok ? "Качество картинки проверено" : "Ошибка: " + (await r.text()));
+  if (r.ok) location.reload();
+}
 async function toggleChannel(deviceId, channelId, btn) {
   const r = await fetch(`/api/devices/${deviceId}/channels/${channelId}/toggle`, { method: "POST" });
   if (r.ok) location.reload();

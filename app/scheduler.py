@@ -8,7 +8,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import settings
-from app.services import archive, poller
+from app.services import archive, poller, quality
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +38,17 @@ def start_scheduler() -> None:
         coalesce=True,
         replace_existing=True,
     )
+    if settings.quality_check_minutes > 0:
+        scheduler.add_job(
+            quality.check_quality_all,
+            trigger=IntervalTrigger(minutes=settings.quality_check_minutes),
+            id="quality_check",
+            name="Контроль качества картинки",
+            max_instances=1,
+            coalesce=True,
+            replace_existing=True,
+        )
+
     scheduler.start()
     log.info(
         "Планировщик запущен: опрос каждые %d мин, архив в %02d:%02d",

@@ -51,6 +51,7 @@ async def raise_alert(
     channel_id: int | None = None,
     context: dict | None = None,
     notify: bool = True,
+    photo: bytes | None = None,
 ) -> bool:
     """Открывает алерт, если он ещё не активен. Возвращает True, если новый.
 
@@ -89,7 +90,11 @@ async def raise_alert(
 
     if notify:
         icon = _ICON.get(severity, "⚠️")
-        sent = await telegram.send_message(f"{icon} <b>АЛЕРТ</b>\n{telegram.esc(message)}")
+        text = f"{icon} <b>АЛЕРТ</b>\n{telegram.esc(message)}"
+        if photo is not None:
+            sent = await telegram.send_photo(photo, caption=text)
+        else:
+            sent = await telegram.send_message(text)
         if sent:
             state.last_notified_at = now
     return True

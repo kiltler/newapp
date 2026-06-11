@@ -90,6 +90,9 @@ tr.row-muted { opacity: .45; }
 .wall-cell { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .wall-img { width: 100%; aspect-ratio: 16/9; object-fit: cover; background: #000; display: block; }
 .wall-cell figcaption { padding: 6px 8px; font-size: 13px; display: flex; gap: 6px; align-items: center; }
+.wall-cell.q-ok { border-color: var(--ok); }
+.wall-cell.q-warn { border-color: var(--warn); box-shadow: 0 0 0 2px var(--warn); }
+.wall-cell.q-bad { border-color: var(--err); box-shadow: 0 0 0 2px var(--err); }
 
 /* Страница входа */
 .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; }

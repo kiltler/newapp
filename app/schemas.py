@@ -62,6 +62,8 @@ class ChannelOut(BaseModel):
     status: str
     enabled: bool = True
     archive_depth_days: int | None = None
+    quality: str | None = None
+    quality_checked_at: dt.datetime | None = None
     last_status_change: dt.datetime | None = None
     last_seen: dt.datetime | None = None
 

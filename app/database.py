@@ -46,6 +46,10 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 _NEW_COLUMNS = [
     ("devices", "archive_retention_days", "INTEGER DEFAULT 0"),
     ("channels", "archive_depth_days", "INTEGER"),
+    ("channels", "quality", "VARCHAR(16)"),
+    ("channels", "quality_checked_at", "TIMESTAMP"),
+    ("channels", "frame_sig", "TEXT"),
+    ("channels", "frozen_count", "INTEGER DEFAULT 0"),
 ]
 
 

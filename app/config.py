@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     archive_gap_alert_minutes: int = 60
     hdd_usage_alert_percent: int = 0
 
+    # Контроль качества картинки (компьютерное зрение)
+    quality_check_minutes: int = 0          # период проверки, 0 = выключено
+    quality_dark_threshold: float = 30.0    # средняя яркость ниже → тёмный/чёрный кадр
+    quality_uniform_threshold: float = 8.0  # контраст (ст.откл.) ниже → однотонный (залеплен)
+    quality_blur_threshold: float = 15.0    # резкость (дисперсия лапласиана) ниже → расфокус
+    quality_frozen_diff: float = 1.0        # отличие кадров меньше → зависший поток
+
     # Сеть
     default_http_timeout: float = 15.0
     default_http_retries: int = 2

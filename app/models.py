@@ -148,7 +148,22 @@ class Channel(Base):
     # Реальная глубина архива по каналу (дней), измеряется суточной задачей.
     archive_depth_days: Mapped[int | None] = mapped_column(Integer, default=None)
 
+    # Контроль качества картинки (компьютерное зрение по снапшоту)
+    quality: Mapped[str | None] = mapped_column(String(16), default=None)  # ok|dark|uniform|blurry|frozen|error
+    quality_checked_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    frame_sig: Mapped[str | None] = mapped_column(Text, default=None)  # подпись кадра (для детекта фриза)
+    frozen_count: Mapped[int] = mapped_column(Integer, default=0)
+
     device: Mapped["Device"] = relationship(back_populates="channels")
+
+
+class Quality:
+    OK = "ok"
+    DARK = "dark"
+    UNIFORM = "uniform"
+    BLURRY = "blurry"
+    FROZEN = "frozen"
+    ERROR = "error"
 
 
 class Hdd(Base):

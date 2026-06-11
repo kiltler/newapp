@@ -12,7 +12,7 @@ from app.database import get_session
 from app.drivers import build_client, detect_api_type
 from app.drivers.base import NVRError
 from app.models import ApiType, Channel, Device
-from app.services import archive, poller
+from app.services import archive, poller, quality
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["devices"])
@@ -205,6 +205,16 @@ async def archive_depth_now(device_id: int, session: AsyncSession = Depends(get_
     if device is None:
         raise HTTPException(404, "Устройство не найдено")
     await archive.measure_device_depth(device_id)
+    return {"ok": True}
+
+
+@router.post("/devices/{device_id}/quality-check")
+async def quality_check_now(device_id: int, session: AsyncSession = Depends(get_session)):
+    """Проверить качество картинки по всем online-каналам устройства."""
+    device = await crud.get_device(session, device_id)
+    if device is None:
+        raise HTTPException(404, "Устройство не найдено")
+    await quality.check_device_quality(device_id)
     return {"ok": True}
 
 

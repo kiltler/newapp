@@ -17,9 +17,10 @@
 </div>
 
 <div class="wall">
+  {% set m = {'online':'ok','offline':'err','no_video':'warn','unknown':'muted'} %}
+  {% set qedge = {'ok':'q-ok','blurry':'q-warn','dark':'q-bad','uniform':'q-bad','frozen':'q-bad','error':'q-bad'} %}
   {% for c in channels %}
-    {% set m = {'online':'ok','offline':'err','no_video':'warn','unknown':'muted'} %}
-    <figure class="wall-cell">
+    <figure class="wall-cell {{ qedge.get(c.quality, '') }}">
       <img class="wall-img" data-url="/api/devices/{{ device.id }}/channels/{{ c.channel_id }}/snapshot"
            alt="кан. {{ c.channel_id }}">
       <figcaption>

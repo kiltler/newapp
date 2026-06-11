@@ -11,6 +11,7 @@
     <button onclick="recheck({{ device.id }})">Перепроверить возможности</button>
     <button onclick="archiveCheck({{ device.id }})">Проверить архив (вчера)</button>
     <button onclick="archiveDepth({{ device.id }})">Глубина архива</button>
+    <button onclick="qualityCheck({{ device.id }})">Проверить качество</button>
     <button onclick="syncTime({{ device.id }})">Синхр. время</button>
     <button onclick="diag({{ device.id }})">Диагностика</button>
     <button class="danger" onclick="rebootDevice({{ device.id }})">Перезагрузить</button>
@@ -38,8 +39,10 @@
 
 <h2>Каналы</h2>
 <table class="grid">
-  <thead><tr><th>#</th><th>Имя</th><th>Тип</th><th>Статус</th><th>Глубина</th><th>Изменён</th><th>Кадр</th><th>Монитор</th></tr></thead>
+  <thead><tr><th>#</th><th>Имя</th><th>Тип</th><th>Статус</th><th>Картинка</th><th>Глубина</th><th>Изменён</th><th>Кадр</th><th>Монитор</th></tr></thead>
   <tbody>
+  {% set qm = {'ok':'ok','blurry':'warn','dark':'err','uniform':'err','frozen':'err','error':'err'} %}
+  {% set ql = {'ok':'норма','blurry':'расфокус','dark':'тёмный','uniform':'залеплен','frozen':'завис','error':'ошибка'} %}
   {% for c in device.channels|sort(attribute='channel_id') %}
     <tr class="{{ '' if c.enabled else 'row-muted' }}">
       <td>{{ c.channel_id }}</td>
@@ -49,6 +52,7 @@
         {% set m = {'online':'ok','offline':'err','no_video':'warn','unknown':'muted'} %}
         <span class="badge {{ m[c.status] }}">{{ c.status }}</span>
       </td>
+      <td>{% if c.quality %}<span class="badge {{ qm.get(c.quality,'muted') }}">{{ ql.get(c.quality, c.quality) }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
       <td class="muted">{% if c.archive_depth_days is not none %}{{ c.archive_depth_days }} дн.{% else %}—{% endif %}</td>
       <td class="muted">{{ c.last_status_change.strftime('%d.%m %H:%M') if c.last_status_change else '—' }}</td>
       <td><button class="mini" onclick="showSnap({{ device.id }},{{ c.channel_id }},this)">📷 кадр</button></td>
@@ -58,7 +62,7 @@
         </button>
       </td>
     </tr>
-  {% else %}<tr><td colspan="8" class="muted">Каналов нет (опросите устройство).</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="9" class="muted">Каналов нет (опросите устройство).</td></tr>{% endfor %}
   </tbody>
 </table>
 
