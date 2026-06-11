@@ -30,6 +30,12 @@ def _strip_ns(xml_text: str) -> ET.Element:
     return ET.fromstring(cleaned)
 
 
+def _body(resp) -> str:
+    """Декодирует тело ответа как UTF-8 (ISAPI отдаёт UTF-8; имена камер часто
+    на кириллице — httpx иногда угадывает кодировку неверно и портит текст)."""
+    return resp.content.decode("utf-8", "replace")
+
+
 def _text(el: ET.Element | None, tag: str) -> str | None:
     if el is None:
         return None
@@ -56,7 +62,7 @@ class HikvisionClient(NVRClient):
         resp = await self._request("GET", "/ISAPI/System/deviceInfo")
         if resp.status_code != 200:
             raise FeatureUnavailable(f"deviceInfo: HTTP {resp.status_code}")
-        root = _strip_ns(resp.text)
+        root = _strip_ns(_body(resp))
         return DeviceInfo(
             model=_text(root, "model"),
             firmware=_text(root, "firmwareVersion"),
@@ -74,7 +80,7 @@ class HikvisionClient(NVRClient):
                 "GET", "/ISAPI/ContentMgmt/InputProxy/channels/status"
             )
             if resp.status_code == 200:
-                root = _strip_ns(resp.text)
+                root = _strip_ns(_body(resp))
                 for item in root.findall(".//InputProxyChannelStatus"):
                     cid = _text(item, "id")
                     if cid is None:
@@ -92,7 +98,7 @@ class HikvisionClient(NVRClient):
         try:
             resp = await self._request("GET", "/ISAPI/System/Video/inputs/channels")
             if resp.status_code == 200:
-                root = _strip_ns(resp.text)
+                root = _strip_ns(_body(resp))
                 for ch in root.findall(".//VideoInputChannel"):
                     cid = _text(ch, "id")
                     if cid is None:
@@ -122,7 +128,7 @@ class HikvisionClient(NVRClient):
         resp = await self._request("GET", "/ISAPI/ContentMgmt/Storage/hdd")
         if resp.status_code != 200:
             raise FeatureUnavailable(f"hdd: HTTP {resp.status_code}")
-        root = _strip_ns(resp.text)
+        root = _strip_ns(_body(resp))
         hdds: list[HddInfo] = []
         for hdd in root.findall(".//hdd"):
             hid = _text(hdd, "id") or "0"
@@ -178,7 +184,7 @@ class HikvisionClient(NVRClient):
                 raise FeatureUnavailable("поиск архива не поддерживается")
             if resp.status_code != 200:
                 raise FeatureUnavailable(f"search: HTTP {resp.status_code}")
-            root = _strip_ns(resp.text)
+            root = _strip_ns(_body(resp))
             matches = root.findall(".//searchMatchItem")
             for m in matches:
                 ts = m.find(".//timeSpan")
@@ -201,7 +207,7 @@ class HikvisionClient(NVRClient):
         resp = await self._request("GET", "/ISAPI/System/time")
         if resp.status_code != 200:
             raise FeatureUnavailable(f"time: HTTP {resp.status_code}")
-        root = _strip_ns(resp.text)
+        root = _strip_ns(_body(resp))
         local = _text(root, "localTime")
         if not local:
             raise FeatureUnavailable("нет localTime")
@@ -224,7 +230,7 @@ class HikvisionClient(NVRClient):
         if cur.status_code != 200:
             raise FeatureUnavailable(f"time GET: HTTP {cur.status_code}")
         now_iso = dt.datetime.now().astimezone().replace(microsecond=0).isoformat()
-        body = re.sub(r"<localTime>.*?</localTime>", f"<localTime>{now_iso}</localTime>", cur.text)
+        body = re.sub(r"<localTime>.*?</localTime>", f"<localTime>{now_iso}</localTime>", _body(cur))
         body = re.sub(r"<timeMode>.*?</timeMode>", "<timeMode>manual</timeMode>", body)
         resp = await self._request(
             "PUT", "/ISAPI/System/time", data=body,

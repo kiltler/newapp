@@ -40,6 +40,13 @@ async def test_analog_video_loss(nvr_hybrid):
     assert statuses[4].state == ChannelState.ONLINE
 
 
+async def test_cyrillic_channel_name(nvr):
+    nvr.get_channel(1).name = "Камера 1 Вход"
+    client = make_driver("hikvision", nvr)
+    statuses = {s.channel_id: s for s in await client.get_channel_statuses()}
+    assert statuses[1].name == "Камера 1 Вход"  # кириллица не должна ломаться
+
+
 async def test_hdd_ok(nvr):
     client = make_driver("hikvision", nvr)
     hdds = await client.get_hdd_info()

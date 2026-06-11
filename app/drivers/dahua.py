@@ -43,6 +43,11 @@ def _parse_dahua_time(value: str) -> dt.datetime:
     return dt.datetime.strptime(value.strip(), _DAHUA_TIME_FMT)
 
 
+def _body(resp) -> str:
+    """Декодирует тело как UTF-8 (имена камер бывают на кириллице)."""
+    return resp.content.decode("utf-8", "replace")
+
+
 class DahuaClient(NVRClient):
     api_type = ApiType.DAHUA
 
@@ -80,8 +85,9 @@ class DahuaClient(NVRClient):
                 data=json.dumps({"uniqueChannels": [-1]}),
                 headers={"Content-Type": "application/json"},
             )
-            if resp.status_code == 200 and resp.text.strip().startswith("{"):
-                data = json.loads(resp.text)
+            body = _body(resp)
+            if resp.status_code == 200 and body.strip().startswith("{"):
+                data = json.loads(body)
                 states = data.get("states", [])
                 result: list[ChannelStatus] = []
                 for st in states:
@@ -135,7 +141,7 @@ class DahuaClient(NVRClient):
         )
         if resp.status_code != 200:
             raise FeatureUnavailable(f"storageDevice: HTTP {resp.status_code}")
-        kv = _parse_kv(resp.text)
+        kv = _parse_kv(_body(resp))
         # Формат: list[0].Detail[0].TotalBytes=..., .UsedBytes=..., .State=...
         # Собираем по индексам list[i].Detail[j]
         disks: dict[str, dict[str, str]] = {}
