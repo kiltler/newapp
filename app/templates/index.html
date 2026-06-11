@@ -18,7 +18,7 @@
   <button onclick="bulkSyncTime(document.getElementById('bulk-group').value)">Синхр. время</button>
 </div>
 <table class="grid">
-  <thead><tr><th></th><th>Объект</th><th>Клиент/адрес</th><th>Host</th><th>Тип</th><th>Каналы</th><th>Статус</th></tr></thead>
+  <thead><tr><th></th><th>Объект</th><th>Группа</th><th>Host</th><th>Тип</th><th>Каналы</th><th>Статус</th></tr></thead>
   <tbody>
   {% for d in devices %}
     {% set health = device_health(d) %}
@@ -26,7 +26,7 @@
     <tr>
       <td><span class="dot {{ health }}"></span></td>
       <td><a href="/devices/{{ d.id }}">{{ d.name }}</a></td>
-      <td>{{ (groups[d.group_id].name if d.group_id else '') }} {{ d.address or '' }}</td>
+      <td>{{ groups[d.group_id].name if d.group_id else '—' }}</td>
       <td>{{ d.host }}:{{ d.http_port }}</td>
       <td>{{ d.api_type }}{% if d.model %} · {{ d.model }}{% endif %}</td>
       <td>{{ up }}/{{ d.channels|length }}</td>

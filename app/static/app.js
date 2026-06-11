@@ -5,14 +5,12 @@ function formData() {
   const f = $("#device-form");
   return {
     name: f.name.value,
-    address: f.address.value || null,
     host: f.host.value,
     http_port: parseInt(f.http_port.value || "80", 10),
     username: f.username.value,
     password: f.password.value,
     api_type: f.api_type.value,
     timeout: parseFloat(f.timeout.value || "15"),
-    archive_retention_days: parseInt(f.archive_retention_days.value || "0", 10),
   };
 }
 

@@ -107,7 +107,7 @@ async def test_channel_mute_suppresses_alert(db, monkeypatch):
         assert alert is None or alert.active is False  # заглушённый канал не тревожит
 
 
-async def test_archive_depth_alert(db, monkeypatch):
+async def test_archive_depth_measured(db, monkeypatch):
     from app.services import archive as archive_mod
 
     nvr = MockNVR.default(channels=2)
@@ -128,7 +128,6 @@ async def test_archive_depth_alert(db, monkeypatch):
         device = Device(
             name="D", host="t", http_port=80, username="admin",
             api_type=ApiType.HIKVISION, capabilities={"archive": True},
-            archive_retention_days=10,
         )
         session.add(device)
         await session.commit()
@@ -143,15 +142,9 @@ async def test_archive_depth_alert(db, monkeypatch):
         chs = (
             await session.execute(select(Channel).where(Channel.device_id == did))
         ).scalars().all()
-        assert all(c.archive_depth_days is not None for c in chs)
         depths = {c.channel_id: c.archive_depth_days for c in chs}
-        assert depths[1] == 0  # нет архива
-        alert = (
-            await session.execute(
-                select(AlertState).where(AlertState.scope_key == f"device:{did}:archive_depth")
-            )
-        ).scalar_one_or_none()
-        assert alert is not None and alert.active is True  # 0 < 10 → алерт
+        assert depths[1] == 0           # нет архива
+        assert depths[2] is not None and depths[2] > 0  # глубина измерена
 
 
 async def test_poll_unreachable(db, monkeypatch):

@@ -30,11 +30,9 @@ class DeviceCreate(BaseModel):
     api_type: str = "auto"
     auth_scheme: str = "digest"
     group_id: int | None = None
-    address: str | None = None
     timeout: float = 15.0
     retries: int = 2
     enabled: bool = True
-    archive_retention_days: int = 0
 
 
 class DeviceUpdate(BaseModel):
@@ -47,11 +45,9 @@ class DeviceUpdate(BaseModel):
     api_type: str | None = None
     auth_scheme: str | None = None
     group_id: int | None = None
-    address: str | None = None
     timeout: float | None = None
     retries: int | None = None
     enabled: bool | None = None
-    archive_retention_days: int | None = None
 
 
 class ChannelOut(BaseModel):
@@ -92,7 +88,6 @@ class DeviceOut(BaseModel):
     enabled: bool
     reachable: bool
     consecutive_failures: int
-    archive_retention_days: int = 0
     capabilities: dict = Field(default_factory=dict)
     last_seen: dt.datetime | None = None
     last_error: str | None = None

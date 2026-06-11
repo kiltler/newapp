@@ -57,11 +57,9 @@ async def create_device(session: AsyncSession, data: schemas.DeviceCreate) -> De
         api_type=data.api_type,
         auth_scheme=data.auth_scheme,
         group_id=data.group_id,
-        address=data.address,
         timeout=data.timeout,
         retries=data.retries,
         enabled=data.enabled,
-        archive_retention_days=data.archive_retention_days,
     )
     session.add(device)
     await session.commit()

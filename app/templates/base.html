@@ -25,7 +25,6 @@
     <h3>Добавить устройство</h3>
     <form id="device-form">
       <label>Имя объекта<input name="name" required></label>
-      <label>Адрес/клиент<input name="address"></label>
       <div class="row">
         <label>Host/IP<input name="host" required></label>
         <label>Порт<input name="http_port" type="number" value="80"></label>
@@ -43,10 +42,6 @@
           </select>
         </label>
         <label>Таймаут, с<input name="timeout" type="number" value="15"></label>
-      </div>
-      <div class="row">
-        <label>Архив обещано клиенту, дней (0 = не контролировать)
-          <input name="archive_retention_days" type="number" value="0"></label>
       </div>
       <div class="actions">
         <button type="button" id="test-btn">Проверить</button>

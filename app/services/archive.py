@@ -175,12 +175,14 @@ async def measure_depth_all(target_day: dt.date | None = None) -> None:
         await measure_device_depth(did)
 
 
+# Окно поиска для оценки глубины архива (дней назад)
+_DEPTH_WINDOW_DAYS = 90
+
+
 async def measure_device_depth(device_id: int) -> None:
     """Определяет, сколько дней архива реально хранится по каждому каналу.
 
-    Делает один широкий поиск на канал и берёт самую раннюю запись. Сравнивает
-    с обещанной клиенту глубиной (``archive_retention_days``) и шлёт алерт, если
-    реальная глубина меньше.
+    Делает один широкий поиск на канал и берёт самую раннюю запись.
     """
     async with SessionLocal() as session:
         device = (
@@ -196,15 +198,11 @@ async def measure_device_depth(device_id: int) -> None:
         if not caps.get("archive", True):
             return
 
-        promised = device.archive_retention_days or 0
-        # Окно поиска: обещанная глубина + запас, иначе 60 дней по умолчанию.
-        window_days = (promised + 7) if promised else 60
         now = dt.datetime.now()
-        window_start = now - dt.timedelta(days=window_days)
+        window_start = now - dt.timedelta(days=_DEPTH_WINDOW_DAYS)
 
         client = build_client(device, semaphore=_semaphore)
         channels = [c for c in device.channels if c.enabled] or device.channels
-        device_depth: int | None = None
 
         for ch in channels:
             try:
@@ -213,31 +211,9 @@ async def measure_device_depth(device_id: int) -> None:
                 continue
             if not segments:
                 ch.archive_depth_days = 0
-                device_depth = 0 if device_depth is None else min(device_depth, 0)
                 continue
             oldest = min(s.start for s in segments)
-            depth = max((now - oldest).days, 0)
-            ch.archive_depth_days = depth
-            device_depth = depth if device_depth is None else min(device_depth, depth)
-
-        # Алерт, если глубина меньше обещанной клиенту
-        scope = f"device:{device_id}:archive_depth"
-        if promised and device_depth is not None and device_depth < promised:
-            await alerts.raise_alert(
-                session, scope_key=scope, alert_type="archive_depth_low",
-                severity=Severity.WARNING, device_id=device_id,
-                message=(
-                    f"«{device.name}»: глубина архива {device_depth} дн. "
-                    f"меньше обещанных клиенту {promised} дн."
-                ),
-                context={"depth": device_depth, "promised": promised},
-            )
-        elif promised:
-            await alerts.resolve_alert(
-                session, scope_key=scope, device_id=device_id,
-                message=f"«{device.name}»: глубина архива в норме ({device_depth} дн.)",
-                notify=False,
-            )
+            ch.archive_depth_days = max((now - oldest).days, 0)
         await session.commit()
 
 

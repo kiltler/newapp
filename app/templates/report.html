@@ -20,15 +20,12 @@
 
   <h1>Отчёт по объекту: {{ device.name }}</h1>
   <p class="muted">
-    {{ device.address or '' }} · {{ device.host }} · {{ device.model or '' }}<br>
+    {{ device.host }} · {{ device.model or '' }}<br>
     Период: {{ period_from.strftime('%d.%m.%Y') }} — {{ period_to.strftime('%d.%m.%Y') }} ·
     сформирован {{ now.strftime('%d.%m.%Y %H:%M') }}
   </p>
 
-  <h2>Контроль архива</h2>
-  <p>
-    Обещано клиенту: <b>{{ device.archive_retention_days or '—' }}</b> дн.
-  </p>
+  <h2>Архив</h2>
   <table>
     <thead><tr><th>#</th><th>Камера</th><th>Текущий статус</th><th>Глубина архива</th></tr></thead>
     <tbody>
@@ -37,12 +34,7 @@
         <td>{{ c.channel_id }}</td>
         <td>{{ c.name or '—' }}</td>
         <td>{{ c.status }}{% if not c.enabled %} (не мониторится){% endif %}</td>
-        <td>
-          {% if c.archive_depth_days is not none %}{{ c.archive_depth_days }} дн.
-            {% if device.archive_retention_days and c.archive_depth_days < device.archive_retention_days %}
-              ⚠️ ниже нормы{% endif %}
-          {% else %}—{% endif %}
-        </td>
+        <td>{% if c.archive_depth_days is not none %}{{ c.archive_depth_days }} дн.{% else %}—{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>
