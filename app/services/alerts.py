@@ -40,6 +40,26 @@ async def _log_event(
     )
 
 
+async def notify_once(
+    session: AsyncSession,
+    *,
+    type_: str,
+    message: str,
+    severity: str = Severity.INFO,
+    device_id: int | None = None,
+    channel_id: int | None = None,
+    notify: bool = True,
+) -> None:
+    """Разовое событие (без дедупликации состояния): пишем в лог и шлём в Telegram."""
+    await _log_event(
+        session, type_=type_, message=message, severity=severity,
+        device_id=device_id, channel_id=channel_id,
+    )
+    if notify:
+        icon = _ICON.get(severity, "ℹ️")
+        await telegram.send_message(f"{icon} {telegram.esc(message)}")
+
+
 async def raise_alert(
     session: AsyncSession,
     *,

@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}План объекта — NVR Monitor{% endblock %}
+{% block content %}
+<div class="device-head">
+  <h1>План объекта</h1>
+  <form id="plan-upload" enctype="multipart/form-data">
+    <input type="file" name="file" accept="image/*" required>
+    <button type="submit">Загрузить план</button>
+  </form>
+</div>
+
+{% if not has_image %}
+  <p class="muted">План ещё не загружен. Выберите картинку плана (PNG/JPG) и нажмите «Загрузить план».</p>
+{% else %}
+<div class="plan-controls">
+  <select id="m-device"></select>
+  <select id="m-channel"></select>
+  <button id="m-add">+ Поставить метку (затем клик по плану)</button>
+  <span class="muted">Перетаскивай метки мышью · двойной клик — удалить</span>
+</div>
+
+<div id="plan-box" class="plan-box">
+  <img src="/plan/image" id="plan-img" alt="план">
+  {% for m in markers %}
+    <div class="marker dot {{ m.color }}" data-id="{{ m.id }}"
+         style="left:{{ m.x }}%; top:{{ m.y }}%"
+         title="{{ m.label }}" onclick="location.href='/devices/{{ m.device_id }}'">
+      <span class="marker-label">{{ m.label }}</span>
+    </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<script>
+const DEVICES = {{ devices_json | tojson }};
+// Загрузка картинки плана
+document.getElementById("plan-upload").onsubmit = async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const r = await fetch("/api/plan/image", { method: "POST", body: fd });
+  if (r.ok) location.reload(); else alert("Ошибка загрузки: " + (await r.text()));
+};
+
+const devSel = document.getElementById("m-device");
+const chSel = document.getElementById("m-channel");
+if (devSel) {
+  DEVICES.forEach(d => devSel.add(new Option(d.name, d.id)));
+  function fillCh() {
+    chSel.innerHTML = "";
+    chSel.add(new Option("(всё устройство)", ""));
+    const d = DEVICES.find(x => x.id == devSel.value);
+    if (d) d.channels.forEach(c => chSel.add(new Option(`${c.channel_id}. ${c.name}`, c.channel_id)));
+  }
+  devSel.onchange = fillCh; fillCh();
+}
+
+let addMode = false;
+const addBtn = document.getElementById("m-add");
+if (addBtn) addBtn.onclick = () => { addMode = true; addBtn.textContent = "Кликни по плану…"; };
+
+const box = document.getElementById("plan-box");
+if (box) {
+  box.addEventListener("click", async (e) => {
+    if (!addMode || e.target.closest(".marker")) return;
+    const rect = box.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width * 100;
+    const y = (e.clientY - rect.top) / rect.height * 100;
+    const d = DEVICES.find(x => x.id == devSel.value);
+    const ch = chSel.value ? parseInt(chSel.value, 10) : null;
+    const label = ch ? `${d.name} к${ch}` : d.name;
+    await fetch("/api/plan/markers", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ device_id: parseInt(devSel.value, 10), channel_id: ch, label, x, y }),
+    });
+    location.reload();
+  });
+
+  // перетаскивание + удаление
+  let drag = null;
+  box.querySelectorAll(".marker").forEach(m => {
+    m.addEventListener("mousedown", (e) => { drag = m; e.preventDefault(); });
+    m.addEventListener("dblclick", async (e) => {
+      e.stopPropagation();
+      if (confirm("Удалить метку?")) {
+        await fetch(`/api/plan/markers/${m.dataset.id}`, { method: "DELETE" });
+        location.reload();
+      }
+    });
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (!drag) return;
+    const rect = box.getBoundingClientRect();
+    drag.style.left = ((e.clientX - rect.left) / rect.width * 100) + "%";
+    drag.style.top = ((e.clientY - rect.top) / rect.height * 100) + "%";
+  });
+  document.addEventListener("mouseup", async () => {
+    if (!drag) return;
+    const id = drag.dataset.id;
+    const x = parseFloat(drag.style.left), y = parseFloat(drag.style.top);
+    drag = null;
+    await fetch(`/api/plan/markers/${id}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ x, y }),
+    });
+  });
+}
+</script>
+{% endblock %}

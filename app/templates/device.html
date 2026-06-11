@@ -123,4 +123,44 @@
   {% else %}<tr><td colspan="4" class="muted">Событий нет.</td></tr>{% endfor %}
   </tbody>
 </table>
+
+<h2>Журнал обслуживания</h2>
+<form id="note-form" class="note-form">
+  <input id="note-text" placeholder="Например: заменил БП 12.06; на гарантии до 2027; лезть с лестницей" required>
+  <input id="note-ch" type="number" min="1" placeholder="канал (необяз.)" style="max-width:140px">
+  <button type="submit">Добавить</button>
+</form>
+<table class="grid" id="notes-table">
+  <thead><tr><th>Дата</th><th>Канал</th><th>Заметка</th><th></th></tr></thead>
+  <tbody id="notes-body"><tr><td colspan="4" class="muted">Загрузка…</td></tr></tbody>
+</table>
+
+<script>
+const DEVICE_ID = {{ device.id }};
+async function loadNotes() {
+  const notes = await fetch(`/api/devices/${DEVICE_ID}/notes`).then(r => r.json());
+  const body = document.getElementById("notes-body");
+  if (!notes.length) { body.innerHTML = '<tr><td colspan="4" class="muted">Записей нет.</td></tr>'; return; }
+  body.innerHTML = notes.map(n => `<tr>
+    <td class="muted">${new Date(n.created_at).toLocaleString("ru-RU")}</td>
+    <td>${n.channel_id ?? "—"}</td>
+    <td>${n.text.replace(/</g,"&lt;")}</td>
+    <td><button class="mini" onclick="delNote(${n.id})">✕</button></td></tr>`).join("");
+}
+document.getElementById("note-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const text = document.getElementById("note-text").value;
+  const chv = document.getElementById("note-ch").value;
+  await fetch(`/api/devices/${DEVICE_ID}/notes`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, channel_id: chv ? parseInt(chv, 10) : null }),
+  });
+  e.target.reset(); loadNotes();
+};
+async function delNote(id) {
+  await fetch(`/api/notes/${id}`, { method: "DELETE" });
+  loadNotes();
+}
+loadNotes();
+</script>
 {% endblock %}

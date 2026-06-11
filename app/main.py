@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.api import auth, dashboard, devices, monitoring
+from app.api import auth, dashboard, devices, monitoring, plan
 from app.config import settings
 from app.database import init_db
 from app.scheduler import shutdown_scheduler, start_scheduler
@@ -69,6 +69,7 @@ if not settings.admin_password:
 app.include_router(auth.router)
 app.include_router(devices.router)
 app.include_router(monitoring.router)
+app.include_router(plan.router)
 app.include_router(dashboard.router)
 
 # Статика

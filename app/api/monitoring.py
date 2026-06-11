@@ -3,7 +3,11 @@ from __future__ import annotations
 
 import datetime as dt
 
+import csv
+import io
+
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -58,6 +62,33 @@ async def events(
 ):
     return await crud.list_events(
         session, device_id=device_id, severity=severity, limit=limit
+    )
+
+
+@router.get("/events/export.csv")
+async def export_events_csv(
+    device_id: int | None = None,
+    limit: int = Query(5000, le=20000),
+    session: AsyncSession = Depends(get_session),
+):
+    """Экспорт журнала событий в CSV (для актов и истории)."""
+    events = await crud.list_events(session, device_id=device_id, limit=limit)
+    buf = io.StringIO()
+    writer = csv.writer(buf, delimiter=";")
+    writer.writerow(["Дата/время", "Устройство", "Канал", "Тип", "Важность", "Сообщение"])
+    for e in events:
+        writer.writerow([
+            e.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            e.device_id or "",
+            e.channel_id if e.channel_id is not None else "",
+            e.type, e.severity, e.message,
+        ])
+    buf.seek(0)
+    # BOM, чтобы Excel корректно открыл кириллицу
+    data = "﻿" + buf.getvalue()
+    return StreamingResponse(
+        iter([data]), media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=events.csv"},
     )
 
 

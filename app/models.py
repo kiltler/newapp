@@ -224,6 +224,31 @@ class Event(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class Note(Base):
+    """Журнал обслуживания: заметки по устройству/каналу."""
+
+    __tablename__ = "notes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    device_id: Mapped[int] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"))
+    channel_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    text: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PlanMarker(Base):
+    """Точка камеры/устройства на плане объекта (координаты в процентах 0–100)."""
+
+    __tablename__ = "plan_markers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    device_id: Mapped[int] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"))
+    channel_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    label: Mapped[str | None] = mapped_column(String(255), default=None)
+    x: Mapped[float] = mapped_column(Float, default=50.0)
+    y: Mapped[float] = mapped_column(Float, default=50.0)
+
+
 class AlertState(Base):
     """Активное состояние проблемы для анти-спама и уведомлений 'восстановлено'."""
 

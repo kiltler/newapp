@@ -3,7 +3,8 @@ import httpx
 from sqlalchemy import select
 
 from app.database import SessionLocal
-from app.models import AlertState, ApiType, Channel, ChannelState, Device, Hdd
+from app.models import AlertState, ApiType, Channel, ChannelState, Device, Event, Hdd
+from mock.state import MockChannel
 from app.services import poller
 from mock.server import make_mock_app
 from mock.state import MockNVR
@@ -105,6 +106,30 @@ async def test_channel_mute_suppresses_alert(db, monkeypatch):
             )
         ).scalar_one_or_none()
         assert alert is None or alert.active is False  # заглушённый канал не тревожит
+
+
+async def test_camera_add_remove_events(db, monkeypatch):
+    nvr = MockNVR.default(channels=3)
+    _patch_build_client(monkeypatch, nvr)
+    async with SessionLocal() as session:
+        device_id = await _make_device(session)
+
+    await poller.poll_device(device_id)  # первый опрос — 3 канала, без событий "добавлена"
+
+    nvr.channels.append(MockChannel(id=4, name="Cam4"))  # добавили камеру
+    await poller.poll_device(device_id)
+
+    nvr.channels = [c for c in nvr.channels if c.id != 2]  # убрали камеру 2
+    await poller.poll_device(device_id)
+
+    async with SessionLocal() as session:
+        types = (
+            await session.execute(select(Event.type, Event.channel_id))
+        ).all()
+        added = [c for (t, c) in types if t == "camera_added"]
+        removed = [c for (t, c) in types if t == "camera_removed"]
+        assert 4 in added
+        assert 2 in removed
 
 
 async def test_archive_depth_measured(db, monkeypatch):

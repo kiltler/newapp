@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}История — NVR Monitor{% endblock %}
+{% block content %}
+<div class="device-head">
+  <h1>История за {{ days }} дней</h1>
+  <div class="device-actions">
+    <button onclick="location.href='/api/events/export.csv'">⬇ Экспорт CSV</button>
+  </div>
+</div>
+
+<h2>Инциденты по дням</h2>
+<div class="chart">
+  {% for label, count in by_day %}
+    <div class="chart-col" title="{{ label }}: {{ count }}">
+      <div class="chart-bar" style="height: {{ (count / max_day * 100)|round(0, 'floor') }}%"></div>
+      <div class="chart-x">{{ label }}</div>
+    </div>
+  {% endfor %}
+</div>
+
+<h2>Топ проблемных камер</h2>
+<table class="grid">
+  <thead><tr><th>Объект</th><th>Канал</th><th>Имя</th><th>Инцидентов</th></tr></thead>
+  <tbody>
+  {% for r in top_rows %}
+    <tr>
+      <td><a href="/devices/{{ '' }}">{{ r.device }}</a></td>
+      <td>{{ r.channel }}</td>
+      <td>{{ r.name or '—' }}</td>
+      <td><b>{{ r.count }}</b></td>
+    </tr>
+  {% else %}<tr><td colspan="4" class="muted">Инцидентов за период нет 🎉</td></tr>{% endfor %}
+  </tbody>
+</table>
+
+<h2>Лента событий</h2>
+<table class="grid">
+  <thead><tr><th>Время</th><th>Уровень</th><th>Сообщение</th></tr></thead>
+  <tbody>
+  {% for e in events %}
+    <tr>
+      <td class="muted">{{ e.created_at.strftime('%d.%m %H:%M') }}</td>
+      <td><span class="badge {{ {'info':'ok','warning':'warn','critical':'err'}[e.severity] }}">{{ e.severity }}</span></td>
+      <td>{{ e.message }}</td>
+    </tr>
+  {% else %}<tr><td colspan="3" class="muted">Событий нет.</td></tr>{% endfor %}
+  </tbody>
+</table>
+{% endblock %}

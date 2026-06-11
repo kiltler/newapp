@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>TV — NVR Monitor</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="tv-body">
+  <div class="tv-head">
+    <span id="tv-clock"></span>
+    <span id="tv-summary" class="muted"></span>
+    <a href="/" class="muted">выйти</a>
+  </div>
+  <div id="tv-grid" class="tv-grid"></div>
+
+<script>
+let known = {};   // id -> reachable/health, для звука на новую проблему
+let audioCtx = null;
+function beep() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+    o.connect(g); g.connect(audioCtx.destination);
+    o.frequency.value = 880; o.type = "square"; g.gain.value = 0.2;
+    o.start(); setTimeout(() => o.stop(), 400);
+  } catch (e) {}
+}
+function tile(d, up, total) {
+  let cls = "green";
+  if (!d.enabled) cls = "gray";
+  else if (!d.reachable) cls = "red";
+  else if (up < total) cls = "yellow";
+  return `<div class="tv-tile ${cls}" onclick="location.href='/devices/${d.id}'">
+    <div class="tv-name">${d.name}</div>
+    <div class="tv-stat">${d.reachable ? up + "/" + total + " камер" : "НЕДОСТУПЕН"}</div>
+  </div>`;
+}
+async function refresh() {
+  document.getElementById("tv-clock").textContent = new Date().toLocaleString("ru-RU");
+  try {
+    const [list, sum] = await Promise.all([
+      fetch("/api/devices").then(r => r.json()),
+      fetch("/api/summary").then(r => r.json()),
+    ]);
+    document.getElementById("tv-summary").textContent =
+      `всего ${sum.devices_total} · онлайн ${sum.devices_online} · проблемы ${sum.devices_with_problems} · недоступны ${sum.devices_unreachable}`;
+    const detailed = await Promise.all(list.map(d => fetch(`/api/devices/${d.id}`).then(r => r.json())));
+    let html = "";
+    for (const d of detailed) {
+      const total = d.channels.length;
+      const up = d.channels.filter(c => c.status === "online").length;
+      const bad = !d.reachable || up < total;
+      if (bad && known[d.id] === false) beep();  // стало плохо
+      known[d.id] = bad;
+      html += tile(d, up, total);
+    }
+    document.getElementById("tv-grid").innerHTML = html;
+  } catch (e) {}
+}
+refresh();
+setInterval(refresh, 10000);
+</script>
+</body>
+</html>

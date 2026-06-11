@@ -123,6 +123,33 @@ class TestConnectionResult(BaseModel):
 
 
 # ── События / архив ─────────────────────────────────────────────────────────────
+class NoteCreate(BaseModel):
+    text: str
+    channel_id: int | None = None
+
+
+class NoteOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    device_id: int
+    channel_id: int | None = None
+    text: str
+    created_at: dt.datetime
+
+
+class MarkerCreate(BaseModel):
+    device_id: int
+    channel_id: int | None = None
+    label: str | None = None
+    x: float = 50.0
+    y: float = 50.0
+
+
+class MarkerMove(BaseModel):
+    x: float
+    y: float
+
+
 class EventOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int

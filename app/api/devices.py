@@ -11,7 +11,7 @@ from app import crud, schemas
 from app.database import get_session
 from app.drivers import build_client, detect_api_type
 from app.drivers.base import NVRError
-from app.models import ApiType, Channel, Device
+from app.models import ApiType, Channel, Device, Note
 from app.services import archive, poller, quality
 
 log = logging.getLogger(__name__)
@@ -235,6 +235,43 @@ async def toggle_channel(
     ch.enabled = not ch.enabled
     await session.commit()
     return {"ok": True, "enabled": ch.enabled}
+
+
+# ── Журнал обслуживания (заметки) ──────────────────────────────────────────────
+@router.get("/devices/{device_id}/notes", response_model=list[schemas.NoteOut])
+async def list_notes(device_id: int, session: AsyncSession = Depends(get_session)):
+    rows = (
+        await session.execute(
+            select(Note).where(Note.device_id == device_id).order_by(Note.created_at.desc())
+        )
+    ).scalars().all()
+    return rows
+
+
+@router.post("/devices/{device_id}/notes", response_model=schemas.NoteOut)
+async def add_note(
+    device_id: int, data: schemas.NoteCreate, session: AsyncSession = Depends(get_session)
+):
+    device = await crud.get_device(session, device_id)
+    if device is None:
+        raise HTTPException(404, "Устройство не найдено")
+    note = Note(device_id=device_id, channel_id=data.channel_id, text=data.text)
+    session.add(note)
+    await session.commit()
+    await session.refresh(note)
+    return note
+
+
+@router.delete("/notes/{note_id}")
+async def delete_note(note_id: int, session: AsyncSession = Depends(get_session)):
+    note = (
+        await session.execute(select(Note).where(Note.id == note_id))
+    ).scalar_one_or_none()
+    if note is None:
+        raise HTTPException(404, "Заметка не найдена")
+    await session.delete(note)
+    await session.commit()
+    return {"ok": True}
 
 
 # ── Массовые операции (по группе или по всем) ──────────────────────────────────

@@ -158,10 +158,14 @@ async def _handle_reachable(session: AsyncSession, device: Device) -> None:
 # ── Каналы ─────────────────────────────────────────────────────────────────────
 async def _update_channels(session: AsyncSession, device: Device, statuses) -> None:
     existing = {c.channel_id: c for c in device.channels}
+    original_ids = set(existing.keys())   # каналы, известные ДО этого опроса
+    had_channels = bool(original_ids)     # не первый ли это опрос
+    seen_ids: set[int] = set()
     now = utcnow()
     threshold = dt.timedelta(minutes=settings.camera_offline_alert_minutes)
 
     for st in statuses:
+        seen_ids.add(st.channel_id)
         ch = existing.get(st.channel_id)
         if ch is None:
             ch = Channel(
@@ -170,6 +174,13 @@ async def _update_channels(session: AsyncSession, device: Device, statuses) -> N
             )
             session.add(ch)
             existing[st.channel_id] = ch
+            # Новая камера появилась в конфигурации NVR (не на первом опросе)
+            if had_channels:
+                await alerts.notify_once(
+                    session, type_="camera_added", severity=Severity.INFO,
+                    device_id=device.id, channel_id=st.channel_id,
+                    message=f"«{device.name}»: добавлена камера, канал {st.channel_id} ({st.name or '—'})",
+                )
         if st.name and ch.name != st.name:
             ch.name = st.name
         ch.kind = st.kind
@@ -208,6 +219,18 @@ async def _update_channels(session: AsyncSession, device: Device, statuses) -> N
                         f"уже {int((now - down_since).total_seconds() // 60)} мин"
                     ),
                 )
+
+    # Камеры, пропавшие из конфигурации NVR (были, но в опросе их больше нет)
+    for cid in original_ids - seen_ids:
+        ch = existing.get(cid)
+        if ch is None or ch.status == ChannelState.UNKNOWN:
+            continue
+        ch.status = ChannelState.UNKNOWN
+        await alerts.notify_once(
+            session, type_="camera_removed", severity=Severity.WARNING,
+            device_id=device.id, channel_id=cid,
+            message=f"«{device.name}»: камера убрана из конфигурации NVR, канал {cid} ({ch.name or '—'})",
+        )
 
 
 # ── HDD ──────────────────────────────────────────────────────────────────────
