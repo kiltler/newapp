@@ -3,6 +3,15 @@ chcp 65001 >nul
 cd /d "%~dp0"
 title NVR Monitor
 
+REM --- Otklyuchaem proxy/VPN peremennye dlya etoy sessii (chasta prichina oshibok ustanovki) ---
+set "ALL_PROXY="
+set "HTTP_PROXY="
+set "HTTPS_PROXY="
+set "all_proxy="
+set "http_proxy="
+set "https_proxy="
+set "NO_PROXY=127.0.0.1,localhost"
+
 echo ============================================
 echo   NVR Monitor - zapusk demo
 echo ============================================
