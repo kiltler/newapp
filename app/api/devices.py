@@ -144,6 +144,28 @@ async def channel_snapshot(
     return Response(content=data, media_type="image/jpeg")
 
 
+@router.get("/devices/{device_id}/raw")
+async def raw_request(
+    device_id: int, path: str, session: AsyncSession = Depends(get_session)
+):
+    """Диагностика: выполняет GET к произвольному эндпоинту NVR и отдаёт сырой ответ.
+
+    Использует сохранённые учётные данные устройства. Только для отладки.
+    """
+    device = await crud.get_device(session, device_id)
+    if device is None:
+        raise HTTPException(404, "Устройство не найдено")
+    if not path.startswith("/"):
+        raise HTTPException(400, "path должен начинаться с /")
+    client = build_client(device)
+    try:
+        resp = await client._request("GET", path)
+    except NVRError as exc:
+        raise HTTPException(502, f"Ошибка запроса: {exc}")
+    text = resp.content.decode("utf-8", "replace")
+    return Response(content=text, media_type="text/plain; charset=utf-8")
+
+
 @router.post("/devices/{device_id}/sync-time")
 async def sync_time(device_id: int, session: AsyncSession = Depends(get_session)):
     device = await crud.get_device(session, device_id)

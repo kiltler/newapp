@@ -70,6 +70,13 @@ async function rebootDevice(id) {
   const r = await fetch(`/api/devices/${id}/reboot`, { method: "POST" });
   alert(r.ok ? "Команда перезагрузки отправлена" : "Ошибка: " + (await r.text()));
 }
+function diag(id) {
+  const p = prompt(
+    "Эндпоинт NVR для диагностики:",
+    "/ISAPI/System/Video/inputs/channels"
+  );
+  if (p) window.open(`/api/devices/${id}/raw?path=${encodeURIComponent(p)}`, "_blank");
+}
 function showSnap(deviceId, channelId, btn) {
   const cell = btn.parentElement;
   const url = `/api/devices/${deviceId}/channels/${channelId}/snapshot?t=` + Date.now();
