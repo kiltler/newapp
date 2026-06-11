@@ -1,0 +1,46 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # В Compose по умолчанию используем PostgreSQL из сервиса db.
+      # Чтобы перейти на SQLite — закомментируйте строку ниже и задайте DATABASE_URL в .env.
+      DATABASE_URL: postgresql+psycopg://nvrmon:nvrmon@db:5432/nvrmon
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nvrmon
+      POSTGRES_PASSWORD: nvrmon
+      POSTGRES_DB: nvrmon
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nvrmon"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Эмулятор NVR (только для разработки/демо). Запуск: --profile dev ──────────
+  mock:
+    build: .
+    restart: unless-stopped
+    command: ["python", "-m", "mock.server"]
+    environment:
+      MOCK_PROFILE: both
+      MOCK_PORT: "8088"
+    ports:
+      - "8088:8088"
+    profiles: ["dev"]
+
+volumes:
+  pgdata:

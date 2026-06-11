@@ -1,0 +1,78 @@
+:root {
+  --bg: #0f1419; --panel: #1a2029; --line: #2a323d; --text: #e6e9ee;
+  --muted: #8b97a7; --ok: #2ecc71; --warn: #f1c40f; --err: #e74c3c; --accent: #3498db;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg); color: var(--text); }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.topbar { display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 24px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.logo { font-weight: 700; font-size: 18px; }
+.topbar nav a { margin-left: 18px; }
+.container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+
+h1 { margin: 8px 0; } h2 { margin: 28px 0 12px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); gap: 14px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 16px; display: flex; flex-direction: column; gap: 4px; }
+.card .num { font-size: 30px; font-weight: 700; }
+.card.ok .num { color: var(--ok); } .card.warn .num { color: var(--warn); } .card.err .num { color: var(--err); }
+
+table.grid { width: 100%; border-collapse: collapse; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+table.grid th, table.grid td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+table.grid th { color: var(--muted); font-weight: 600; font-size: 13px; }
+table.grid tr:last-child td { border-bottom: none; }
+
+.muted { color: var(--muted); }
+.err-text { color: var(--err); grid-column: 1/-1; }
+
+.dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; }
+.dot.green { background: var(--ok); } .dot.yellow { background: var(--warn); }
+.dot.red { background: var(--err); } .dot.gray { background: var(--muted); }
+
+.badge { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 12px; font-weight: 600; }
+.badge.ok { background: rgba(46,204,113,.15); color: var(--ok); }
+.badge.warn { background: rgba(241,196,15,.15); color: var(--warn); }
+.badge.err { background: rgba(231,76,60,.15); color: var(--err); }
+.badge.muted { background: rgba(139,151,167,.15); color: var(--muted); }
+
+button { background: var(--accent); color: #fff; border: none; padding: 8px 14px;
+  border-radius: 7px; cursor: pointer; font-size: 14px; }
+button:hover { opacity: .9; }
+button.secondary { background: var(--line); } button.danger { background: var(--err); }
+
+.device-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; }
+.device-actions button { margin-left: 8px; }
+.info-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr));
+  gap: 8px 20px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; padding: 16px; margin-top: 12px; }
+
+/* Календарь архива */
+.calendar-wrap { overflow-x: auto; }
+table.calendar { border-collapse: collapse; }
+table.calendar th, table.calendar td { padding: 2px; text-align: center; font-size: 11px; }
+table.calendar th.day { color: var(--muted); }
+.cal { display: inline-block; width: 22px; height: 22px; border-radius: 4px; }
+.cal-full { background: var(--ok); } .cal-partial { background: var(--warn); }
+.cal-none { background: var(--err); } .cal-na { background: #555; }
+.cal-unknown { background: var(--line); }
+.legend { margin-top: 8px; display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 13px; }
+.legend .cal { vertical-align: middle; }
+
+/* Модал */
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex;
+  align-items: center; justify-content: center; }
+.modal.hidden { display: none; }
+.modal-card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 24px; width: 480px; max-width: 92vw; }
+.modal-card label { display: block; margin: 8px 0; font-size: 13px; color: var(--muted); }
+.modal-card input, .modal-card select { width: 100%; padding: 8px; margin-top: 4px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 6px; color: var(--text); }
+.modal-card .row { display: flex; gap: 12px; } .modal-card .row label { flex: 1; }
+.modal-card .actions { display: flex; gap: 10px; margin-top: 16px; }
+.test-result { white-space: pre-wrap; color: var(--muted); font-size: 12px; margin-top: 10px; }

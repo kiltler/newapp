@@ -1,0 +1,91 @@
+"""REST API: сводка, события, календарь архива."""
+from __future__ import annotations
+
+import datetime as dt
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app import crud, schemas
+from app.database import get_session
+from app.models import ArchiveCoverage, Channel, ChannelState, Device
+
+router = APIRouter(prefix="/api", tags=["monitoring"])
+
+
+@router.get("/summary")
+async def summary(session: AsyncSession = Depends(get_session)):
+    devices = (await session.execute(select(Device))).scalars().all()
+    total = len(devices)
+    online = sum(1 for d in devices if d.reachable and d.enabled)
+    unreachable = sum(1 for d in devices if not d.reachable and d.enabled)
+
+    channels_down = (
+        await session.execute(
+            select(func.count())
+            .select_from(Channel)
+            .where(Channel.status != ChannelState.ONLINE, Channel.enabled.is_(True))
+        )
+    ).scalar() or 0
+
+    # устройства с проблемами: недоступны, есть offline-каналы или дрейф времени
+    problem_device_ids: set[int] = {d.id for d in devices if not d.reachable and d.enabled}
+    rows = (
+        await session.execute(
+            select(Channel.device_id).where(
+                Channel.status != ChannelState.ONLINE, Channel.enabled.is_(True)
+            )
+        )
+    ).scalars()
+    problem_device_ids.update(rows)
+
+    return {
+        "devices_total": total,
+        "devices_online": online,
+        "devices_unreachable": unreachable,
+        "devices_with_problems": len(problem_device_ids),
+        "channels_down": channels_down,
+    }
+
+
+@router.get("/events", response_model=list[schemas.EventOut])
+async def events(
+    device_id: int | None = None,
+    severity: str | None = None,
+    limit: int = Query(200, le=1000),
+    session: AsyncSession = Depends(get_session),
+):
+    return await crud.list_events(
+        session, device_id=device_id, severity=severity, limit=limit
+    )
+
+
+@router.get("/devices/{device_id}/archive")
+async def archive_calendar(
+    device_id: int,
+    days: int = Query(14, ge=1, le=90),
+    session: AsyncSession = Depends(get_session),
+):
+    """Матрица 'канал × день' с покрытием архива за последние N дней."""
+    today = dt.date.today()
+    start_day = today - dt.timedelta(days=days)
+    rows = (
+        await session.execute(
+            select(ArchiveCoverage).where(
+                ArchiveCoverage.device_id == device_id,
+                ArchiveCoverage.day >= start_day,
+            )
+        )
+    ).scalars().all()
+
+    day_list = [(start_day + dt.timedelta(days=i)).isoformat() for i in range(days + 1)]
+    matrix: dict[int, dict[str, dict]] = {}
+    for r in rows:
+        matrix.setdefault(r.channel_id, {})[r.day.isoformat()] = {
+            "status": r.status,
+            "recorded_minutes": r.recorded_minutes,
+            "largest_gap_minutes": r.largest_gap_minutes,
+            "gaps": r.gaps,
+        }
+    return {"days": day_list, "channels": matrix}

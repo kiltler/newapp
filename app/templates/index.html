@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="cards">
+  <div class="card"><span class="num">{{ stats.devices_total }}</span><span>Всего NVR</span></div>
+  <div class="card ok"><span class="num">{{ stats.devices_online }}</span><span>Онлайн</span></div>
+  <div class="card warn"><span class="num">{{ stats.devices_with_problems }}</span><span>С проблемами</span></div>
+  <div class="card err"><span class="num">{{ stats.devices_unreachable }}</span><span>Недоступны</span></div>
+  <div class="card"><span class="num">{{ stats.channels_down }}</span><span>Каналов не в норме</span></div>
+</section>
+
+<h2>Объекты</h2>
+<table class="grid">
+  <thead><tr><th></th><th>Объект</th><th>Клиент/адрес</th><th>Host</th><th>Тип</th><th>Каналы</th><th>Статус</th></tr></thead>
+  <tbody>
+  {% for d in devices %}
+    {% set health = device_health(d) %}
+    {% set up = d.channels | selectattr('status','equalto','online') | list | length %}
+    <tr>
+      <td><span class="dot {{ health }}"></span></td>
+      <td><a href="/devices/{{ d.id }}">{{ d.name }}</a></td>
+      <td>{{ (groups[d.group_id].name if d.group_id else '') }} {{ d.address or '' }}</td>
+      <td>{{ d.host }}:{{ d.http_port }}</td>
+      <td>{{ d.api_type }}{% if d.model %} · {{ d.model }}{% endif %}</td>
+      <td>{{ up }}/{{ d.channels|length }}</td>
+      <td>
+        {% if not d.reachable %}<span class="badge err">недоступен</span>
+        {% elif health == 'yellow' %}<span class="badge warn">есть проблемы</span>
+        {% else %}<span class="badge ok">норма</span>{% endif %}
+        {% if d.time_drift_seconds and d.time_drift_seconds > 300 %}
+          <span class="badge warn" title="дрейф времени">⏱ {{ (d.time_drift_seconds//60) }}м</span>
+        {% endif %}
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="muted">Устройств нет. Нажмите «+ Устройство».</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<h2>Последние события</h2>
+<table class="grid">
+  <thead><tr><th>Время</th><th>Уровень</th><th>Сообщение</th></tr></thead>
+  <tbody>
+  {% for e in events %}
+    <tr>
+      <td class="muted">{{ e.created_at.strftime('%d.%m %H:%M') }}</td>
+      <td><span class="badge {{ {'info':'ok','warning':'warn','critical':'err'}[e.severity] }}">{{ e.severity }}</span></td>
+      <td>{{ e.message }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="3" class="muted">Событий пока нет.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

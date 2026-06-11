@@ -1,0 +1,52 @@
+"""Планировщик фоновых задач (APScheduler): опрос и суточная проверка архива."""
+from __future__ import annotations
+
+import logging
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
+
+from app.config import settings
+from app.services import archive, poller
+
+log = logging.getLogger(__name__)
+
+scheduler = AsyncIOScheduler()
+
+
+def start_scheduler() -> None:
+    if scheduler.running:
+        return
+    scheduler.add_job(
+        poller.poll_all,
+        trigger=IntervalTrigger(minutes=settings.poll_interval_minutes),
+        id="poll_all",
+        name="Опрос устройств",
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        archive.check_archive_all,
+        trigger=CronTrigger(
+            hour=settings.archive_check_hour, minute=settings.archive_check_minute
+        ),
+        id="archive_check",
+        name="Суточная проверка архива",
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+    )
+    scheduler.start()
+    log.info(
+        "Планировщик запущен: опрос каждые %d мин, архив в %02d:%02d",
+        settings.poll_interval_minutes,
+        settings.archive_check_hour,
+        settings.archive_check_minute,
+    )
+
+
+def shutdown_scheduler() -> None:
+    if scheduler.running:
+        scheduler.shutdown(wait=False)

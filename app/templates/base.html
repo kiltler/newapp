@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}NVR Monitor{% endblock %}</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+    <a href="/" class="logo">📹 NVR Monitor</a>
+    <nav>
+        <a href="/">Дашборд</a>
+        <a href="#" id="add-device-btn">+ Устройство</a>
+    </nav>
+</header>
+<main class="container">
+    {% block content %}{% endblock %}
+</main>
+
+<!-- Модал добавления устройства -->
+<div id="modal" class="modal hidden">
+  <div class="modal-card">
+    <h3>Добавить устройство</h3>
+    <form id="device-form">
+      <label>Имя объекта<input name="name" required></label>
+      <label>Адрес/клиент<input name="address"></label>
+      <div class="row">
+        <label>Host/IP<input name="host" required></label>
+        <label>Порт<input name="http_port" type="number" value="80"></label>
+      </div>
+      <div class="row">
+        <label>Логин<input name="username" value="admin"></label>
+        <label>Пароль<input name="password" type="password"></label>
+      </div>
+      <div class="row">
+        <label>Тип API
+          <select name="api_type">
+            <option value="auto">Авто (определить)</option>
+            <option value="hikvision">Hikvision (ISAPI)</option>
+            <option value="dahua">Dahua / RVI (CGI)</option>
+          </select>
+        </label>
+        <label>Таймаут, с<input name="timeout" type="number" value="15"></label>
+      </div>
+      <div class="actions">
+        <button type="button" id="test-btn">Проверить</button>
+        <button type="submit">Сохранить</button>
+        <button type="button" id="cancel-btn" class="secondary">Отмена</button>
+      </div>
+      <pre id="test-result" class="test-result"></pre>
+    </form>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

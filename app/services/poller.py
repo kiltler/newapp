@@ -1,0 +1,276 @@
+"""Опрос устройств: статус каналов, HDD, время. Обновляет БД и поднимает алерты."""
+from __future__ import annotations
+
+import asyncio
+import datetime as dt
+import logging
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.config import settings
+from app.database import SessionLocal
+from app.drivers import build_client
+from app.drivers.base import NVRAuthError, NVRConnectionError, NVRError
+from app.models import (
+    Channel,
+    ChannelState,
+    Device,
+    Hdd,
+    HddState,
+    Severity,
+    utcnow,
+)
+from app.services import alerts
+
+log = logging.getLogger(__name__)
+
+# Один общий semaphore на процесс — щадим VPN-каналы
+_semaphore = asyncio.Semaphore(settings.max_concurrent_polls)
+
+
+async def poll_all() -> None:
+    """Опрашивает все включённые устройства параллельно (с ограничением)."""
+    async with SessionLocal() as session:
+        devices = (
+            await session.execute(select(Device).where(Device.enabled.is_(True)))
+        ).scalars().all()
+        ids = [d.id for d in devices]
+    if not ids:
+        return
+    log.info("Опрос %d устройств", len(ids))
+    await asyncio.gather(*(poll_device(did) for did in ids), return_exceptions=True)
+
+
+async def poll_device(device_id: int) -> None:
+    """Опрашивает одно устройство в собственной сессии БД."""
+    async with SessionLocal() as session:
+        device = (
+            await session.execute(
+                select(Device)
+                .where(Device.id == device_id)
+                .options(selectinload(Device.channels), selectinload(Device.hdds))
+            )
+        ).scalar_one_or_none()
+        if device is None or not device.enabled:
+            return
+        try:
+            await _poll_one(session, device)
+        except Exception:  # noqa: BLE001
+            log.exception("Ошибка опроса устройства %s", device_id)
+        await session.commit()
+
+
+async def _poll_one(session: AsyncSession, device: Device) -> None:
+    client = build_client(device, semaphore=_semaphore)
+    caps = device.capabilities or {}
+
+    # ── Проба доступности ──────────────────────────────────────────────────
+    try:
+        await client.get_device_info()
+    except NVRConnectionError as exc:
+        await _handle_unreachable(session, device, str(exc))
+        return
+    except NVRAuthError as exc:
+        device.last_error = f"auth: {exc}"
+        await alerts.raise_alert(
+            session, scope_key=f"device:{device.id}:auth",
+            alert_type="nvr_auth_error", severity=Severity.CRITICAL,
+            device_id=device.id,
+            message=f"NVR «{device.name}» ({device.host}): ошибка авторизации",
+        )
+        return
+    except NVRError as exc:
+        log.warning("deviceInfo %s: %s", device.id, exc)
+
+    # Устройство доступно
+    await _handle_reachable(session, device)
+
+    # ── Каналы ──────────────────────────────────────────────────────────────
+    if caps.get("channels", True):
+        try:
+            statuses = await client.get_channel_statuses()
+            await _update_channels(session, device, statuses)
+        except NVRConnectionError as exc:
+            await _handle_unreachable(session, device, str(exc))
+            return
+        except NVRError as exc:
+            log.warning("Каналы %s недоступны: %s", device.id, exc)
+
+    # ── HDD ───────────────────────────────────────────────────────────────────
+    if caps.get("hdd", True):
+        try:
+            hdds = await client.get_hdd_info()
+            await _update_hdds(session, device, hdds)
+        except NVRError as exc:
+            log.debug("HDD %s: %s", device.id, exc)
+
+    # ── Время устройства ───────────────────────────────────────────────────────
+    if caps.get("time", True):
+        try:
+            device_time = await client.get_device_time()
+            await _check_time_drift(session, device, device_time)
+        except NVRError as exc:
+            log.debug("Время %s: %s", device.id, exc)
+
+
+# ── Доступность устройства ─────────────────────────────────────────────────────
+async def _handle_unreachable(session: AsyncSession, device: Device, error: str) -> None:
+    device.consecutive_failures += 1
+    device.reachable = False
+    device.last_error = error
+    log.info(
+        "NVR %s недоступен (%d/%d): %s",
+        device.id, device.consecutive_failures, settings.nvr_unreachable_threshold, error,
+    )
+    if device.consecutive_failures >= settings.nvr_unreachable_threshold:
+        await alerts.raise_alert(
+            session, scope_key=f"device:{device.id}:unreachable",
+            alert_type="nvr_unreachable", severity=Severity.CRITICAL,
+            device_id=device.id,
+            message=(
+                f"NVR «{device.name}» ({device.host}:{device.http_port}) недоступен "
+                f"({device.consecutive_failures} циклов подряд)"
+            ),
+            context={"error": error},
+        )
+
+
+async def _handle_reachable(session: AsyncSession, device: Device) -> None:
+    was_down = device.consecutive_failures >= settings.nvr_unreachable_threshold
+    device.consecutive_failures = 0
+    device.reachable = True
+    device.last_seen = utcnow()
+    device.last_error = None
+    if was_down:
+        await alerts.resolve_alert(
+            session, scope_key=f"device:{device.id}:unreachable",
+            device_id=device.id,
+            message=f"NVR «{device.name}» ({device.host}) снова доступен",
+        )
+    await alerts.resolve_alert(
+        session, scope_key=f"device:{device.id}:auth", device_id=device.id,
+        message=f"NVR «{device.name}»: авторизация восстановлена", notify=False,
+    )
+
+
+# ── Каналы ─────────────────────────────────────────────────────────────────────
+async def _update_channels(session: AsyncSession, device: Device, statuses) -> None:
+    existing = {c.channel_id: c for c in device.channels}
+    now = utcnow()
+    threshold = dt.timedelta(minutes=settings.camera_offline_alert_minutes)
+
+    for st in statuses:
+        ch = existing.get(st.channel_id)
+        if ch is None:
+            ch = Channel(
+                device_id=device.id, channel_id=st.channel_id,
+                name=st.name, kind=st.kind, status=ChannelState.UNKNOWN,
+            )
+            session.add(ch)
+            existing[st.channel_id] = ch
+        if st.name and ch.name != st.name:
+            ch.name = st.name
+        ch.kind = st.kind
+        ch.last_seen = now
+
+        new_state = st.state
+        if ch.status != new_state:
+            ch.status = new_state
+            ch.last_status_change = now
+
+        scope = f"device:{device.id}:channel:{st.channel_id}:down"
+        if new_state == ChannelState.ONLINE:
+            await alerts.resolve_alert(
+                session, scope_key=scope, device_id=device.id, channel_id=st.channel_id,
+                message=f"«{device.name}» канал {st.channel_id} ({ch.name or '—'}): онлайн",
+            )
+        else:
+            down_since = ch.last_status_change or now
+            if now - down_since >= threshold:
+                label = "offline" if new_state == ChannelState.OFFLINE else "нет видео"
+                await alerts.raise_alert(
+                    session, scope_key=scope, alert_type="camera_down",
+                    severity=Severity.WARNING, device_id=device.id,
+                    channel_id=st.channel_id,
+                    message=(
+                        f"«{device.name}» канал {st.channel_id} "
+                        f"({ch.name or '—'}): {label} "
+                        f"уже {int((now - down_since).total_seconds() // 60)} мин"
+                    ),
+                )
+
+
+# ── HDD ──────────────────────────────────────────────────────────────────────
+async def _update_hdds(session: AsyncSession, device: Device, hdds) -> None:
+    existing = {h.hdd_id: h for h in device.hdds}
+    for info in hdds:
+        h = existing.get(info.hdd_id)
+        if h is None:
+            h = Hdd(device_id=device.id, hdd_id=info.hdd_id)
+            session.add(h)
+            existing[info.hdd_id] = h
+        h.name = info.name
+        h.capacity_mb = info.capacity_mb
+        h.free_mb = info.free_mb
+        h.status = info.status
+
+        fault_scope = f"device:{device.id}:hdd:{info.hdd_id}:fault"
+        if info.status in (HddState.ERROR, HddState.NO_DISK):
+            label = "ошибка диска" if info.status == HddState.ERROR else "диск отсутствует"
+            await alerts.raise_alert(
+                session, scope_key=fault_scope, alert_type="hdd_fault",
+                severity=Severity.CRITICAL, device_id=device.id,
+                message=f"«{device.name}» HDD {info.hdd_id}: {label}",
+            )
+        else:
+            await alerts.resolve_alert(
+                session, scope_key=fault_scope, device_id=device.id,
+                message=f"«{device.name}» HDD {info.hdd_id}: норма",
+            )
+
+        # Порог заполнения (опционально)
+        full_scope = f"device:{device.id}:hdd:{info.hdd_id}:full"
+        limit = settings.hdd_usage_alert_percent
+        if limit and h.capacity_mb:
+            usage = h.usage_percent
+            if usage >= limit:
+                await alerts.raise_alert(
+                    session, scope_key=full_scope, alert_type="hdd_full",
+                    severity=Severity.WARNING, device_id=device.id,
+                    message=f"«{device.name}» HDD {info.hdd_id}: заполнен на {usage}%",
+                )
+            else:
+                await alerts.resolve_alert(
+                    session, scope_key=full_scope, device_id=device.id,
+                    message=f"«{device.name}» HDD {info.hdd_id}: заполнение в норме ({usage}%)",
+                    notify=False,
+                )
+
+
+# ── Время ──────────────────────────────────────────────────────────────────────
+async def _check_time_drift(session: AsyncSession, device: Device, device_time: dt.datetime) -> None:
+    server_time = dt.datetime.now()  # локальное время сервера (naive)
+    if device_time.tzinfo is not None:
+        device_time = device_time.replace(tzinfo=None)
+    drift = int(abs((device_time - server_time).total_seconds()))
+    device.time_drift_seconds = drift
+
+    scope = f"device:{device.id}:timedrift"
+    limit = settings.time_drift_alert_minutes * 60
+    if drift > limit:
+        await alerts.raise_alert(
+            session, scope_key=scope, alert_type="time_drift",
+            severity=Severity.WARNING, device_id=device.id,
+            message=(
+                f"«{device.name}»: часы NVR расходятся с сервером на "
+                f"{drift // 60} мин (проверка архива может врать)"
+            ),
+            context={"drift_seconds": drift},
+        )
+    else:
+        await alerts.resolve_alert(
+            session, scope_key=scope, device_id=device.id,
+            message=f"«{device.name}»: время синхронизировано", notify=False,
+        )
