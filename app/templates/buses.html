@@ -1,6 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Автобусы — ручной учёт{% endblock %}
 {% block content %}
+{% set cm = {'green':'green','yellow':'yellow','orange':'orange','red':'red'} %}
+{% macro busrow(r) %}
+  <tr>
+    <td><span class="dot {{ cm[r.color] }}"></span></td>
+    <td><a href="/buses/{{ r.bus.id }}"><b>{{ r.bus.bus_number }}</b></a></td>
+    <td>{{ r.bus.route or '—' }}</td>
+    <td>{% if r.disk %}{{ r.disk.label }} <span class="muted">({{ r.disk.type }})</span>{% else %}<span class="badge red">нет диска</span>{% endif %}</td>
+    <td class="muted">{{ r.bus.installed_since.strftime('%d.%m.%Y') if r.bus.installed_since else '—' }}</td>
+    <td>{{ r.reason }}</td>
+  </tr>
+{% endmacro %}
 <div class="bus-scope">
   <div class="bus-banner">
     <div><span class="bus-ico">🚌</span> <b>Автобусы</b>
@@ -32,32 +43,39 @@
   </div>
   {% endif %}
 
-  <form class="bus-search" method="get">
-    <input name="q" value="{{ q }}" placeholder="Поиск по номеру или маршруту…">
-    <select name="sort" onchange="this.form.submit()">
-      <option value="status" {{ 'selected' if sort=='status' else '' }}>Сначала проблемные</option>
-      <option value="route" {{ 'selected' if sort=='route' else '' }}>По маршруту</option>
-      <option value="number" {{ 'selected' if sort=='number' else '' }}>По номеру</option>
-    </select>
-    <button class="bus-btn">Найти</button>
-  </form>
+  <div class="bus-search">
+    <form method="get" style="display:flex;gap:8px;flex:1">
+      <input name="q" value="{{ q }}" placeholder="Поиск по номеру или маршруту…">
+      <select name="sort" onchange="this.form.submit()">
+        <option value="status" {{ 'selected' if sort=='status' else '' }}>Сначала проблемные</option>
+        <option value="route" {{ 'selected' if sort=='route' else '' }}>По маршруту</option>
+        <option value="group" {{ 'selected' if sort=='group' else '' }}>Группами по маршруту</option>
+        <option value="number" {{ 'selected' if sort=='number' else '' }}>По номеру</option>
+      </select>
+      <button class="bus-btn">Найти</button>
+    </form>
+    <details class="bus-settings">
+      <summary class="bus-btn" style="list-style:none">⚙ Пороги</summary>
+      <div class="bus-settings-body">
+        <label>Менять диск через, дней <input id="set-swap" type="number" min="1" value="{{ swap_days }}"></label>
+        <label>Просмотр диска в течение, дней <input id="set-review" type="number" min="1" value="{{ review_days }}"></label>
+        <button class="bus-btn" onclick="saveThresholds()">Сохранить</button>
+      </div>
+    </details>
+  </div>
 
   <table class="grid">
     <thead><tr><th></th><th>Автобус</th><th>Маршрут</th><th>Диск сейчас</th><th>Поставлен</th><th>Статус</th></tr></thead>
     <tbody>
-    {% set cm = {'green':'green','yellow':'yellow','orange':'orange','red':'red'} %}
-    {% for r in rows %}
-      <tr>
-        <td><span class="dot {{ cm[r.color] }}"></span></td>
-        <td><a href="/buses/{{ r.bus.id }}"><b>{{ r.bus.bus_number }}</b></a></td>
-        <td>{{ r.bus.route or '—' }}</td>
-        <td>{% if r.disk %}{{ r.disk.label }} <span class="muted">({{ r.disk.type }})</span>{% else %}<span class="badge red">нет диска</span>{% endif %}</td>
-        <td class="muted">{{ r.bus.installed_since.strftime('%d.%m.%Y') if r.bus.installed_since else '—' }}</td>
-        <td>{{ r.reason }}</td>
-      </tr>
+    {% if grouped %}
+      {% for label, items in grouped %}
+        <tr class="group-row"><td colspan="6">🚏 Маршрут {{ label }} <span class="muted">({{ items|length }})</span></td></tr>
+        {% for r in items %}{{ busrow(r) }}{% endfor %}
+      {% endfor %}
     {% else %}
-      <tr><td colspan="6" class="muted">Автобусов нет. Нажмите «+ Автобус».</td></tr>
-    {% endfor %}
+      {% for r in rows %}{{ busrow(r) }}{% else %}
+      <tr><td colspan="6" class="muted">Автобусов нет. Нажмите «+ Автобус».</td></tr>{% endfor %}
+    {% endif %}
     </tbody>
   </table>
 </div>
@@ -69,6 +87,13 @@ async function addBus() {
   const route = prompt("Маршрут (необязательно):", "") || null;
   const r = await fetch("/api/buses", { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ bus_number: num, route }) });
+  if (r.ok) location.reload(); else alert("Ошибка: " + (await r.text()));
+}
+async function saveThresholds() {
+  const swap_days = parseInt(document.getElementById("set-swap").value, 10);
+  const review_days = parseInt(document.getElementById("set-review").value, 10);
+  const r = await fetch("/api/buses/settings", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ swap_days, review_days }) });
   if (r.ok) location.reload(); else alert("Ошибка: " + (await r.text()));
 }
 </script>

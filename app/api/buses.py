@@ -20,6 +20,7 @@ from app import schemas
 from app.config import settings
 from app.database import get_session
 from app.models import Bus, Disk, DiskStatus, SwapLog, utcnow
+from app.services import appsettings
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -27,8 +28,15 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 router = APIRouter(tags=["buses"])
 
 
+async def _thresholds(session: AsyncSession) -> tuple[int, int]:
+    """Пороги (замена, просмотр) — из БД, иначе из .env."""
+    swap = await appsettings.get_int(session, "bus_swap_alert_days", settings.bus_swap_alert_days)
+    review = await appsettings.get_int(session, "bus_review_alert_days", settings.bus_review_alert_days)
+    return swap, review
+
+
 # ── Статус автобуса (для индикации) ─────────────────────────────────────────────
-def bus_status(bus: Bus, disks: list[Disk]) -> tuple[str, str]:
+def bus_status(bus: Bus, disks: list[Disk], swap_days: int = 14) -> tuple[str, str]:
     """Возвращает (цвет, причина): red/orange/yellow/green."""
     now = utcnow()
     if bus.installed_disk_id is None:
@@ -37,7 +45,7 @@ def bus_status(bus: Bus, disks: list[Disk]) -> tuple[str, str]:
         return "red", "отмечена проблема"
     overdue = (
         bus.installed_since is not None
-        and (now - bus.installed_since).days >= settings.bus_swap_alert_days
+        and (now - bus.installed_since).days >= swap_days
     )
     if overdue:
         days = (now - bus.installed_since).days
@@ -80,14 +88,22 @@ async def _disk(session: AsyncSession, disk_id: int) -> Disk:
 
 
 # ── REST: автобусы ──────────────────────────────────────────────────────────────
+@router.post("/api/buses/settings")
+async def set_bus_settings(data: schemas.BusSettings, session: AsyncSession = Depends(get_session)):
+    await appsettings.set_value(session, "bus_swap_alert_days", max(data.swap_days, 1))
+    await appsettings.set_value(session, "bus_review_alert_days", max(data.review_days, 1))
+    return {"ok": True}
+
+
 @router.get("/api/buses")
 async def list_buses(session: AsyncSession = Depends(get_session)):
     buses = list((await session.execute(select(Bus))).scalars())
     disks = await _disks(session)
+    swap_days, _ = await _thresholds(session)
     by_id = {d.id: d for d in disks}
     out = []
     for b in buses:
-        color, reason = bus_status(b, disks)
+        color, reason = bus_status(b, disks, swap_days)
         cur = by_id.get(b.installed_disk_id) if b.installed_disk_id else None
         out.append({
             "id": b.id, "bus_number": b.bus_number, "route": b.route,
@@ -266,29 +282,39 @@ async def buses_page(request: Request, q: str = "", sort: str = "status",
                      session: AsyncSession = Depends(get_session)):
     buses = list((await session.execute(select(Bus))).scalars())
     disks = await _disks(session)
+    swap_days, review_days = await _thresholds(session)
     by_id = {d.id: d for d in disks}
     now = utcnow()
     rows, attention = [], []
     for b in buses:
         if q and q.lower() not in (f"{b.bus_number} {b.route or ''}").lower():
             continue
-        color, reason = bus_status(b, disks)
+        color, reason = bus_status(b, disks, swap_days)
         cur = by_id.get(b.installed_disk_id) if b.installed_disk_id else None
         rows.append({"bus": b, "color": color, "reason": reason, "disk": cur})
         if color in ("red", "orange"):
             attention.append({"bus": b, "reason": reason})
     # Сортировка: по статусу (проблемные сверху), по маршруту или по номеру
-    if sort == "route":
+    if sort in ("route", "group"):
         rows.sort(key=lambda x: (_nat(x["bus"].route), _nat(x["bus"].bus_number)))
     elif sort == "number":
         rows.sort(key=lambda x: _nat(x["bus"].bus_number))
     else:
         rows.sort(key=lambda x: (_RANK[x["color"]], _nat(x["bus"].bus_number)))
+    # Группировка по маршрутам (подзаголовки)
+    grouped = None
+    if sort == "group":
+        grouped = []
+        for r in rows:
+            label = r["bus"].route or "Без маршрута"
+            if not grouped or grouped[-1][0] != label:
+                grouped.append((label, []))
+            grouped[-1][1].append(r)
     # забытые на просмотре диски
     stale = [
         d for d in disks
         if d.status == DiskStatus.REMOVED_REVIEW and d.status_since
-        and (now - d.status_since).days >= settings.bus_review_alert_days
+        and (now - d.status_since).days >= review_days
     ]
     # сводка по парку
     summary = {
@@ -296,16 +322,16 @@ async def buses_page(request: Request, q: str = "", sort: str = "status",
         "no_disk": sum(1 for b in buses if b.installed_disk_id is None),
         "overdue": sum(
             1 for b in buses if b.installed_since
-            and (now - b.installed_since).days >= settings.bus_swap_alert_days
+            and (now - b.installed_since).days >= swap_days
         ),
         "disk_ready": sum(1 for d in disks if d.status == DiskStatus.READY),
         "disk_review": sum(1 for d in disks if d.status == DiskStatus.REMOVED_REVIEW),
         "disk_faulty": sum(1 for d in disks if d.status == DiskStatus.FAULTY),
     }
     return templates.TemplateResponse("buses.html", {
-        "request": request, "rows": rows, "attention": attention,
+        "request": request, "rows": rows, "grouped": grouped, "attention": attention,
         "stale_disks": stale, "q": q, "sort": sort, "summary": summary,
-        "swap_days": settings.bus_swap_alert_days,
+        "swap_days": swap_days, "review_days": review_days,
     })
 
 
@@ -332,8 +358,9 @@ async def bus_page(bus_id: int, request: Request, session: AsyncSession = Depend
     if bus is None:
         return HTMLResponse("Автобус не найден", status_code=404)
     disks = await _disks(session)
+    swap_days, _ = await _thresholds(session)
     by_id = {d.id: d for d in disks}
-    color, reason = bus_status(bus, disks)
+    color, reason = bus_status(bus, disks, swap_days)
     assigned = [d for d in disks if d.assigned_bus_id == bus.id]
     ready = [d for d in disks if d.status == DiskStatus.READY]
     history = await _swaplog(session, bus_id=bus_id)

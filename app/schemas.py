@@ -198,6 +198,11 @@ class FaultyRequest(BaseModel):
     note: str | None = None
 
 
+class BusSettings(BaseModel):
+    swap_days: int = 14
+    review_days: int = 7
+
+
 class EventOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int

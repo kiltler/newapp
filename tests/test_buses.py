@@ -94,6 +94,21 @@ async def test_pages_render(db):
             assert r.status_code == 200, f"{path} -> {r.status_code}"
 
 
+async def test_settings_and_grouping(db):
+    async with _client() as c:
+        await c.post("/api/buses", json={"bus_number": "А1", "route": "5"})
+        await c.post("/api/buses", json={"bus_number": "А2", "route": "5"})
+        await c.post("/api/buses", json={"bus_number": "Б1", "route": "10"})
+        # пороги сохраняются и применяются
+        r = await c.post("/api/buses/settings", json={"swap_days": 21, "review_days": 3})
+        assert r.status_code == 200
+        page = (await c.get("/buses")).text
+        assert 'value="21"' in page and 'value="3"' in page  # подставились в форму
+        # группировка по маршрутам
+        grouped = (await c.get("/buses?sort=group")).text
+        assert "Маршрут 5" in grouped and "Маршрут 10" in grouped
+
+
 async def test_route_sort_order(db):
     async with _client() as c:
         await c.post("/api/buses", json={"bus_number": "А1", "route": "10"})

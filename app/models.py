@@ -350,3 +350,12 @@ class SwapLog(Base):
     removed_disk_id: Mapped[int | None] = mapped_column(Integer, default=None)
     installed_disk_id: Mapped[int | None] = mapped_column(Integer, default=None)
     note: Mapped[str | None] = mapped_column(Text, default=None)
+
+
+class AppSetting(Base):
+    """Простое хранилище настроек (ключ/значение), правится из UI."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")

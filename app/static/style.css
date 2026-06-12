@@ -200,6 +200,15 @@ tr.row-muted { opacity: .45; }
 .bus-tile span:last-child { color: var(--muted); font-size: 13px; }
 .bus-tile.warn { border-color: var(--warn); } .bus-tile.warn .num { color: var(--warn); }
 .bus-tile.bad { border-color: var(--err); } .bus-tile.bad .num { color: var(--err); }
+.group-row td { background: rgba(243,156,18,.12); font-weight: 700; color: #f39c12; }
+.bus-settings { position: relative; }
+.bus-settings summary { cursor: pointer; }
+.bus-settings summary::-webkit-details-marker { display: none; }
+.bus-settings-body { position: absolute; right: 0; z-index: 20; margin-top: 6px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px;
+  display: flex; flex-direction: column; gap: 10px; min-width: 250px; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+.bus-settings-body label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.bus-settings-body input { padding: 9px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; color: var(--text); }
 /* крупные элементы для работы с телефона */
 @media (max-width: 640px) {
   .bus-btn { padding: 12px 18px; font-size: 16px; }
