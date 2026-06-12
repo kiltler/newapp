@@ -56,6 +56,20 @@ async function pollNow(id) {
   await fetch(`/api/devices/${id}/poll`, { method: "POST" });
   location.reload();
 }
+async function editCoords(id, lat, lon) {
+  const cur = (lat !== null ? lat : "") + ", " + (lon !== null ? lon : "");
+  const v = prompt("Координаты объекта (широта, долгота). Пусто — очистить:", cur.trim() === "," ? "" : cur);
+  if (v === null) return;
+  const parts = v.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
+  const latitude = parts[0] ? parseFloat(parts[0]) : null;
+  const longitude = parts[1] ? parseFloat(parts[1]) : null;
+  const r = await fetch(`/api/devices/${id}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ latitude, longitude }),
+  });
+  if (r.ok) location.reload();
+  else alert("Ошибка: " + (await r.text()));
+}
 async function recheck(id) {
   const r = await fetch(`/api/devices/${id}/recheck`, { method: "POST" });
   if (r.ok) location.reload();

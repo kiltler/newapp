@@ -96,6 +96,8 @@ class DeviceOut(BaseModel):
     last_seen: dt.datetime | None = None
     last_error: str | None = None
     time_drift_seconds: int | None = None
+    latitude: float | None = None
+    longitude: float | None = None
 
 
 class DeviceDetail(DeviceOut):

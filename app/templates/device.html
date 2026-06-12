@@ -30,6 +30,10 @@
   <div><b>Темп. / CPU:</b>
     {% if device.temperature is not none %}{{ device.temperature }}°C{% else %}—{% endif %} /
     {% if device.cpu_load is not none %}{{ device.cpu_load }}%{% else %}—{% endif %}</div>
+  <div><b>Координаты:</b>
+    {% if device.latitude is not none and device.longitude is not none %}{{ device.latitude }}, {{ device.longitude }}{% else %}—{% endif %}
+    <button class="mini" onclick="editCoords({{ device.id }}, {{ device.latitude if device.latitude is not none else 'null' }}, {{ device.longitude if device.longitude is not none else 'null' }})">изменить</button>
+  </div>
   <div><b>Возможности:</b>
     {% for k, v in device.capabilities.items() %}
       <span class="badge {{ 'ok' if v else 'err' }}">{{ k }}{{ '✓' if v else '✗' }}</span>
