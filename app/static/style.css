@@ -252,6 +252,22 @@ tr.row-muted { opacity: .45; }
 tr.audit-stale { background: rgba(231,76,60,.10); }
 .loc-sel { padding: 5px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
   color: var(--text); font-size: 12px; }
+
+/* Нижняя панель-вкладки (PWA / телефон) */
+.tabbar { display: none; }
+@media (max-width: 760px) {
+  .tabbar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000;
+    background: var(--panel); border-top: 1px solid var(--line);
+    padding-bottom: env(safe-area-inset-bottom); }
+  .tabbar a { flex: 1; text-align: center; padding: 8px 0 6px; color: var(--muted);
+    text-decoration: none; font-size: 11px; display: flex; flex-direction: column; gap: 2px; }
+  .tabbar a .ic { font-size: 21px; }
+  .tabbar a.active { color: #f39c12; }
+  .container { padding-bottom: 76px; }
+  /* верхнее меню на телефоне прячем — навигация снизу */
+  .topbar nav { display: none; }
+  .topbar { padding: 10px 16px; }
+}
 /* крупные элементы для работы с телефона */
 @media (max-width: 640px) {
   .bus-btn { padding: 12px 18px; font-size: 16px; }

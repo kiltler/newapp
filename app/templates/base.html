@@ -2,9 +2,17 @@
 <html lang="ru">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>{% block title %}NVR Monitor{% endblock %}</title>
     <link rel="stylesheet" href="/static/style.css">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="theme-color" content="#e67e22">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Автобусы">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch.png">
+    <link rel="icon" href="/static/icons/favicon-32.png">
 </head>
 <body>
 <header class="topbar">
@@ -74,8 +82,25 @@
 </div>
 
 <div id="toasts" class="toasts"></div>
+
+<!-- Нижняя панель-вкладки (телефон): быстрый доступ к движухе по автобусам -->
+<nav class="tabbar">
+  <a href="/buses" data-path="/buses"><span class="ic">🚌</span>Автобусы</a>
+  <a href="/buses/collection" data-path="/buses/collection"><span class="ic">📅</span>Сбор</a>
+  <a href="/buses/review" data-path="/buses/review"><span class="ic">🔎</span>Очередь</a>
+  <a href="/disks" data-path="/disks"><span class="ic">💿</span>Диски</a>
+  <a href="/logout"><span class="ic">🚪</span>Выход</a>
+</nav>
+
 <script src="/static/app.js"></script>
 <script src="/static/notify.js"></script>
+<script>
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+  // подсветка активной вкладки
+  document.querySelectorAll(".tabbar a[data-path]").forEach((a) => {
+    if (location.pathname === a.dataset.path || (a.dataset.path !== "/buses" && location.pathname.startsWith(a.dataset.path))) a.classList.add("active");
+  });
+</script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="NVR Monitor", version="0.1.0", lifespan=lifespan)
 
 # Открытые без авторизации пути (статика, страница входа, проверки, mock)
-_PUBLIC_PREFIXES = ("/static", "/login", "/logout", "/healthz", "/metrics", "/mock", "/docs", "/openapi.json")
+_PUBLIC_PREFIXES = ("/static", "/login", "/logout", "/healthz", "/metrics", "/mock", "/docs", "/openapi.json", "/sw.js", "/offline", "/manifest.webmanifest")
 # Что разрешено роли «bus» (только модуль «Автобусы»)
 _BUS_PREFIXES = ("/buses", "/disks", "/api/buses", "/api/disks")
 
@@ -103,3 +103,36 @@ if settings.mock_mode:
 @app.get("/healthz")
 async def healthz():
     return {"status": "ok"}
+
+
+@app.get("/sw.js")
+async def service_worker():
+    from fastapi.responses import FileResponse
+
+    return FileResponse(
+        str(static_dir / "sw.js"), media_type="application/javascript",
+        headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"},
+    )
+
+
+@app.get("/manifest.webmanifest")
+async def web_manifest():
+    from fastapi.responses import FileResponse
+
+    return FileResponse(
+        str(static_dir / "manifest.webmanifest"), media_type="application/manifest+json"
+    )
+
+
+@app.get("/offline")
+async def offline_page():
+    from fastapi.responses import HTMLResponse
+
+    return HTMLResponse(
+        "<!DOCTYPE html><html lang='ru'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<title>Нет сети</title><link rel='stylesheet' href='/static/style.css'></head>"
+        "<body style='display:flex;align-items:center;justify-content:center;height:100vh;text-align:center'>"
+        "<div><h1>📴 Нет связи</h1><p class='muted'>Приложению нужен интернет/сеть до сервера.<br>"
+        "Проверь подключение и потяни страницу вниз для обновления.</p></div></body></html>"
+    )

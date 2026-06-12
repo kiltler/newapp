@@ -1,0 +1,16 @@
+{
+  "name": "NVR Monitor — Автобусы",
+  "short_name": "Автобусы",
+  "description": "Учёт дисков автобусных видеорегистраторов",
+  "start_url": "/buses",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f1419",
+  "theme_color": "#e67e22",
+  "icons": [
+    { "src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/static/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
