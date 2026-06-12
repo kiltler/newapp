@@ -56,6 +56,9 @@ async def render_metrics(session: AsyncSession) -> str:
             problem_devices += 1
 
         add("nvrmon_device_reachable", 1 if d.reachable else 0, lbl)
+        if d.latitude is not None and d.longitude is not None:
+            add("nvrmon_device_geo", 1 if d.reachable else 0,
+                f'{lbl},lat="{d.latitude}",lon="{d.longitude}"')
         add("nvrmon_device_consecutive_failures", d.consecutive_failures, lbl)
         add("nvrmon_device_channels_total", c_total, lbl)
         add("nvrmon_device_channels_online", c_online, lbl)
@@ -137,6 +140,7 @@ async def render_metrics(session: AsyncSession) -> str:
         "nvrmon_active_alerts_critical": "Критических алертов",
         "nvrmon_active_alerts_warning": "Предупреждений",
         "nvrmon_device_reachable": "Доступность устройства (1/0)",
+        "nvrmon_device_geo": "Объект на карте (1=онлайн)",
         "nvrmon_device_consecutive_failures": "Неудачных опросов подряд",
         "nvrmon_device_channels_total": "Каналов на устройстве",
         "nvrmon_device_channels_online": "Каналов онлайн на устройстве",

@@ -7,12 +7,53 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 2,
+  "version": 3,
   "refresh": "10s",
   "style": "dark",
   "time": {
     "from": "now-6h",
     "to": "now"
+  },
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      },
+      {
+        "name": "Аварии (алерты)",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "nvrmon-prom"
+        },
+        "enable": true,
+        "iconColor": "red",
+        "expr": "nvrmon_active_alerts > 0",
+        "titleFormat": "Есть активные алерты",
+        "step": "60s"
+      },
+      {
+        "name": "NVR недоступен",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "nvrmon-prom"
+        },
+        "enable": true,
+        "iconColor": "orange",
+        "expr": "nvrmon_device_reachable == 0",
+        "titleFormat": "NVR недоступен",
+        "textFormat": "{{device}}",
+        "tagKeys": "device",
+        "step": "60s"
+      }
+    ]
   },
   "panels": [
     {
@@ -1371,6 +1412,268 @@
           ]
         }
       }
+    },
+    {
+      "type": "row",
+      "title": "📊  Аптайм / SLA",
+      "id": 32,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 70
+      },
+      "panels": []
+    },
+    {
+      "id": 33,
+      "type": "bargauge",
+      "title": "Аптайм камер за 24ч, %",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 71
+      },
+      "targets": [
+        {
+          "expr": "avg_over_time(nvrmon_channel_up[24h]) * 100",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          },
+          "legendFormat": "{{device}} · {{name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 90
+              },
+              {
+                "color": "green",
+                "value": 99
+              }
+            ]
+          },
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 34,
+      "type": "bargauge",
+      "title": "Top-5 проблемных за 24ч (аптайм %)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 71
+      },
+      "targets": [
+        {
+          "expr": "bottomk(5, avg_over_time(nvrmon_channel_up[24h]) * 100)",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          },
+          "legendFormat": "{{device}} · {{name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 90
+              },
+              {
+                "color": "green",
+                "value": 99
+              }
+            ]
+          },
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "🗺  Карта объектов",
+      "id": 35,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 80
+      },
+      "panels": []
+    },
+    {
+      "id": 36,
+      "type": "geomap",
+      "title": "Объекты на карте",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 81
+      },
+      "targets": [
+        {
+          "expr": "nvrmon_device_geo",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          },
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "view": {
+          "id": "fit",
+          "zoom": 5
+        },
+        "basemap": {
+          "type": "default",
+          "name": "Basemap"
+        },
+        "controls": {
+          "showZoom": true,
+          "mouseWheelZoom": true,
+          "showAttribution": true
+        },
+        "layers": [
+          {
+            "type": "markers",
+            "name": "Объекты",
+            "location": {
+              "mode": "coords",
+              "latitude": "lat",
+              "longitude": "lon"
+            },
+            "config": {
+              "showLegend": true,
+              "style": {
+                "size": {
+                  "fixed": 10
+                },
+                "color": {
+                  "field": "Value"
+                },
+                "opacity": 0.85,
+                "symbol": {
+                  "fixed": "img/icons/marker/circle.svg"
+                },
+                "textConfig": {
+                  "fontSize": 12
+                }
+              }
+            },
+            "tooltip": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {}
+        },
+        {
+          "id": "convertFieldType",
+          "options": {
+            "conversions": [
+              {
+                "targetField": "lat",
+                "destinationType": "number"
+              },
+              {
+                "targetField": "lon",
+                "destinationType": "number"
+              }
+            ]
+          }
+        }
+      ]
     }
   ]
 }

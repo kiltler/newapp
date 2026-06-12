@@ -60,6 +60,8 @@ async def create_device(session: AsyncSession, data: schemas.DeviceCreate) -> De
         timeout=data.timeout,
         retries=data.retries,
         enabled=data.enabled,
+        latitude=data.latitude,
+        longitude=data.longitude,
     )
     session.add(device)
     await session.commit()

@@ -33,6 +33,8 @@ class DeviceCreate(BaseModel):
     timeout: float = 15.0
     retries: int = 2
     enabled: bool = True
+    latitude: float | None = None
+    longitude: float | None = None
 
 
 class DeviceUpdate(BaseModel):
@@ -48,6 +50,8 @@ class DeviceUpdate(BaseModel):
     timeout: float | None = None
     retries: int | None = None
     enabled: bool | None = None
+    latitude: float | None = None
+    longitude: float | None = None
 
 
 class ChannelOut(BaseModel):

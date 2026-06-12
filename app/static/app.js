@@ -11,6 +11,8 @@ function formData() {
     password: f.password.value,
     api_type: f.api_type.value,
     timeout: parseFloat(f.timeout.value || "15"),
+    latitude: f.latitude.value ? parseFloat(f.latitude.value) : null,
+    longitude: f.longitude.value ? parseFloat(f.longitude.value) : null,
   };
 }
 

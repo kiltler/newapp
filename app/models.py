@@ -118,6 +118,10 @@ class Device(Base):
     memory_usage: Mapped[float | None] = mapped_column(Float, default=None)
     temperature: Mapped[float | None] = mapped_column(Float, default=None)
 
+    # Координаты объекта (для карты)
+    latitude: Mapped[float | None] = mapped_column(Float, default=None)
+    longitude: Mapped[float | None] = mapped_column(Float, default=None)
+
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow

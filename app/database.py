@@ -47,6 +47,8 @@ _NEW_COLUMNS = [
     ("devices", "cpu_load", "FLOAT"),
     ("devices", "memory_usage", "FLOAT"),
     ("devices", "temperature", "FLOAT"),
+    ("devices", "latitude", "FLOAT"),
+    ("devices", "longitude", "FLOAT"),
     ("channels", "archive_depth_days", "INTEGER"),
     ("channels", "quality", "VARCHAR(16)"),
     ("channels", "quality_checked_at", "TIMESTAMP"),
