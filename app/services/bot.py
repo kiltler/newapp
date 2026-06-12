@@ -237,7 +237,7 @@ async def run_bot() -> None:
     log.info("Telegram-бот запущен (long-polling)")
     offset = 0
     warned_unreachable = False
-    async with httpx.AsyncClient(timeout=httpx.Timeout(40.0, connect=10.0)) as http:
+    async with telegram.make_client(httpx.Timeout(40.0, connect=10.0)) as http:
         while True:
             try:
                 resp = await _api("getUpdates", http, offset=offset, timeout=25)

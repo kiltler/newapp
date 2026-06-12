@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     telegram_chat_id: str = ""
     telegram_enabled: bool = True
     telegram_bot_enabled: bool = True  # двусторонний бот (команды/кнопки)
+    # Прокси для доступа к Telegram, если сервер не пускают напрямую (DPI/блокировка).
+    # Примеры: http://user:pass@host:3128  |  socks5://host:1080
+    telegram_proxy: str = ""
 
     # Watchdog (внешний «пульс»: healthchecks.io и т.п.)
     watchdog_url: str = ""

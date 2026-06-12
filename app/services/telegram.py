@@ -17,6 +17,12 @@ def is_configured() -> bool:
     return bool(settings.telegram_bot_token and settings.telegram_chat_id)
 
 
+def make_client(timeout) -> httpx.AsyncClient:
+    """httpx-клиент для Telegram с учётом прокси (если задан TELEGRAM_PROXY)."""
+    proxy = settings.telegram_proxy or None
+    return httpx.AsyncClient(timeout=timeout, proxy=proxy)
+
+
 async def send_message(
     text: str, *, chat_id: str | None = None, reply_markup: dict | None = None
 ) -> bool:
@@ -41,7 +47,7 @@ async def send_message(
     if reply_markup is not None:
         payload["reply_markup"] = reply_markup
     try:
-        async with httpx.AsyncClient(timeout=15.0) as http:
+        async with make_client(15.0) as http:
             resp = await http.post(url, json=payload)
             if resp.status_code != 200:
                 log.error("Telegram API %s: %s", resp.status_code, resp.text[:200])
@@ -64,7 +70,7 @@ async def send_photo(image: bytes, caption: str = "", *, chat_id: str | None = N
     }
     files = {"photo": ("snapshot.jpg", image, "image/jpeg")}
     try:
-        async with httpx.AsyncClient(timeout=20.0) as http:
+        async with make_client(20.0) as http:
             resp = await http.post(url, data=data, files=files)
             if resp.status_code != 200:
                 log.error("Telegram sendPhoto %s: %s", resp.status_code, resp.text[:200])
