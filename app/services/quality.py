@@ -27,7 +27,7 @@ from app.services.poller import _semaphore
 
 log = logging.getLogger(__name__)
 
-_SIG_SIZE = 32  # размер подписи кадра (32×32 grayscale)
+_SIG_SIZE = 96  # размер подписи кадра (96×96 grayscale) — сохраняем микроизменения
 
 
 @dataclass
@@ -37,7 +37,7 @@ class QualityResult:
     contrast: float
     sharpness: float
     signature: str  # base64 уменьшенного кадра — для детекта фриза
-    frozen: bool
+    frozen: bool     # этот кадр идентичен предыдущему (ещё не вердикт!)
 
 
 def analyze(jpeg: bytes, prev_sig: str | None = None) -> QualityResult:
@@ -83,13 +83,13 @@ def analyze(jpeg: bytes, prev_sig: str | None = None) -> QualityResult:
         except Exception:  # noqa: BLE001
             frozen = False
 
-    # Вердикт по приоритету проблем
+    # Вердикт по приоритету проблем. ФРИЗ здесь НЕ выносим — он требует
+    # подтверждения во времени (одинаковость кадра подряд несколько проверок),
+    # иначе статичную живую сцену примем за зависание. Это решает вызывающий код.
     if brightness < settings.quality_dark_threshold:
         verdict = Quality.DARK
     elif contrast < settings.quality_uniform_threshold:
         verdict = Quality.UNIFORM
-    elif frozen:
-        verdict = Quality.FROZEN
     elif sharpness < settings.quality_blur_threshold:
         verdict = Quality.BLURRY
     else:
@@ -148,11 +148,17 @@ async def check_device_quality(device_id: int) -> None:
                 continue
 
             ch.frame_sig = res.signature
-            ch.quality = res.verdict
             ch.quality_checked_at = utcnow()
             ch.frozen_count = ch.frozen_count + 1 if res.frozen else 0
 
-            if res.verdict == Quality.OK:
+            # Фриз выносим только если кадр идентичен N проверок ПОДРЯД —
+            # живая статичная сцена за это время хоть немного, да изменится.
+            verdict = res.verdict
+            if verdict == Quality.OK and ch.frozen_count >= settings.quality_frozen_checks:
+                verdict = Quality.FROZEN
+            ch.quality = verdict
+
+            if verdict == Quality.OK:
                 await alerts.resolve_alert(
                     session, scope_key=scope, device_id=device_id, channel_id=ch.channel_id,
                     message=f"«{device.name}» канал {ch.channel_id} ({ch.name or '—'}): картинка в норме",
@@ -163,9 +169,9 @@ async def check_device_quality(device_id: int) -> None:
                     severity=Severity.WARNING, device_id=device_id, channel_id=ch.channel_id,
                     message=(
                         f"«{device.name}» канал {ch.channel_id} ({ch.name or '—'}): "
-                        f"{_VERDICT_RU.get(res.verdict, res.verdict)}"
+                        f"{_VERDICT_RU.get(verdict, verdict)}"
                     ),
-                    context={"verdict": res.verdict, "brightness": round(res.brightness, 1)},
+                    context={"verdict": verdict, "brightness": round(res.brightness, 1)},
                     photo=jpeg,  # прикладываем проблемный кадр в Telegram
                 )
         await session.commit()
