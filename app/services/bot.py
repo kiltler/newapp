@@ -236,10 +236,16 @@ async def run_bot() -> None:
         return
     log.info("Telegram-бот запущен (long-polling)")
     offset = 0
-    async with httpx.AsyncClient(timeout=40.0) as http:
+    warned_unreachable = False
+    async with httpx.AsyncClient(timeout=httpx.Timeout(40.0, connect=10.0)) as http:
         while True:
             try:
                 resp = await _api("getUpdates", http, offset=offset, timeout=25)
+                if not resp.get("ok", True):
+                    log.error("Telegram вернул ошибку: %s", resp)
+                    await asyncio.sleep(10)
+                    continue
+                warned_unreachable = False
                 for upd in resp.get("result", []):
                     offset = upd["update_id"] + 1
                     if "message" in upd:
@@ -248,6 +254,18 @@ async def run_bot() -> None:
                         await _handle_callback(http, upd["callback_query"])
             except asyncio.CancelledError:
                 raise
+            except httpx.TimeoutException:
+                # Долгий poll иногда таймаутит штатно — без шума.
+                if not warned_unreachable:
+                    log.warning(
+                        "Бот: нет ответа от api.telegram.org (таймаут). "
+                        "Проверьте доступ сервера к Telegram (firewall/блокировка)."
+                    )
+                    warned_unreachable = True
+                await asyncio.sleep(3)
+            except httpx.HTTPError as exc:
+                log.warning("Бот: сетевая ошибка (%s): %s", type(exc).__name__, exc)
+                await asyncio.sleep(5)
             except Exception as exc:  # noqa: BLE001
-                log.warning("Ошибка бота: %s", exc)
+                log.warning("Ошибка бота (%s): %s", type(exc).__name__, exc)
                 await asyncio.sleep(5)
