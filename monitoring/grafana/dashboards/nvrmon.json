@@ -1,0 +1,81 @@
+{
+  "uid": "nvrmon-main",
+  "title": "NVR Monitor",
+  "tags": ["nvr", "cctv"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "type": "stat", "title": "Устройства онлайн",
+      "datasource": { "type": "prometheus", "uid": "nvrmon-prom" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "targets": [{ "expr": "nvrmon_devices_online", "refId": "A" }],
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "green" }, "unit": "none" }, "overrides": [] },
+      "options": { "colorMode": "background", "graphMode": "area", "textMode": "value_and_name" }
+    },
+    {
+      "type": "stat", "title": "Недоступны",
+      "datasource": { "type": "prometheus", "uid": "nvrmon-prom" },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "targets": [{ "expr": "nvrmon_devices_unreachable", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "none", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } }, "overrides": [] },
+      "options": { "colorMode": "background", "graphMode": "none" }
+    },
+    {
+      "type": "stat", "title": "Каналы онлайн",
+      "datasource": { "type": "prometheus", "uid": "nvrmon-prom" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "targets": [{ "expr": "nvrmon_channels_online", "refId": "A" }],
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "blue" }, "unit": "none" }, "overrides": [] },
+      "options": { "colorMode": "background", "graphMode": "area" }
+    },
+    {
+      "type": "stat", "title": "Активные алерты",
+      "datasource": { "type": "prometheus", "uid": "nvrmon-prom" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "targets": [{ "expr": "nvrmon_active_alerts", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "none", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 5 } ] } }, "overrides": [] },
+      "options": { "colorMode": "background", "graphMode": "none" }
+    },
+    {
+      "type": "timeseries", "title": "Каналы: онлайн / с проблемой",
+      "datasource": { "type": "prometheus", "uid": "nvrmon-prom" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 4 },
+      "targets": [
+        { "expr": "nvrmon_channels_online", "refId": "A", "legendFormat": "онлайн" },
+        { "expr": "nvrmon_channels_problem", "refId": "B", "legendFormat": "проблема" }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 15, "lineWidth": 2 }, "unit": "none" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "type": "bargauge", "title": "Температура NVR, °C",
+      "datasource": { "type": "prometheus", "uid": "nvrmon-prom" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 12 },
+      "targets": [{ "expr": "nvrmon_device_temperature_celsius", "refId": "A", "legendFormat": "{{device}}" }],
+      "fieldConfig": { "defaults": { "unit": "celsius", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 55 }, { "color": "red", "value": 65 } ] } }, "overrides": [] },
+      "options": { "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true }
+    },
+    {
+      "type": "bargauge", "title": "Дрейф времени NVR, сек",
+      "datasource": { "type": "prometheus", "uid": "nvrmon-prom" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 12 },
+      "targets": [{ "expr": "nvrmon_device_time_drift_seconds", "refId": "A", "legendFormat": "{{device}}" }],
+      "fieldConfig": { "defaults": { "unit": "s", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 300 }, { "color": "red", "value": 600 } ] } }, "overrides": [] },
+      "options": { "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true }
+    },
+    {
+      "type": "bargauge", "title": "Каналы онлайн по устройствам",
+      "datasource": { "type": "prometheus", "uid": "nvrmon-prom" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 21 },
+      "targets": [
+        { "expr": "nvrmon_device_channels_online", "refId": "A", "legendFormat": "{{device}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none", "color": { "mode": "continuous-GrYlRd" } }, "overrides": [] },
+      "options": { "orientation": "horizontal", "displayMode": "basic", "showUnfilled": true }
+    }
+  ]
+}

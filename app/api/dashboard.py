@@ -5,7 +5,7 @@ import datetime as dt
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,6 +55,13 @@ async def index(request: Request, session: AsyncSession = Depends(get_session)):
 
 
 _STATUS_COLOR = {"online": "green", "offline": "red", "no_video": "yellow", "unknown": "gray"}
+
+
+@router.get("/metrics", response_class=PlainTextResponse)
+async def metrics(session: AsyncSession = Depends(get_session)):
+    from app.services.metrics import render_metrics
+
+    return PlainTextResponse(await render_metrics(session), media_type="text/plain; version=0.0.4")
 
 
 @router.get("/tv", response_class=HTMLResponse)

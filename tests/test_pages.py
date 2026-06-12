@@ -82,6 +82,16 @@ async def test_recent_alerts(db):
         assert "инфо" not in msgs            # info-событие не показываем
 
 
+async def test_metrics(db):
+    did = await _make_device()
+    async with _client() as c:
+        r = await c.get("/metrics")
+        assert r.status_code == 200
+        body = r.text
+        assert "nvrmon_devices_total" in body
+        assert "nvrmon_device_reachable{" in body  # есть метрика с лейблом устройства
+
+
 async def test_qr_png(db):
     did = await _make_device()
     async with _client() as c:

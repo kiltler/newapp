@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="NVR Monitor", version="0.1.0", lifespan=lifespan)
 
 # Открытые без авторизации пути (статика, страница входа, проверки, mock)
-_PUBLIC_PREFIXES = ("/static", "/login", "/logout", "/healthz", "/mock", "/docs", "/openapi.json")
+_PUBLIC_PREFIXES = ("/static", "/login", "/logout", "/healthz", "/metrics", "/mock", "/docs", "/openapi.json")
 
 
 @app.middleware("http")

@@ -119,6 +119,20 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 2. Узнайте `chat_id` нужного чата/группы (например через @getidsbot).
 3. Заполните в `.env`: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_ENABLED=true`.
 
+## Grafana + Prometheus (красивые дашборды)
+
+Монитор отдаёт метрики Prometheus на `/metrics`. В комплекте — Prometheus и
+Grafana с **готовым дашбордом** (онлайн/недоступны, каналы, температура NVR,
+дрейф времени, активные алерты). Запуск:
+
+```bash
+docker compose --profile grafana up -d
+```
+
+Grafana: `http://<IP>:3000` (логин/пароль `admin`/`admin`, меняются на первом
+входе или через `GRAFANA_USER`/`GRAFANA_PASSWORD`). Дашборд **NVR Monitor**
+появляется автоматически, источник данных Prometheus уже подключён.
+
 ## Развёртывание на Ubuntu VPS через Docker Compose
 
 ```bash
