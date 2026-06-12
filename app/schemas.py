@@ -156,6 +156,48 @@ class MarkerMove(BaseModel):
     y: float
 
 
+# ── Автобусы / диски ────────────────────────────────────────────────────────────
+class BusCreate(BaseModel):
+    bus_number: str
+    route: str | None = None
+    dvr_model: str | None = None
+
+
+class BusUpdate(BaseModel):
+    bus_number: str | None = None
+    route: str | None = None
+    dvr_model: str | None = None
+    problem_note: str | None = None
+    has_problem: bool | None = None
+
+
+class DiskCreate(BaseModel):
+    label: str
+    type: str = "SSD"
+    capacity_gb: int | None = None
+    assigned_bus_id: int | None = None
+    status: str = "ready"
+    note: str | None = None
+
+
+class DiskUpdate(BaseModel):
+    label: str | None = None
+    type: str | None = None
+    capacity_gb: int | None = None
+    assigned_bus_id: int | None = None
+    note: str | None = None
+
+
+class SwapRequest(BaseModel):
+    installed_disk_id: int | None = None  # какой ставим (None = снять без замены)
+    note: str | None = None
+    force: bool = False                   # подтвердить установку чужого диска
+
+
+class FaultyRequest(BaseModel):
+    note: str | None = None
+
+
 class EventOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int

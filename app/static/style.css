@@ -165,6 +165,39 @@ tr.row-muted { opacity: .45; }
 .toast.err { background: var(--err); color: #fff; }
 .toast.warn { background: var(--warn); }
 .toast.ok { background: var(--ok); }
+
+/* ── Модуль «Автобусы» (янтарный режим, офлайн) ── */
+.nav-bus { color: #f39c12 !important; font-weight: 700; }
+.bus-scope { --bus: #f39c12; }
+.dot.orange { background: #e67e22; }
+.badge.orange { background: rgba(230,126,34,.18); color: #e67e22; }
+.bus-banner { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;
+  gap: 10px; background: linear-gradient(90deg, rgba(243,156,18,.18), rgba(230,126,34,.06));
+  border: 1px solid rgba(243,156,18,.4); border-left: 5px solid #f39c12;
+  border-radius: 10px; padding: 14px 18px; margin: 10px 0 14px; font-size: 18px; }
+.bus-ico { font-size: 22px; }
+.badge-offline { background: #e67e22; color: #1a1207; font-weight: 700; font-size: 12px;
+  padding: 3px 10px; border-radius: 20px; margin-left: 8px; letter-spacing: .5px; }
+.bus-btn { background: #e67e22; color: #1a1207; border: none; padding: 9px 16px; border-radius: 8px;
+  cursor: pointer; font-size: 15px; font-weight: 600; text-decoration: none; display: inline-block; }
+.bus-btn:hover { opacity: .9; text-decoration: none; }
+.bus-btn.big { font-size: 18px; padding: 14px 22px; }
+.bus-btn.danger { background: var(--err); color: #fff; }
+.attention { background: rgba(231,76,60,.1); border: 1px solid rgba(231,76,60,.4);
+  border-radius: 10px; padding: 12px 18px; margin-bottom: 14px; }
+.attention h3 { margin: 0 0 8px; } .attention ul { margin: 0; padding-left: 20px; }
+.bus-search { display: flex; gap: 8px; margin-bottom: 12px; }
+.bus-search input, .bus-search select { padding: 9px; background: var(--bg); border: 1px solid var(--line);
+  border-radius: 6px; color: var(--text); flex: 1; max-width: 360px; }
+.bus-actions { display: flex; gap: 10px; margin: 14px 0; flex-wrap: wrap; }
+.disk-current { font-size: 18px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; padding: 14px 18px; display: inline-block; }
+.bus-problem { grid-column: 1 / -1; }
+/* крупные элементы для работы с телефона */
+@media (max-width: 640px) {
+  .bus-btn { padding: 12px 18px; font-size: 16px; }
+  table.grid th, table.grid td { padding: 11px 10px; }
+}
 .toast-x { position: absolute; right: 10px; top: 10px; cursor: pointer; opacity: .7; }
 @keyframes toast-in { from { transform: translateX(20px); opacity: 0; } to { transform: none; opacity: 1; } }
 

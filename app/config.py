@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     temp_alert_celsius: float = 65.0        # температура выше → алерт
     cpu_alert_percent: float = 95.0         # загрузка CPU выше → алерт
 
+    # Модуль «Автобусы» (ручной учёт дисков)
+    bus_swap_alert_days: int = 14           # диск стоит дольше → пора менять
+    bus_review_alert_days: int = 7          # диск висит на просмотре дольше → забыли
+
     # Сеть
     default_http_timeout: float = 15.0
     default_http_retries: int = 2

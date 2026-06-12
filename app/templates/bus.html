@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}Автобус {{ bus.bus_number }}{% endblock %}
+{% block content %}
+<div class="bus-scope">
+  <a href="/buses" class="muted">← к списку автобусов</a>
+  <div class="bus-banner">
+    <div><span class="dot {{ color }}"></span> <b>Автобус {{ bus.bus_number }}</b>
+      <span class="badge-offline">OFFLINE</span></div>
+    <button class="bus-btn danger" onclick="delBus()">Удалить</button>
+  </div>
+
+  <section class="info-grid">
+    <div><b>Маршрут:</b> {{ bus.route or '—' }}</div>
+    <div><b>Модель DVR:</b> {{ bus.dvr_model or '—' }} <button class="mini" onclick="editModel()">изм.</button></div>
+    <div><b>Статус:</b> {{ reason }}</div>
+    <div class="bus-problem">
+      <b>Проблема:</b>
+      {% if bus.has_problem %}<span class="badge red">{{ bus.problem_note or 'да' }}</span>{% else %}<span class="muted">нет</span>{% endif %}
+      <button class="mini" onclick="editProblem()">отметить/снять</button>
+    </div>
+  </section>
+
+  <h2>Диск в регистраторе</h2>
+  {% if installed %}
+    <div class="disk-current">💿 <b>{{ installed.label }}</b> ({{ installed.type }}{% if installed.capacity_gb %}, {{ installed.capacity_gb }} ГБ{% endif %}) · стоит с {{ bus.installed_since.strftime('%d.%m.%Y') if bus.installed_since else '—' }}</div>
+  {% else %}
+    <div class="badge red">Регистратор без диска</div>
+  {% endif %}
+
+  <div class="bus-actions">
+    <button class="bus-btn big" onclick="openSwap()">🔄 Заменить диск</button>
+    {% if installed %}<button class="bus-btn" onclick="removeDisk()">Снять без замены</button>{% endif %}
+  </div>
+
+  <h2>Закреплённые диски</h2>
+  <table class="grid">
+    <thead><tr><th>Диск</th><th>Тип</th><th>Статус</th><th>Действия</th></tr></thead>
+    <tbody>
+    {% set sm = {'installed':'ok','ready':'ok','removed_review':'warn','faulty':'err'} %}
+    {% set sl = {'installed':'установлен','ready':'готов (резерв)','removed_review':'на просмотре','faulty':'неисправен'} %}
+    {% for d in assigned %}
+      <tr>
+        <td><b>{{ d.label }}</b></td><td>{{ d.type }}</td>
+        <td><span class="badge {{ sm[d.status] }}">{{ sl[d.status] }}</span></td>
+        <td>
+          {% if d.status == 'removed_review' %}<button class="mini" onclick="reviewed({{ d.id }})">✓ просмотрен</button>{% endif %}
+          {% if d.status != 'faulty' %}<button class="mini danger" onclick="faulty({{ d.id }})">неисправен</button>{% endif %}
+        </td>
+      </tr>
+    {% else %}<tr><td colspan="4" class="muted">Диски не закреплены.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+
+  <h2>История замен</h2>
+  <table class="grid">
+    <thead><tr><th>Дата</th><th>Снят</th><th>Установлен</th><th>Заметка</th></tr></thead>
+    <tbody>
+    {% for h in history %}
+      <tr>
+        <td class="muted">{{ h.date.strftime('%d.%m.%Y %H:%M') }}</td>
+        <td>{{ disks_by_id[h.removed_disk_id].label if h.removed_disk_id and h.removed_disk_id in disks_by_id else '—' }}</td>
+        <td>{{ disks_by_id[h.installed_disk_id].label if h.installed_disk_id and h.installed_disk_id in disks_by_id else '—' }}</td>
+        <td>{{ h.note or '' }}</td>
+      </tr>
+    {% else %}<tr><td colspan="4" class="muted">Замен ещё не было.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+
+  <!-- Модал замены -->
+  <div id="swap-modal" class="modal hidden">
+    <div class="modal-card bus-scope">
+      <h3>Замена диска</h3>
+      {% if installed %}<p>Снимется: <b>{{ installed.label }}</b> → «на просмотре».</p>
+      {% else %}<p>Регистратор пустой — будет установлен выбранный диск.</p>{% endif %}
+      <label>Поставить диск (готовые к установке):
+        <select id="swap-disk">
+          <option value="">— не ставить (только снять) —</option>
+          {% for d in ready_disks|sort(attribute='assigned_bus_id') %}
+            <option value="{{ d.id }}" data-other="{{ 0 if d.assigned_bus_id in (none, bus.id) else 1 }}">
+              {{ d.label }} ({{ d.type }}){% if d.assigned_bus_id and d.assigned_bus_id != bus.id %} — чужой!{% endif %}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Заметка<input id="swap-note" placeholder="зачем сняли / что нашли"></label>
+      <div class="actions">
+        <button class="bus-btn" onclick="doSwap()">Подтвердить</button>
+        <button class="secondary" onclick="document.getElementById('swap-modal').classList.add('hidden')">Отмена</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const BUS_ID = {{ bus.id }};
+function openSwap(){ document.getElementById("swap-modal").classList.remove("hidden"); }
+async function postSwap(body){
+  return fetch(`/api/buses/${BUS_ID}/swap`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) });
+}
+async function doSwap(){
+  const sel = document.getElementById("swap-disk");
+  const id = sel.value ? parseInt(sel.value,10) : null;
+  const note = document.getElementById("swap-note").value || null;
+  let r = await postSwap({ installed_disk_id:id, note });
+  if (r.status === 409){
+    if (!confirm("Этот диск закреплён за другим автобусом. Всё равно установить?")) return;
+    r = await postSwap({ installed_disk_id:id, note, force:true });
+  }
+  if (r.ok) location.reload(); else alert("Ошибка: " + (await r.text()));
+}
+async function removeDisk(){
+  if (!confirm("Снять диск без установки замены? Автобус останется без диска.")) return;
+  const note = prompt("Заметка (необязательно):","") || null;
+  const r = await postSwap({ installed_disk_id:null, note });
+  if (r.ok) location.reload(); else alert("Ошибка: " + (await r.text()));
+}
+async function reviewed(id){ const r = await fetch(`/api/disks/${id}/reviewed`,{method:"POST"}); r.ok?location.reload():alert(await r.text()); }
+async function faulty(id){
+  const note = prompt("Что с диском? (заметка о неисправности):"); if (note===null) return;
+  const r = await fetch(`/api/disks/${id}/faulty`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({note})});
+  r.ok?location.reload():alert(await r.text());
+}
+async function editProblem(){
+  const has = {{ 'true' if bus.has_problem else 'false' }};
+  const note = prompt("Описание проблемы (пусто — снять проблему):", {{ (bus.problem_note or '') | tojson }});
+  if (note===null) return;
+  const r = await fetch(`/api/buses/${BUS_ID}`,{method:"PUT",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({ has_problem: !!note.trim(), problem_note: note.trim() || null })});
+  r.ok?location.reload():alert(await r.text());
+}
+async function editModel(){
+  const m = prompt("Модель регистратора:", {{ (bus.dvr_model or '') | tojson }}); if (m===null) return;
+  const r = await fetch(`/api/buses/${BUS_ID}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({dvr_model:m||null})});
+  r.ok?location.reload():alert(await r.text());
+}
+async function delBus(){ if(!confirm("Удалить автобус?"))return; const r=await fetch(`/api/buses/${BUS_ID}`,{method:"DELETE"}); if(r.ok)location.href="/buses"; else alert(await r.text()); }
+</script>
+{% endblock %}

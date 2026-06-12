@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Журнал замен{% endblock %}
+{% block content %}
+<div class="bus-scope">
+  <a href="/buses" class="muted">← к автобусам</a>
+  <div class="bus-banner">
+    <div><b>Журнал замен дисков</b> <span class="badge-offline">Ручной учёт</span></div>
+    <a class="bus-btn" href="/api/buses/swaplog.csv">⬇ Экспорт CSV</a>
+  </div>
+
+  <table class="grid">
+    <thead><tr><th>Дата</th><th>Автобус</th><th>Снят</th><th>Установлен</th><th>Заметка</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td class="muted">{{ r.date.strftime('%d.%m.%Y %H:%M') }}</td>
+        <td>{% set b = buses.get(r.bus_id) %}{% if b %}<a href="/buses/{{ b.id }}">{{ b.bus_number }}</a>{% else %}#{{ r.bus_id }}{% endif %}</td>
+        <td>{{ disks[r.removed_disk_id].label if r.removed_disk_id and r.removed_disk_id in disks else '—' }}</td>
+        <td>{{ disks[r.installed_disk_id].label if r.installed_disk_id and r.installed_disk_id in disks else '—' }}</td>
+        <td>{{ r.note or '' }}</td>
+      </tr>
+    {% else %}<tr><td colspan="5" class="muted">Операций ещё не было.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

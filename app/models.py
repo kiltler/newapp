@@ -289,3 +289,64 @@ class AlertState(Base):
     )
     resolved_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     context: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+# ── Модуль «Автобусы» (ручной офлайн-учёт дисковой ротации) ──────────────────
+class DiskStatus:
+    INSTALLED = "installed"          # стоит в автобусе
+    REMOVED_REVIEW = "removed_review"  # снят, на просмотре
+    READY = "ready"                  # просмотрен/готов к установке (резерв)
+    FAULTY = "faulty"                # неисправен/списан
+
+
+class DiskType:
+    SSD = "SSD"
+    HDD = "HDD"
+
+
+class Bus(Base):
+    """Автобусный видеорегистратор (только ручной учёт, без сети)."""
+
+    __tablename__ = "buses"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    bus_number: Mapped[str] = mapped_column(String(64))
+    route: Mapped[str | None] = mapped_column(String(64), default=None)
+    dvr_model: Mapped[str | None] = mapped_column(String(128), default=None)
+    installed_disk_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    installed_since: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    problem_note: Mapped[str | None] = mapped_column(Text, default=None)
+    has_problem: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class Disk(Base):
+    """Съёмный диск автобусного регистратора."""
+
+    __tablename__ = "disks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    label: Mapped[str] = mapped_column(String(64))
+    type: Mapped[str] = mapped_column(String(8), default=DiskType.SSD)
+    capacity_gb: Mapped[int | None] = mapped_column(Integer, default=None)
+    status: Mapped[str] = mapped_column(String(20), default=DiskStatus.READY)
+    assigned_bus_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    status_since: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    note: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SwapLog(Base):
+    """Журнал замен дисков по автобусам."""
+
+    __tablename__ = "swap_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    date: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    bus_id: Mapped[int] = mapped_column(Integer)
+    removed_disk_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    installed_disk_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    note: Mapped[str | None] = mapped_column(Text, default=None)
