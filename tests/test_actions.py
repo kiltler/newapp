@@ -29,3 +29,13 @@ async def test_sync_time(api, nvr):
 async def test_reboot(api, nvr):
     client = make_driver(api, nvr)
     await client.reboot()  # не должно бросить исключение
+
+
+async def test_health_hikvision(nvr):
+    nvr.temperature_c = 52.0
+    nvr.cpu_percent = 33
+    client = make_driver("hikvision", nvr)
+    h = await client.get_health()
+    assert h.temperature_c == 52.0
+    assert h.cpu_percent == 33
+    assert h.memory_percent is not None

@@ -33,6 +33,45 @@
   </tbody>
 </table>
 
+<h2>Потеряно часов записи ({{ days }} дн.)</h2>
+<table class="grid">
+  <thead><tr><th>Объект</th><th>Канал</th><th>Имя</th><th>Потеряно, ч</th></tr></thead>
+  <tbody>
+  {% for r in lost_rows %}
+    <tr><td>{{ r.device }}</td><td>{{ r.channel }}</td><td>{{ r.name or '—' }}</td>
+        <td><b>{{ r.hours }}</b></td></tr>
+  {% else %}<tr><td colspan="4" class="muted">Нет данных (архив проверяется суточной задачей).</td></tr>{% endfor %}
+  </tbody>
+</table>
+
+<h2>Heatmap аптайма (инциденты по дням)</h2>
+{% if heatmap %}
+<div class="calendar-wrap">
+<table class="calendar">
+  <thead><tr><th>Камера</th>
+    {% for d in hm_days %}<th class="day">{{ d.strftime('%d') }}</th>{% endfor %}
+  </tr></thead>
+  <tbody>
+  {% for row in heatmap %}
+    <tr>
+      <td title="{{ row.device }}">{{ row.channel }}. {{ row.name or '—' }}</td>
+      {% for n in row.days %}
+        <td class="cal {{ 'hm0' if n==0 else ('hm1' if n<=1 else ('hm2' if n<=3 else 'hm3')) }}"
+            title="{{ n }} инц."></td>
+      {% endfor %}
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<div class="legend">
+  <span class="cal hm0"></span> ок
+  <span class="cal hm1"></span> 1
+  <span class="cal hm2"></span> 2–3
+  <span class="cal hm3"></span> 4+
+</div>
+{% else %}<p class="muted">Инцидентов по камерам за период нет 🎉</p>{% endif %}
+
 <h2>Лента событий</h2>
 <table class="grid">
   <thead><tr><th>Время</th><th>Уровень</th><th>Сообщение</th></tr></thead>

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}QR-наклейки — NVR Monitor{% endblock %}
+{% block content %}
+<div class="noprint">
+  <h1>QR-наклейки на оборудование</h1>
+  <p class="muted">Распечатай, наклей на NVR. Скан телефоном → мобильная карточка устройства.</p>
+  <button onclick="window.print()">🖨 Печать</button>
+</div>
+<div class="labels">
+  {% for d in devices %}
+    <div class="label">
+      <img src="/api/devices/{{ d.id }}/qr.png" alt="QR">
+      <div class="label-name">{{ d.name }}</div>
+      <div class="label-host muted">{{ d.host }} · {{ d.model or '' }}</div>
+    </div>
+  {% else %}
+    <p class="muted">Устройств нет.</p>
+  {% endfor %}
+</div>
+{% endblock %}

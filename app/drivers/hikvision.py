@@ -15,6 +15,7 @@ from app.drivers.base import (
     DeviceInfo,
     FeatureUnavailable,
     HddInfo,
+    HealthInfo,
     NVRClient,
 )
 from app.models import ApiType, HddState
@@ -254,3 +255,31 @@ class HikvisionClient(NVRClient):
         resp = await self._request("PUT", "/ISAPI/System/reboot")
         if resp.status_code not in (200, 201):
             raise FeatureUnavailable(f"reboot: HTTP {resp.status_code}")
+
+    async def get_health(self) -> HealthInfo:
+        resp = await self._request("GET", "/ISAPI/System/status")
+        if resp.status_code != 200:
+            raise FeatureUnavailable(f"status: HTTP {resp.status_code}")
+        root = _strip_ns(_body(resp))
+        # CPU: среднее по всем ядрам
+        cpus = [int(e.text) for e in root.findall(".//cpuUtilization") if e is not None and e.text]
+        cpu = round(sum(cpus) / len(cpus), 1) if cpus else None
+        # Память: usage / (usage + available)
+        usage = root.find(".//memoryUsage")
+        avail = root.find(".//memoryAvailable")
+        mem = None
+        try:
+            if usage is not None and avail is not None and usage.text and avail.text:
+                u, a = float(usage.text), float(avail.text)
+                if u + a > 0:
+                    mem = round(u / (u + a) * 100, 1)
+        except ValueError:
+            mem = None
+        temp_el = root.find(".//temperature")
+        temp = None
+        if temp_el is not None and temp_el.text:
+            try:
+                temp = float(temp_el.text)
+            except ValueError:
+                temp = None
+        return HealthInfo(cpu_percent=cpu, memory_percent=mem, temperature_c=temp)

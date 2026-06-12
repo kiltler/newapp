@@ -6,6 +6,7 @@ from app.drivers.base import (
     DeviceInfo,
     DeviceTime,
     HddInfo,
+    HealthInfo,
     NVRClient,
     NVRAuthError,
     NVRConnectionError,
@@ -25,6 +26,7 @@ __all__ = [
     "Capabilities",
     "DeviceTime",
     "DeviceInfo",
+    "HealthInfo",
     "build_client",
     "detect_api_type",
 ]

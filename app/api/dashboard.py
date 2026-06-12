@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import crud
 from app.api.monitoring import archive_calendar, summary
 from app.database import get_session
-from app.models import ChannelState, Group, PlanMarker
+from app.models import ArchiveCoverage, AuditLog, ChannelState, Group, PlanMarker
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -97,10 +97,46 @@ async def history(request: Request, session: AsyncSession = Depends(get_session)
          "name": cname.get((did, cid), ""), "count": n}
         for (did, cid), n in top
     ]
+
+    # KPI: потеряно часов записи за период (из суточного покрытия архива)
+    cov = (
+        await session.execute(
+            select(ArchiveCoverage).where(ArchiveCoverage.day >= since.date())
+        )
+    ).scalars().all()
+    lost: dict[tuple, int] = {}
+    for r in cov:
+        lost_min = max(1440 - r.recorded_minutes, 0)
+        k = (r.device_id, r.channel_id)
+        lost[k] = lost.get(k, 0) + lost_min
+    lost_rows = sorted(
+        [{"device": dname.get(d, d), "channel": c, "name": cname.get((d, c), ""),
+          "hours": round(m / 60, 1)} for (d, c), m in lost.items() if m > 0],
+        key=lambda r: -r["hours"],
+    )[:20]
+
+    # Heatmap аптайма: камера × день, цвет по числу инцидентов
+    hm_days = [(since.date() + dt.timedelta(days=i)) for i in range(days + 1)]
+    hm_day_iso = [d.isoformat() for d in hm_days]
+    hm: dict[tuple, dict[str, int]] = {}
+    for e in period:
+        if e.device_id and e.channel_id is not None and e.type in (
+            "camera_down", "bad_image", "camera_removed"
+        ):
+            k = (e.device_id, e.channel_id)
+            day = e.created_at.replace(tzinfo=None).date().isoformat()
+            hm.setdefault(k, {})[day] = hm.get(k, {}).get(day, 0) + 1
+    heatmap = [
+        {"device": dname.get(d, d), "channel": c, "name": cname.get((d, c), ""),
+         "days": [hm[(d, c)].get(di, 0) for di in hm_day_iso]}
+        for (d, c) in sorted(hm.keys())
+    ]
+
     return templates.TemplateResponse(
         "history.html",
         {"request": request, "by_day": by_day, "max_day": max_day,
-         "top_rows": top_rows, "events": period[:60], "days": days},
+         "top_rows": top_rows, "events": period[:60], "days": days,
+         "lost_rows": lost_rows, "heatmap": heatmap, "hm_days": hm_days},
     )
 
 
@@ -136,6 +172,61 @@ async def plan_page(request: Request, session: AsyncSession = Depends(get_sessio
         "plan.html",
         {"request": request, "devices_json": devices_json,
          "markers": marker_rows, "has_image": has_image},
+    )
+
+
+@router.get("/firmware", response_class=HTMLResponse)
+async def firmware_page(request: Request, session: AsyncSession = Depends(get_session)):
+    devices = await crud.list_devices(session)
+    models: dict[str, dict] = {}
+    for d in devices:
+        model = d.model or "неизвестно"
+        m = models.setdefault(model, {"devices": [], "firmwares": set()})
+        m["devices"].append(d)
+        m["firmwares"].add(d.firmware or "—")
+    rows = [
+        {"model": model, "devices": data["devices"],
+         "mixed": len(data["firmwares"]) > 1}
+        for model, data in sorted(models.items())
+    ]
+    return templates.TemplateResponse(
+        "firmware.html", {"request": request, "rows": rows}
+    )
+
+
+@router.get("/calc", response_class=HTMLResponse)
+async def storage_calc(request: Request):
+    return templates.TemplateResponse("calc.html", {"request": request})
+
+
+@router.get("/audit", response_class=HTMLResponse)
+async def audit_page(request: Request, session: AsyncSession = Depends(get_session)):
+    rows = (
+        await session.execute(
+            select(AuditLog).order_by(AuditLog.created_at.desc()).limit(300)
+        )
+    ).scalars().all()
+    return templates.TemplateResponse("audit.html", {"request": request, "rows": rows})
+
+
+@router.get("/labels", response_class=HTMLResponse)
+async def labels_page(request: Request, session: AsyncSession = Depends(get_session)):
+    devices = await crud.list_devices(session)
+    return templates.TemplateResponse("labels.html", {"request": request, "devices": devices})
+
+
+@router.get("/m/{device_id}", response_class=HTMLResponse)
+async def mobile_device(
+    device_id: int, request: Request, session: AsyncSession = Depends(get_session)
+):
+    device = await crud.get_device(session, device_id)
+    if device is None:
+        return HTMLResponse("Устройство не найдено", status_code=404)
+    events = await crud.list_events(session, device_id=device_id, limit=15)
+    channels = sorted(device.channels, key=lambda c: c.channel_id)
+    return templates.TemplateResponse(
+        "mobile.html",
+        {"request": request, "device": device, "channels": channels, "events": events},
     )
 
 

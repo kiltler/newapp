@@ -208,6 +208,19 @@ def make_mock_app(nvr: MockNVR | None = None, profile: str = "both") -> FastAPI:
             return _xml("<ResponseStatus><statusCode>1</statusCode>"
                         "<statusString>OK</statusString></ResponseStatus>")
 
+        @app.get("/ISAPI/System/status")
+        async def sys_status(request: Request):
+            n = state()
+            require_auth(request, n.username, n.password)
+            return _xml(
+                "<DeviceStatus><deviceUpTime>123456</deviceUpTime>"
+                f"<CPUList><CPU><cpuDescription>cpu</cpuDescription>"
+                f"<cpuUtilization>{n.cpu_percent}</cpuUtilization></CPU></CPUList>"
+                f"<MemoryList><Memory><memoryUsage>{n.memory_used}</memoryUsage>"
+                f"<memoryAvailable>{n.memory_avail}</memoryAvailable></Memory></MemoryList>"
+                f"<temperature>{n.temperature_c}</temperature></DeviceStatus>"
+            )
+
         @app.get("/ISAPI/Streaming/channels/{cid}/picture")
         async def picture(request: Request, cid: int):
             n = state()

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ device.name }}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="mobile">
+  <div class="m-head">
+    <b>{{ device.name }}</b>
+    <span class="badge {{ 'ok' if device.reachable else 'err' }}">{{ 'онлайн' if device.reachable else 'недоступен' }}</span>
+  </div>
+  <div class="m-actions">
+    <button onclick="act('poll')">Опросить</button>
+    <button onclick="act('sync-time')">Синхр. время</button>
+    <button class="danger" onclick="act('reboot')">Перезагрузить</button>
+  </div>
+
+  <h3>Камеры</h3>
+  <div class="m-cams">
+    {% for c in channels %}
+      {% set m = {'online':'ok','offline':'err','no_video':'warn','unknown':'muted'} %}
+      <div class="m-cam">
+        <img loading="lazy" src="/api/devices/{{ device.id }}/channels/{{ c.channel_id }}/snapshot">
+        <div><span class="badge {{ m[c.status] }}">{{ c.status }}</span> {{ c.channel_id }}. {{ c.name or '—' }}</div>
+      </div>
+    {% endfor %}
+  </div>
+
+  <h3>Последние события</h3>
+  <ul class="m-events">
+    {% for e in events %}
+      <li><span class="muted">{{ e.created_at.strftime('%d.%m %H:%M') }}</span> {{ e.message }}</li>
+    {% else %}<li class="muted">Событий нет.</li>{% endfor %}
+  </ul>
+
+  <h3>Быстрая заметка</h3>
+  <form id="note-form" class="m-note">
+    <input id="note-text" placeholder="что сделал на объекте" required>
+    <button type="submit">Сохранить</button>
+  </form>
+
+<script>
+const ID = {{ device.id }};
+async function act(a) {
+  const r = await fetch(`/api/devices/${ID}/${a}`, { method: "POST" });
+  alert(r.ok ? "Готово" : "Ошибка");
+  if (a === "poll") location.reload();
+}
+document.getElementById("note-form").onsubmit = async (e) => {
+  e.preventDefault();
+  await fetch(`/api/devices/${ID}/notes`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: document.getElementById("note-text").value }),
+  });
+  e.target.reset(); alert("Заметка сохранена");
+};
+</script>
+</body>
+</html>

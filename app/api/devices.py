@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,7 +12,7 @@ from app.database import get_session
 from app.drivers import build_client, detect_api_type
 from app.drivers.base import NVRError
 from app.models import ApiType, Channel, Device, Note
-from app.services import archive, poller, quality
+from app.services import archive, audit, poller, quality
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["devices"])
@@ -72,11 +72,15 @@ async def put_device(
 
 
 @router.delete("/devices/{device_id}")
-async def remove_device(device_id: int, session: AsyncSession = Depends(get_session)):
+async def remove_device(
+    device_id: int, request: Request, session: AsyncSession = Depends(get_session)
+):
     device = await crud.get_device(session, device_id)
     if device is None:
         raise HTTPException(404, "Устройство не найдено")
+    name = device.name
     await crud.delete_device(session, device)
+    await audit.log_action(session, request, "delete_device", target=name)
     return {"ok": True}
 
 
@@ -145,6 +149,21 @@ async def channel_snapshot(
     return Response(content=data, media_type="image/jpeg")
 
 
+@router.get("/devices/{device_id}/qr.png")
+async def device_qr(device_id: int, request: Request):
+    """QR-код со ссылкой на мобильную карточку устройства (для наклейки)."""
+    import io
+
+    import qrcode
+
+    base = str(request.base_url).rstrip("/")
+    url = f"{base}/m/{device_id}"
+    img = qrcode.make(url)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return Response(content=buf.getvalue(), media_type="image/png")
+
+
 @router.get("/devices/{device_id}/raw")
 async def raw_request(
     device_id: int, path: str, session: AsyncSession = Depends(get_session)
@@ -171,7 +190,9 @@ async def raw_request(
 
 
 @router.post("/devices/{device_id}/sync-time")
-async def sync_time(device_id: int, session: AsyncSession = Depends(get_session)):
+async def sync_time(
+    device_id: int, request: Request, session: AsyncSession = Depends(get_session)
+):
     device = await crud.get_device(session, device_id)
     if device is None:
         raise HTTPException(404, "Устройство не найдено")
@@ -180,13 +201,16 @@ async def sync_time(device_id: int, session: AsyncSession = Depends(get_session)
         await client.sync_time()
     except NVRError as exc:
         raise HTTPException(502, f"Не удалось синхронизировать время: {exc}")
+    await audit.log_action(session, request, "sync_time", target=device.name)
     # сразу пересчитаем дрейф
     await poller.poll_device(device_id)
     return {"ok": True}
 
 
 @router.post("/devices/{device_id}/reboot")
-async def reboot_device(device_id: int, session: AsyncSession = Depends(get_session)):
+async def reboot_device(
+    device_id: int, request: Request, session: AsyncSession = Depends(get_session)
+):
     device = await crud.get_device(session, device_id)
     if device is None:
         raise HTTPException(404, "Устройство не найдено")
@@ -195,6 +219,7 @@ async def reboot_device(device_id: int, session: AsyncSession = Depends(get_sess
         await client.reboot()
     except NVRError as exc:
         raise HTTPException(502, f"Не удалось перезагрузить: {exc}")
+    await audit.log_action(session, request, "reboot", target=device.name)
     return {"ok": True}
 
 
@@ -220,7 +245,8 @@ async def quality_check_now(device_id: int, session: AsyncSession = Depends(get_
 
 @router.post("/devices/{device_id}/channels/{channel_id}/toggle")
 async def toggle_channel(
-    device_id: int, channel_id: int, session: AsyncSession = Depends(get_session)
+    device_id: int, channel_id: int, request: Request,
+    session: AsyncSession = Depends(get_session),
 ):
     """Включить/выключить мониторинг канала (заглушка)."""
     ch = (
@@ -234,6 +260,11 @@ async def toggle_channel(
         raise HTTPException(404, "Канал не найден")
     ch.enabled = not ch.enabled
     await session.commit()
+    await audit.log_action(
+        session, request, "toggle_channel",
+        target=f"устройство {device_id} канал {channel_id}",
+        detail="включён" if ch.enabled else "заглушён",
+    )
     return {"ok": True, "enabled": ch.enabled}
 
 
@@ -283,15 +314,22 @@ async def _bulk_targets(session: AsyncSession, group_id: int | None) -> list[int
 
 
 @router.post("/bulk/poll")
-async def bulk_poll(group_id: int | None = None, session: AsyncSession = Depends(get_session)):
+async def bulk_poll(
+    request: Request, group_id: int | None = None,
+    session: AsyncSession = Depends(get_session),
+):
     ids = await _bulk_targets(session, group_id)
     for did in ids:
         await poller.poll_device(did)
+    await audit.log_action(session, request, "bulk_poll", detail=f"{len(ids)} устройств")
     return {"ok": True, "count": len(ids)}
 
 
 @router.post("/bulk/sync-time")
-async def bulk_sync_time(group_id: int | None = None, session: AsyncSession = Depends(get_session)):
+async def bulk_sync_time(
+    request: Request, group_id: int | None = None,
+    session: AsyncSession = Depends(get_session),
+):
     ids = await _bulk_targets(session, group_id)
     done = 0
     for did in ids:
@@ -301,7 +339,24 @@ async def bulk_sync_time(group_id: int | None = None, session: AsyncSession = De
             done += 1
         except NVRError:
             pass
+    await audit.log_action(session, request, "bulk_sync_time", detail=f"{done}/{len(ids)}")
     return {"ok": True, "synced": done, "total": len(ids)}
+
+
+@router.get("/audit")
+async def audit_log(limit: int = 200, session: AsyncSession = Depends(get_session)):
+    from app.models import AuditLog
+
+    rows = (
+        await session.execute(
+            select(AuditLog).order_by(AuditLog.created_at.desc()).limit(limit)
+        )
+    ).scalars().all()
+    return [
+        {"user": r.user, "action": r.action, "target": r.target,
+         "detail": r.detail, "created_at": r.created_at.isoformat()}
+        for r in rows
+    ]
 
 
 @router.post("/devices/{device_id}/recheck", response_model=schemas.DeviceDetail)

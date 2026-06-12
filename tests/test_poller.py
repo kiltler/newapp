@@ -132,6 +132,26 @@ async def test_camera_add_remove_events(db, monkeypatch):
         assert 2 in removed
 
 
+async def test_overheat_alert(db, monkeypatch):
+    nvr = MockNVR.default(channels=1)
+    nvr.temperature_c = 90.0  # перегрев
+    _patch_build_client(monkeypatch, nvr)
+    async with SessionLocal() as session:
+        device_id = await _make_device(session)
+
+    await poller.poll_device(device_id)
+
+    async with SessionLocal() as session:
+        device = (await session.execute(select(Device).where(Device.id == device_id))).scalar_one()
+        alert = (
+            await session.execute(
+                select(AlertState).where(AlertState.scope_key == f"device:{device_id}:overheat")
+            )
+        ).scalar_one_or_none()
+        assert device.temperature == 90.0
+        assert alert is not None and alert.active is True
+
+
 async def test_archive_depth_measured(db, monkeypatch):
     from app.services import archive as archive_mod
 

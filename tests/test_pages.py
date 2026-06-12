@@ -59,7 +59,17 @@ async def test_plan_markers(db):
 async def test_pages_render(db):
     did = await _make_device()
     async with _client() as c:
-        for path in ["/", "/tv", "/history", "/plan",
+        for path in ["/", "/tv", "/history", "/plan", "/firmware", "/calc",
+                     "/audit", "/labels", f"/m/{did}",
                      f"/devices/{did}", f"/devices/{did}/report", f"/devices/{did}/wall"]:
             r = await c.get(path)
             assert r.status_code == 200, f"{path} -> {r.status_code}"
+
+
+async def test_qr_png(db):
+    did = await _make_device()
+    async with _client() as c:
+        r = await c.get(f"/api/devices/{did}/qr.png")
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "image/png"
+        assert r.content[:8] == b"\x89PNG\r\n\x1a\n"

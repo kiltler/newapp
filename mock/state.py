@@ -43,6 +43,12 @@ class MockNVR:
     # Сдвиг часов устройства относительно сервера (сек) — для теста дрейфа времени
     time_offset_seconds: int = 0
 
+    # Телеметрия здоровья (для проверки температуры/нагрузки)
+    cpu_percent: int = 18
+    memory_used: int = 400
+    memory_avail: int = 600
+    temperature_c: float = 46.0
+
     # Какие фичи "урезаны" (для эмуляции HiWatch / старых прошивок)
     disabled_features: set[str] = field(default_factory=set)
 

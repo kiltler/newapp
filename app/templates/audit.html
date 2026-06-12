@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Аудит действий — NVR Monitor{% endblock %}
+{% block content %}
+<h1>Журнал действий в панели</h1>
+<table class="grid">
+  <thead><tr><th>Время</th><th>Пользователь</th><th>Действие</th><th>Объект</th><th>Детали</th></tr></thead>
+  <tbody>
+  {% set names = {'reboot':'Перезагрузка','sync_time':'Синхр. время','toggle_channel':'Заглушка канала',
+    'delete_device':'Удаление устройства','bulk_poll':'Массовый опрос','bulk_sync_time':'Массовая синхр.'} %}
+  {% for r in rows %}
+    <tr>
+      <td class="muted">{{ r.created_at.strftime('%d.%m %H:%M:%S') }}</td>
+      <td>{{ r.user }}</td>
+      <td>{{ names.get(r.action, r.action) }}</td>
+      <td>{{ r.target or '—' }}</td>
+      <td class="muted">{{ r.detail or '' }}</td>
+    </tr>
+  {% else %}<tr><td colspan="5" class="muted">Действий пока нет.</td></tr>{% endfor %}
+  </tbody>
+</table>
+{% endblock %}

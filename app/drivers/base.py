@@ -86,6 +86,13 @@ class ArchiveSegment:
 
 
 @dataclass
+class HealthInfo:
+    cpu_percent: float | None = None
+    memory_percent: float | None = None
+    temperature_c: float | None = None
+
+
+@dataclass
 class DeviceTime:
     device_time: dt.datetime
     server_time: dt.datetime
@@ -238,6 +245,10 @@ class NVRClient(abc.ABC):
     async def reboot(self) -> None:
         """Перезагружает устройство."""
         raise FeatureUnavailable("перезагрузка не поддерживается")
+
+    async def get_health(self) -> "HealthInfo":
+        """Возвращает температуру/нагрузку устройства, если доступно."""
+        raise FeatureUnavailable("телеметрия здоровья не поддерживается")
 
     async def test_connection(self) -> DeviceInfo:
         """Базовый тест: получить инфо об устройстве (бросает при ошибке)."""

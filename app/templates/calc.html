@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Калькулятор хранилища — NVR Monitor{% endblock %}
+{% block content %}
+<h1>Калькулятор хранилища</h1>
+<p class="muted">Прикидка нужного объёма дисков под заданную глубину архива.</p>
+
+<div class="calc">
+  <label>Камер, шт <input id="c-cams" type="number" value="16"></label>
+  <label>Битрейт на камеру, Мбит/с <input id="c-br" type="number" value="4" step="0.5"></label>
+  <label>Часов записи в сутки <input id="c-hours" type="number" value="24"></label>
+  <label>Глубина архива, дней <input id="c-days" type="number" value="30"></label>
+  <label>Запас на сбои, % <input id="c-spare" type="number" value="10"></label>
+</div>
+<h2 id="calc-out">—</h2>
+<p class="muted">Формула: камеры × битрейт(Мбит/с) ÷ 8 × 3600 × часов × дней → ГБ (+ запас).</p>
+
+<script>
+function calc() {
+  const cams = +document.getElementById("c-cams").value;
+  const br = +document.getElementById("c-br").value;
+  const hours = +document.getElementById("c-hours").value;
+  const days = +document.getElementById("c-days").value;
+  const spare = +document.getElementById("c-spare").value;
+  // Мбит/с -> МБ/с = /8; * сек * часов * дней
+  const gb = cams * br / 8 * 3600 * hours * days / 1024 * (1 + spare / 100);
+  const tb = gb / 1024;
+  document.getElementById("calc-out").textContent =
+    `Нужно ≈ ${tb.toFixed(2)} ТБ (${Math.round(gb)} ГБ)`;
+}
+document.querySelectorAll(".calc input").forEach(i => i.addEventListener("input", calc));
+calc();
+</script>
+{% endblock %}

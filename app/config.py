@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     quality_blur_threshold: float = 15.0    # резкость (дисперсия лапласиана) ниже → расфокус
     quality_frozen_diff: float = 1.0        # отличие кадров меньше → зависший поток
 
+    # Здоровье железа NVR
+    temp_alert_celsius: float = 65.0        # температура выше → алерт
+    cpu_alert_percent: float = 95.0         # загрузка CPU выше → алерт
+
     # Сеть
     default_http_timeout: float = 15.0
     default_http_retries: int = 2

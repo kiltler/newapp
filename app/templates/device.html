@@ -27,6 +27,9 @@
   <div><b>Доступен:</b> {% if device.reachable %}<span class="badge ok">да</span>{% else %}<span class="badge err">нет</span>{% endif %}</div>
   <div><b>Дрейф времени:</b>
     {% if device.time_drift_seconds is not none %}{{ device.time_drift_seconds }} с{% else %}—{% endif %}</div>
+  <div><b>Темп. / CPU:</b>
+    {% if device.temperature is not none %}{{ device.temperature }}°C{% else %}—{% endif %} /
+    {% if device.cpu_load is not none %}{{ device.cpu_load }}%{% else %}—{% endif %}</div>
   <div><b>Возможности:</b>
     {% for k, v in device.capabilities.items() %}
       <span class="badge {{ 'ok' if v else 'err' }}">{{ k }}{{ '✓' if v else '✗' }}</span>

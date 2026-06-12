@@ -114,6 +114,46 @@ async def _poll_one(session: AsyncSession, device: Device) -> None:
         except NVRError as exc:
             log.debug("Время %s: %s", device.id, exc)
 
+    # ── Здоровье железа (температура/нагрузка) ─────────────────────────────────
+    try:
+        health = await client.get_health()
+        await _check_health(session, device, health)
+    except NVRError as exc:
+        log.debug("Health %s: %s", device.id, exc)
+
+
+async def _check_health(session: AsyncSession, device: Device, health) -> None:
+    device.cpu_load = health.cpu_percent
+    device.memory_usage = health.memory_percent
+    device.temperature = health.temperature_c
+
+    scope = f"device:{device.id}:overheat"
+    if health.temperature_c is not None and health.temperature_c >= settings.temp_alert_celsius:
+        await alerts.raise_alert(
+            session, scope_key=scope, alert_type="overheat", severity=Severity.CRITICAL,
+            device_id=device.id,
+            message=f"«{device.name}»: перегрев NVR — {health.temperature_c}°C",
+        )
+    elif health.temperature_c is not None:
+        await alerts.resolve_alert(
+            session, scope_key=scope, device_id=device.id,
+            message=f"«{device.name}»: температура в норме ({health.temperature_c}°C)",
+        )
+
+    cpu_scope = f"device:{device.id}:cpu"
+    if health.cpu_percent is not None and health.cpu_percent >= settings.cpu_alert_percent:
+        await alerts.raise_alert(
+            session, scope_key=cpu_scope, alert_type="high_cpu", severity=Severity.WARNING,
+            device_id=device.id,
+            message=f"«{device.name}»: высокая загрузка CPU — {health.cpu_percent}%",
+        )
+    elif health.cpu_percent is not None:
+        await alerts.resolve_alert(
+            session, scope_key=cpu_scope, device_id=device.id,
+            message=f"«{device.name}»: загрузка CPU в норме ({health.cpu_percent}%)",
+            notify=False,
+        )
+
 
 # ── Доступность устройства ─────────────────────────────────────────────────────
 async def _handle_unreachable(session: AsyncSession, device: Device, error: str) -> None:

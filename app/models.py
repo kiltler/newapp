@@ -113,6 +113,11 @@ class Device(Base):
     last_error: Mapped[str | None] = mapped_column(Text, default=None)
     time_drift_seconds: Mapped[int | None] = mapped_column(Integer, default=None)
 
+    # Здоровье железа (температура/нагрузка), если NVR отдаёт
+    cpu_load: Mapped[float | None] = mapped_column(Float, default=None)
+    memory_usage: Mapped[float | None] = mapped_column(Float, default=None)
+    temperature: Mapped[float | None] = mapped_column(Float, default=None)
+
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
@@ -247,6 +252,19 @@ class PlanMarker(Base):
     label: Mapped[str | None] = mapped_column(String(255), default=None)
     x: Mapped[float] = mapped_column(Float, default=50.0)
     y: Mapped[float] = mapped_column(Float, default=50.0)
+
+
+class AuditLog(Base):
+    """Журнал действий оператора в панели (кто, что, когда)."""
+
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user: Mapped[str] = mapped_column(String(64), default="—")
+    action: Mapped[str] = mapped_column(String(64))
+    target: Mapped[str | None] = mapped_column(String(255), default=None)
+    detail: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class AlertState(Base):
