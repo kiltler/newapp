@@ -315,6 +315,7 @@ class Bus(Base):
     dvr_model: Mapped[str | None] = mapped_column(String(128), default=None)
     installed_disk_id: Mapped[int | None] = mapped_column(Integer, default=None)
     installed_since: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    collect_weekday: Mapped[int | None] = mapped_column(Integer, default=None)  # день недели сбора 0=Пн
     problem_note: Mapped[str | None] = mapped_column(Text, default=None)
     has_problem: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -335,6 +336,8 @@ class Disk(Base):
     status: Mapped[str] = mapped_column(String(20), default=DiskStatus.READY)
     assigned_bus_id: Mapped[int | None] = mapped_column(Integer, default=None)
     status_since: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    location: Mapped[str] = mapped_column(String(16), default="shelf")  # где физически
+    last_audit_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     note: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -393,3 +396,22 @@ OBSERVATION_TAGS = [
     "нет записи", "дыра в записи", "камера замазана",
     "нет звука", "засвет/темно", "ок",
 ]
+
+
+class DiskLocation:
+    IN_BUS = "in_bus"        # в автобусе (в регистраторе)
+    REVIEWER = "reviewer"    # у смотрящего (на просмотре)
+    SHELF = "shelf"          # на полке (резерв)
+    TRANSIT = "transit"      # в пути
+    SAFE = "safe"            # в сейфе/хранилище
+
+
+DISK_LOCATIONS = {
+    DiskLocation.IN_BUS: "в автобусе",
+    DiskLocation.REVIEWER: "у смотрящего",
+    DiskLocation.SHELF: "на полке",
+    DiskLocation.TRANSIT: "в пути",
+    DiskLocation.SAFE: "в сейфе",
+}
+
+WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]

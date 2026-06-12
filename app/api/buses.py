@@ -20,9 +20,12 @@ from app import schemas
 from app.config import settings
 from app.database import get_session
 from app.models import (
+    DISK_LOCATIONS,
     OBSERVATION_TAGS,
+    WEEKDAYS,
     Bus,
     Disk,
+    DiskLocation,
     DiskReview,
     DiskStatus,
     SwapLog,
@@ -188,6 +191,7 @@ async def disk_reviewed(disk_id: int, session: AsyncSession = Depends(get_sessio
         raise HTTPException(400, "Просмотренным можно пометить только диск 'на просмотре'")
     disk.status = DiskStatus.READY
     disk.status_since = utcnow()
+    disk.location = DiskLocation.SHELF  # готов → на полке (резерв)
     await session.commit()
     return {"ok": True}
 
@@ -218,10 +222,12 @@ async def _perform_swap(session: AsyncSession, bus: Bus, new: Disk | None, note:
     if removed:
         removed.status = DiskStatus.REMOVED_REVIEW
         removed.status_since = now
+        removed.location = DiskLocation.REVIEWER  # снят → у смотрящего
     if new:
         new.status = DiskStatus.INSTALLED
         new.status_since = now
         new.assigned_bus_id = bus.id
+        new.location = DiskLocation.IN_BUS
         bus.installed_disk_id = new.id
         bus.installed_since = now
     else:
@@ -274,8 +280,21 @@ async def disk_restore(disk_id: int, session: AsyncSession = Depends(get_session
         raise HTTPException(400, "Вернуть в строй можно только неисправный диск")
     disk.status = DiskStatus.READY
     disk.status_since = utcnow()
+    disk.location = DiskLocation.SHELF
     await session.commit()
     return {"ok": True}
+
+
+@router.post("/api/disks/audit")
+async def disks_audit(data: schemas.AuditRequest, session: AsyncSession = Depends(get_session)):
+    """Ревизия: отметить подтверждённые (физически найденные) диски."""
+    now = utcnow()
+    ids = set(data.present_ids)
+    for d in await _disks(session):
+        if d.id in ids:
+            d.last_audit_at = now
+    await session.commit()
+    return {"ok": True, "confirmed": len(ids)}
 
 
 @router.post("/api/disks/{disk_id}/review")
@@ -409,7 +428,7 @@ async def swaplog_page(request: Request, bus_id: int | None = None, disk_id: int
 
 
 @router.get("/buses/collection", response_class=HTMLResponse)
-async def collection_page(request: Request, session: AsyncSession = Depends(get_session)):
+async def collection_page(request: Request, today: int = 0, session: AsyncSession = Depends(get_session)):
     """День сбора дисков: быстрый проход по списку с заменой в один клик."""
     buses = list((await session.execute(select(Bus))).scalars())
     disks = await _disks(session)
@@ -417,16 +436,19 @@ async def collection_page(request: Request, session: AsyncSession = Depends(get_
     ready = [d for d in disks if d.status == DiskStatus.READY]
     swap_days, _ = await _thresholds(session)
 
-    today = dt.datetime.now().date()
+    today_date = dt.datetime.now().date()
+    today_wd = dt.datetime.now().weekday()
     swapped_today = set()
     for log in await _swaplog(session):
         d = log.date
         local = d.astimezone().replace(tzinfo=None) if d.tzinfo else d
-        if local.date() == today:
+        if local.date() == today_date:
             swapped_today.add(log.bus_id)
 
     rows = []
     for b in sorted(buses, key=lambda b: (_nat(b.route), _nat(b.bus_number))):
+        if today and b.collect_weekday != today_wd:   # фильтр «сегодня к сбору»
+            continue
         color, reason = bus_status(b, disks, swap_days)
         rows.append({
             "bus": b, "color": color, "reason": reason,
@@ -434,9 +456,22 @@ async def collection_page(request: Request, session: AsyncSession = Depends(get_
             "done": b.id in swapped_today,
             "ready": sorted(ready, key=lambda d: 0 if d.assigned_bus_id == b.id else 1),
         })
+    planned_today = sum(1 for b in buses if b.collect_weekday == today_wd)
     return templates.TemplateResponse("collection.html", {
-        "request": request, "rows": rows,
-        "total": len(buses), "done": len(swapped_today),
+        "request": request, "rows": rows, "today_only": bool(today),
+        "total": len(rows), "done": sum(1 for r in rows if r["done"]),
+        "planned_today": planned_today, "weekday": WEEKDAYS[today_wd],
+    })
+
+
+@router.get("/buses/plan", response_class=HTMLResponse)
+async def plan_page(request: Request, session: AsyncSession = Depends(get_session)):
+    buses = sorted(
+        (await session.execute(select(Bus))).scalars(),
+        key=lambda b: (_nat(b.route), _nat(b.bus_number)),
+    )
+    return templates.TemplateResponse("plan.html", {
+        "request": request, "buses": buses, "weekdays": WEEKDAYS,
     })
 
 
@@ -557,5 +592,42 @@ async def disks_page(request: Request, status: str = "", q: str = "",
     disks = sorted(disks, key=lambda d: (d.status, d.label))
     return templates.TemplateResponse("disks.html", {
         "request": request, "disks": disks, "buses": buses, "status": status,
-        "q": q, "dup_labels": dup_labels,
+        "q": q, "dup_labels": dup_labels, "locations": DISK_LOCATIONS,
+    })
+
+
+@router.get("/disks/audit", response_class=HTMLResponse)
+async def disks_audit_page(request: Request, session: AsyncSession = Depends(get_session)):
+    """Ревизия: пройтись по дискам и подтвердить наличие; пропавшие подсветятся."""
+    disks = await _disks(session)
+    buses = {b.id: b.bus_number for b in (await session.execute(select(Bus))).scalars()}
+    now = utcnow()
+    items = []
+    for d in sorted(disks, key=lambda d: (d.status, d.label)):
+        age = None
+        if d.last_audit_at:
+            la = d.last_audit_at.astimezone().replace(tzinfo=None) if d.last_audit_at.tzinfo else d.last_audit_at
+            age = (dt.datetime.now() - la).days
+        items.append({"disk": d, "bus": buses.get(d.assigned_bus_id), "audit_age": age})
+    return templates.TemplateResponse("disks_audit.html", {
+        "request": request, "items": items, "locations": DISK_LOCATIONS,
+    })
+
+
+@router.get("/disks/{disk_id}/passport", response_class=HTMLResponse)
+async def disk_passport(disk_id: int, request: Request, session: AsyncSession = Depends(get_session)):
+    """Паспорт диска: вся жизнь — где стоял, кто снимал, что находили."""
+    disk = (await session.execute(select(Disk).where(Disk.id == disk_id))).scalar_one_or_none()
+    if disk is None:
+        return HTMLResponse("Диск не найден", status_code=404)
+    buses = {b.id: b for b in (await session.execute(select(Bus))).scalars()}
+    swaps = await _swaplog(session, disk_id=disk_id)
+    reviews = list((await session.execute(
+        select(DiskReview).where(DiskReview.disk_id == disk_id).order_by(DiskReview.created_at.desc())
+    )).scalars())
+    install_count = sum(1 for s in swaps if s.installed_disk_id == disk_id)
+    return templates.TemplateResponse("passport.html", {
+        "request": request, "disk": disk, "buses": buses, "swaps": swaps,
+        "reviews": reviews, "install_count": install_count,
+        "locations": DISK_LOCATIONS, "bus": buses.get(disk.assigned_bus_id),
     })

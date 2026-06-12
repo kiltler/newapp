@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Ревизия дисков{% endblock %}
+{% block content %}
+<div class="bus-scope">
+  <a href="/disks" class="muted">← к реестру</a>
+  <div class="bus-banner">
+    <div><span class="bus-ico">🧮</span> <b>Ревизия дисков</b></div>
+    <div>
+      <button class="bus-btn" onclick="checkAll()">Отметить все</button>
+      <button class="bus-btn" style="background:#2ecc71" onclick="saveAudit()">Сохранить ревизию</button>
+    </div>
+  </div>
+  <p class="muted">Пройдись по дискам и отметь те, что физически нашёл. Неотмеченные / давно не проверенные — подсвечены: возможно, потеряны.</p>
+
+  <table class="grid">
+    <thead><tr><th>✓</th><th>Метка</th><th>Тип</th><th>Статус</th><th>Где (по системе)</th><th>Автобус</th><th>Последняя ревизия</th></tr></thead>
+    <tbody>
+    {% set sl = {'installed':'установлен','ready':'резерв','removed_review':'на просмотре','faulty':'неисправен'} %}
+    {% for it in items %}
+      <tr class="{{ 'audit-stale' if it.audit_age is none or it.audit_age > 30 else '' }}">
+        <td><input type="checkbox" class="audit-chk" value="{{ it.disk.id }}"></td>
+        <td><a href="/disks/{{ it.disk.id }}/passport"><b>{{ it.disk.label }}</b></a></td>
+        <td>{{ it.disk.type }}</td>
+        <td>{{ sl.get(it.disk.status, it.disk.status) }}</td>
+        <td>{{ locations.get(it.disk.location, it.disk.location) }}</td>
+        <td>{{ it.bus or '—' }}</td>
+        <td class="muted">{% if it.audit_age is none %}никогда{% else %}{{ it.audit_age }} дн. назад{% endif %}</td>
+      </tr>
+    {% else %}<tr><td colspan="7" class="muted">Дисков нет.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+function checkAll(){ document.querySelectorAll(".audit-chk").forEach(c => c.checked = true); }
+async function saveAudit(){
+  const ids = [...document.querySelectorAll(".audit-chk:checked")].map(c => parseInt(c.value, 10));
+  const r = await fetch("/api/disks/audit", { method: "POST",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify({ present_ids: ids }) });
+  if (r.ok) { alert("Подтверждено дисков: " + (await r.json()).confirmed); location.reload(); }
+  else alert("Ошибка: " + (await r.text()));
+}
+</script>
+{% endblock %}

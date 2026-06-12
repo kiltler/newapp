@@ -169,6 +169,7 @@ class BusUpdate(BaseModel):
     dvr_model: str | None = None
     problem_note: str | None = None
     has_problem: bool | None = None
+    collect_weekday: int | None = None
 
 
 class DiskCreate(BaseModel):
@@ -186,6 +187,11 @@ class DiskUpdate(BaseModel):
     capacity_gb: int | None = None
     assigned_bus_id: int | None = None
     note: str | None = None
+    location: str | None = None
+
+
+class AuditRequest(BaseModel):
+    present_ids: list[int] = []
 
 
 class SwapRequest(BaseModel):

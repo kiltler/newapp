@@ -6,8 +6,13 @@
   <div class="bus-banner">
     <div><span class="bus-ico">📅</span> <b>День сбора дисков</b>
       <span class="badge-offline">Ручной учёт</span></div>
-    <a class="bus-btn" href="/api/buses/collection.csv">⬇ Ведомость CSV</a>
+    <div>
+      {% if today_only %}<a class="bus-btn" href="/buses/collection">Все автобусы</a>
+      {% else %}<a class="bus-btn" href="/buses/collection?today=1">📌 Сегодня к сбору ({{ planned_today }})</a>{% endif %}
+      <a class="bus-btn" href="/api/buses/collection.csv">⬇ Ведомость CSV</a>
+    </div>
   </div>
+  {% if today_only %}<p class="muted">Показаны автобусы с днём сбора «{{ weekday }}». <a href="/buses/plan">Настроить план →</a></p>{% endif %}
 
   <div class="collect-progress">
     Обработано сегодня: <b id="done-count">{{ done }}</b> из {{ total }}

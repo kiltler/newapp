@@ -247,6 +247,11 @@ tr.row-muted { opacity: .45; }
   border: 1px solid var(--line); border-radius: 8px; color: var(--text); }
 @media (max-width: 640px) { .review-controls { flex-direction: column; align-items: stretch; }
   .review-controls .rv-note, .review-controls button { width: 100%; } }
+
+/* Ревизия / местоположение */
+tr.audit-stale { background: rgba(231,76,60,.10); }
+.loc-sel { padding: 5px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+  color: var(--text); font-size: 12px; }
 /* крупные элементы для работы с телефона */
 @media (max-width: 640px) {
   .bus-btn { padding: 12px 18px; font-size: 16px; }

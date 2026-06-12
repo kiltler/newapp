@@ -55,6 +55,9 @@ _NEW_COLUMNS = [
     ("channels", "frame_sig", "TEXT"),
     ("channels", "frozen_count", "INTEGER DEFAULT 0"),
     ("swap_log", "user", "VARCHAR(64)"),
+    ("disks", "location", "VARCHAR(16) DEFAULT 'shelf'"),
+    ("disks", "last_audit_at", "TIMESTAMP"),
+    ("buses", "collect_weekday", "INTEGER"),
 ]
 
 

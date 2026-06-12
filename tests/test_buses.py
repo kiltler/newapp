@@ -143,6 +143,42 @@ async def test_review_and_dup_pages(db):
         assert (await c.get("/disks?q=ДУБ")).status_code == 200
 
 
+async def test_location_auto_set(db):
+    async with _client() as c:
+        bus = (await c.post("/api/buses", json={"bus_number": "12"})).json()["id"]
+        d = (await c.post("/api/disks", json={"label": "Л-1", "assigned_bus_id": bus})).json()["id"]
+        await c.post(f"/api/buses/{bus}/swap", json={"installed_disk_id": d})
+    async with SessionLocal() as s:
+        disk = (await s.execute(select(Disk).where(Disk.id == d))).scalar_one()
+        assert disk.location == "in_bus"  # установлен → в автобусе
+    async with _client() as c:
+        await c.post(f"/api/buses/{bus}/swap", json={"installed_disk_id": None})  # снят
+    async with SessionLocal() as s:
+        disk = (await s.execute(select(Disk).where(Disk.id == d))).scalar_one()
+        assert disk.location == "reviewer"  # снят → у смотрящего
+
+
+async def test_audit_and_passport(db):
+    async with _client() as c:
+        bus = (await c.post("/api/buses", json={"bus_number": "13"})).json()["id"]
+        d = (await c.post("/api/disks", json={"label": "А-7", "assigned_bus_id": bus})).json()["id"]
+        r = await c.post("/api/disks/audit", json={"present_ids": [d]})
+        assert r.status_code == 200 and r.json()["confirmed"] == 1
+        assert (await c.get("/disks/audit")).status_code == 200
+        assert (await c.get(f"/disks/{d}/passport")).status_code == 200
+
+
+async def test_plan_and_today(db):
+    async with _client() as c:
+        import datetime as dt
+        bus = (await c.post("/api/buses", json={"bus_number": "14", "route": "5"})).json()["id"]
+        wd = dt.datetime.now().weekday()
+        await c.put(f"/api/buses/{bus}", json={"collect_weekday": wd})
+        assert (await c.get("/buses/plan")).status_code == 200
+        page = (await c.get("/buses/collection?today=1")).text
+        assert "14" in page  # автобус с сегодняшним днём сбора попал в список
+
+
 async def test_pages_render(db):
     async with _client() as c:
         bus = (await c.post("/api/buses", json={"bus_number": "100", "route": "5"})).json()["id"]

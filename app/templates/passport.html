@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Паспорт диска {{ disk.label }}{% endblock %}
+{% block content %}
+<div class="bus-scope">
+  <div class="noprint"><a href="/disks" class="muted">← к реестру</a>
+    <button class="bus-btn" onclick="window.print()">🖨 Печать</button></div>
+  <div class="bus-banner">
+    <div><span class="bus-ico">💿</span> <b>Паспорт диска {{ disk.label }}</b></div>
+  </div>
+
+  <section class="info-grid">
+    <div><b>Тип:</b> {{ disk.type }}{% if disk.capacity_gb %} · {{ disk.capacity_gb }} ГБ{% endif %}</div>
+    {% set sl = {'installed':'установлен','ready':'резерв','removed_review':'на просмотре','faulty':'неисправен'} %}
+    <div><b>Статус:</b> {{ sl.get(disk.status, disk.status) }}</div>
+    <div><b>Где:</b> {{ locations.get(disk.location, disk.location) }}</div>
+    <div><b>Закреплён за:</b> {% if bus %}<a href="/buses/{{ bus.id }}">{{ bus.bus_number }}</a>{% else %}—{% endif %}</div>
+    <div><b>Установок всего:</b> {{ install_count }}</div>
+    <div><b>Заведён:</b> {{ disk.created_at.strftime('%d.%m.%Y') }}</div>
+    {% if disk.note %}<div><b>Заметка:</b> {{ disk.note }}</div>{% endif %}
+  </section>
+
+  <h2>История перемещений</h2>
+  <table class="grid">
+    <thead><tr><th>Дата</th><th>Автобус</th><th>Событие</th><th>Кто</th><th>Заметка</th></tr></thead>
+    <tbody>
+    {% for s in swaps %}
+      {% set b = buses.get(s.bus_id) %}
+      <tr>
+        <td class="muted">{{ s.date.strftime('%d.%m.%Y %H:%M') }}</td>
+        <td>{{ b.bus_number if b else '#' ~ s.bus_id }}</td>
+        <td>{% if s.installed_disk_id == disk.id %}установлен{% elif s.removed_disk_id == disk.id %}снят{% else %}—{% endif %}</td>
+        <td class="muted">{{ s.user or '—' }}</td>
+        <td>{{ s.note or '' }}</td>
+      </tr>
+    {% else %}<tr><td colspan="5" class="muted">Перемещений нет.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Просмотры (что находили)</h2>
+  <table class="grid">
+    <thead><tr><th>Дата</th><th>Наблюдения</th><th>Комментарий</th><th>Кто</th></tr></thead>
+    <tbody>
+    {% for r in reviews %}
+      <tr>
+        <td class="muted">{{ r.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+        <td>{{ r.tags|join(', ') if r.tags else '—' }}</td>
+        <td>{{ r.note or '' }}</td>
+        <td class="muted">{{ r.user or '—' }}</td>
+      </tr>
+    {% else %}<tr><td colspan="4" class="muted">Просмотров нет.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
