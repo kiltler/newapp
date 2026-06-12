@@ -53,6 +53,14 @@ def bus_status(bus: Bus, disks: list[Disk]) -> tuple[str, str]:
 _RANK = {"red": 0, "orange": 1, "yellow": 2, "green": 3}
 
 
+def _nat(s: str | None):
+    """Натуральный ключ сортировки: '5' раньше '10', None в конец."""
+    s = (s or "").strip()
+    if not s:
+        return (2, "")
+    return (0, int(s)) if s.isdigit() else (1, s.lower())
+
+
 async def _disks(session: AsyncSession) -> list[Disk]:
     return list((await session.execute(select(Disk))).scalars())
 
@@ -254,7 +262,8 @@ async def swaplog_csv(bus_id: int | None = None, disk_id: int | None = None,
 
 # ── Страницы ─────────────────────────────────────────────────────────────────────
 @router.get("/buses", response_class=HTMLResponse)
-async def buses_page(request: Request, q: str = "", session: AsyncSession = Depends(get_session)):
+async def buses_page(request: Request, q: str = "", sort: str = "status",
+                     session: AsyncSession = Depends(get_session)):
     buses = list((await session.execute(select(Bus))).scalars())
     disks = await _disks(session)
     by_id = {d.id: d for d in disks}
@@ -268,26 +277,52 @@ async def buses_page(request: Request, q: str = "", session: AsyncSession = Depe
         rows.append({"bus": b, "color": color, "reason": reason, "disk": cur})
         if color in ("red", "orange"):
             attention.append({"bus": b, "reason": reason})
-    rows.sort(key=lambda x: (_RANK[x["color"]], x["bus"].bus_number))
+    # Сортировка: по статусу (проблемные сверху), по маршруту или по номеру
+    if sort == "route":
+        rows.sort(key=lambda x: (_nat(x["bus"].route), _nat(x["bus"].bus_number)))
+    elif sort == "number":
+        rows.sort(key=lambda x: _nat(x["bus"].bus_number))
+    else:
+        rows.sort(key=lambda x: (_RANK[x["color"]], _nat(x["bus"].bus_number)))
     # забытые на просмотре диски
     stale = [
         d for d in disks
         if d.status == DiskStatus.REMOVED_REVIEW and d.status_since
         and (now - d.status_since).days >= settings.bus_review_alert_days
     ]
+    # сводка по парку
+    summary = {
+        "buses": len(buses),
+        "no_disk": sum(1 for b in buses if b.installed_disk_id is None),
+        "overdue": sum(
+            1 for b in buses if b.installed_since
+            and (now - b.installed_since).days >= settings.bus_swap_alert_days
+        ),
+        "disk_ready": sum(1 for d in disks if d.status == DiskStatus.READY),
+        "disk_review": sum(1 for d in disks if d.status == DiskStatus.REMOVED_REVIEW),
+        "disk_faulty": sum(1 for d in disks if d.status == DiskStatus.FAULTY),
+    }
     return templates.TemplateResponse("buses.html", {
         "request": request, "rows": rows, "attention": attention,
-        "stale_disks": stale, "q": q, "swap_days": settings.bus_swap_alert_days,
+        "stale_disks": stale, "q": q, "sort": sort, "summary": summary,
+        "swap_days": settings.bus_swap_alert_days,
     })
 
 
 @router.get("/buses/swaplog", response_class=HTMLResponse)
-async def swaplog_page(request: Request, session: AsyncSession = Depends(get_session)):
-    rows = await _swaplog(session)
+async def swaplog_page(request: Request, bus_id: int | None = None, disk_id: int | None = None,
+                       session: AsyncSession = Depends(get_session)):
+    rows = await _swaplog(session, bus_id, disk_id)
     buses = {b.id: b for b in (await session.execute(select(Bus))).scalars()}
     disks = {d.id: d for d in await _disks(session)}
+    filter_label = ""
+    if disk_id and disk_id in disks:
+        filter_label = f"диск {disks[disk_id].label}"
+    elif bus_id and bus_id in buses:
+        filter_label = f"автобус {buses[bus_id].bus_number}"
     return templates.TemplateResponse("swaplog.html", {
         "request": request, "rows": rows, "buses": buses, "disks": disks,
+        "bus_id": bus_id, "disk_id": disk_id, "filter_label": filter_label,
     })
 
 

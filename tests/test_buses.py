@@ -85,7 +85,20 @@ async def test_reviewed_and_faulty(db):
 
 async def test_pages_render(db):
     async with _client() as c:
-        bus = (await c.post("/api/buses", json={"bus_number": "100"})).json()["id"]
-        for path in ["/buses", f"/buses/{bus}", "/disks", "/buses/swaplog", "/api/buses/swaplog.csv"]:
+        bus = (await c.post("/api/buses", json={"bus_number": "100", "route": "5"})).json()["id"]
+        disk = (await c.post("/api/disks", json={"label": "Д-9", "assigned_bus_id": bus})).json()["id"]
+        for path in ["/buses", "/buses?sort=route", "/buses?sort=number",
+                     f"/buses/{bus}", "/disks", "/buses/swaplog",
+                     f"/buses/swaplog?disk_id={disk}", "/api/buses/swaplog.csv"]:
             r = await c.get(path)
             assert r.status_code == 200, f"{path} -> {r.status_code}"
+
+
+async def test_route_sort_order(db):
+    async with _client() as c:
+        await c.post("/api/buses", json={"bus_number": "А1", "route": "10"})
+        await c.post("/api/buses", json={"bus_number": "А2", "route": "5"})
+        r = await c.get("/buses?sort=route")
+        body = r.text
+        # маршрут 5 должен идти раньше маршрута 10 (натуральная сортировка)
+        assert body.index(">5<") < body.index(">10<")

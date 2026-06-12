@@ -13,6 +13,15 @@
   </div>
   <p class="muted">С этих регистраторов нет связи — статусы вносятся вручную.</p>
 
+  <section class="bus-summary">
+    <div class="bus-tile"><span class="num">{{ summary.buses }}</span><span>автобусов</span></div>
+    <div class="bus-tile {{ 'bad' if summary.no_disk else '' }}"><span class="num">{{ summary.no_disk }}</span><span>без диска</span></div>
+    <div class="bus-tile {{ 'warn' if summary.overdue else '' }}"><span class="num">{{ summary.overdue }}</span><span>просрочка замены</span></div>
+    <div class="bus-tile"><span class="num">{{ summary.disk_ready }}</span><span>дисков в резерве</span></div>
+    <div class="bus-tile {{ 'warn' if summary.disk_review else '' }}"><span class="num">{{ summary.disk_review }}</span><span>на просмотре</span></div>
+    <div class="bus-tile {{ 'bad' if summary.disk_faulty else '' }}"><span class="num">{{ summary.disk_faulty }}</span><span>неисправных</span></div>
+  </section>
+
   {% if attention or stale_disks %}
   <div class="attention">
     <h3>⚠️ Требует внимания</h3>
@@ -25,6 +34,11 @@
 
   <form class="bus-search" method="get">
     <input name="q" value="{{ q }}" placeholder="Поиск по номеру или маршруту…">
+    <select name="sort" onchange="this.form.submit()">
+      <option value="status" {{ 'selected' if sort=='status' else '' }}>Сначала проблемные</option>
+      <option value="route" {{ 'selected' if sort=='route' else '' }}>По маршруту</option>
+      <option value="number" {{ 'selected' if sort=='number' else '' }}>По номеру</option>
+    </select>
     <button class="bus-btn">Найти</button>
   </form>
 

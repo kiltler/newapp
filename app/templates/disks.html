@@ -28,6 +28,7 @@
         <td>{{ buses.get(d.assigned_bus_id) or '—' }}</td>
         <td class="muted">{{ d.note or '' }}</td>
         <td>
+          <a class="mini" href="/buses/swaplog?disk_id={{ d.id }}" style="text-decoration:none">📜 история</a>
           {% if d.status == 'removed_review' %}<button class="mini" onclick="reviewed({{ d.id }})">✓ просмотрен</button>{% endif %}
           {% if d.status != 'faulty' %}<button class="mini danger" onclick="faulty({{ d.id }})">неисправен</button>{% endif %}
         </td>

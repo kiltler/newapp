@@ -3,9 +3,15 @@
 {% block content %}
 <div class="bus-scope">
   <a href="/buses" class="muted">← к автобусам</a>
+  {% set qs = ('disk_id=' ~ disk_id) if disk_id else (('bus_id=' ~ bus_id) if bus_id else '') %}
   <div class="bus-banner">
-    <div><b>Журнал замен дисков</b> <span class="badge-offline">Ручной учёт</span></div>
-    <a class="bus-btn" href="/api/buses/swaplog.csv">⬇ Экспорт CSV</a>
+    <div><b>Журнал замен дисков</b>
+      {% if filter_label %}<span class="badge orange">фильтр: {{ filter_label }}</span>{% endif %}
+      <span class="badge-offline">Ручной учёт</span></div>
+    <div>
+      {% if filter_label %}<a class="bus-btn" href="/buses/swaplog">Сбросить фильтр</a>{% endif %}
+      <a class="bus-btn" href="/api/buses/swaplog.csv{{ ('?' ~ qs) if qs else '' }}">⬇ Экспорт CSV</a>
+    </div>
   </div>
 
   <table class="grid">
