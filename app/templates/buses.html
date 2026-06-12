@@ -2,15 +2,20 @@
 {% block title %}Автобусы — ручной учёт{% endblock %}
 {% block content %}
 {% set cm = {'green':'green','yellow':'yellow','orange':'orange','red':'red'} %}
-{% macro busrow(r) %}
-  <tr>
-    <td><span class="dot {{ cm[r.color] }}"></span></td>
-    <td><a href="/buses/{{ r.bus.id }}"><b>{{ r.bus.bus_number }}</b></a></td>
-    <td>{{ r.bus.route or '—' }}</td>
-    <td>{% if r.disk %}{{ r.disk.label }} <span class="muted">({{ r.disk.type }})</span>{% else %}<span class="badge red">нет диска</span>{% endif %}</td>
-    <td class="muted">{{ r.bus.installed_since.strftime('%d.%m.%Y') if r.bus.installed_since else '—' }}</td>
-    <td>{{ r.reason }}</td>
-  </tr>
+{% macro bcard(r) %}
+  <a class="bcard b-{{ r.color }}" href="/buses/{{ r.bus.id }}">
+    <div class="bcard-top">
+      <span class="dot {{ cm[r.color] }}"></span>
+      <span class="bcard-num">{{ r.bus.bus_number }}</span>
+      <span class="bcard-route">марш. {{ r.bus.route or '—' }}</span>
+    </div>
+    <div class="bcard-disk">
+      {% if r.disk %}💿 <b>{{ r.disk.label }}</b> <span class="muted">({{ r.disk.type }})</span>
+        {% if r.bus.installed_since %}<span class="muted"> · с {{ r.bus.installed_since.strftime('%d.%m') }}</span>{% endif %}
+      {% else %}<span class="badge err">нет диска</span>{% endif %}
+    </div>
+    <div class="bcard-reason">{{ r.reason }}</div>
+  </a>
 {% endmacro %}
 <div class="bus-scope">
   <div class="bus-banner">
@@ -68,20 +73,17 @@
     </details>
   </div>
 
-  <table class="grid">
-    <thead><tr><th></th><th>Автобус</th><th>Маршрут</th><th>Диск сейчас</th><th>Поставлен</th><th>Статус</th></tr></thead>
-    <tbody>
+  <div class="blist">
     {% if grouped %}
       {% for label, items in grouped %}
-        <tr class="group-row"><td colspan="6">🚏 Маршрут {{ label }} <span class="muted">({{ items|length }})</span></td></tr>
-        {% for r in items %}{{ busrow(r) }}{% endfor %}
+        <div class="bgroup">🚏 Маршрут {{ label }} <span class="muted">({{ items|length }})</span></div>
+        {% for r in items %}{{ bcard(r) }}{% endfor %}
       {% endfor %}
     {% else %}
-      {% for r in rows %}{{ busrow(r) }}{% else %}
-      <tr><td colspan="6" class="muted">Автобусов нет. Нажмите «+ Автобус».</td></tr>{% endfor %}
+      {% for r in rows %}{{ bcard(r) }}{% else %}
+      <p class="muted">Автобусов нет. Нажмите «+ Автобус».</p>{% endfor %}
     {% endif %}
-    </tbody>
-  </table>
+  </div>
 </div>
 
 <script>

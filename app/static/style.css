@@ -310,3 +310,27 @@ tr.audit-stale { background: rgba(231,76,60,.10); }
   .bus-search input, .bus-search select { max-width: none; }
   .cards { grid-template-columns: 1fr 1fr; }
 }
+
+/* ── Список автобусов карточками (красиво на телефоне и десктопе) ── */
+.blist { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
+.bcard { display: block; background: var(--panel); border: 1px solid var(--line);
+  border-left: 5px solid var(--line); border-radius: 12px; padding: 12px 14px;
+  text-decoration: none; color: var(--text); transition: border-color .15s, transform .05s; }
+.bcard:hover { text-decoration: none; border-color: var(--accent); }
+.bcard:active { transform: scale(.99); }
+.bcard.b-red { border-left-color: var(--err); }
+.bcard.b-orange { border-left-color: #e67e22; }
+.bcard.b-yellow { border-left-color: var(--warn); }
+.bcard.b-green { border-left-color: var(--ok); }
+.bcard-top { display: flex; align-items: center; gap: 9px; }
+.bcard-num { font-size: 19px; font-weight: 700; color: var(--accent); }
+.bcard-route { margin-left: auto; color: var(--muted); font-size: 13px; white-space: nowrap; }
+.bcard-disk { margin-top: 7px; font-size: 15px; }
+.bcard-reason { margin-top: 4px; font-size: 12.5px; color: var(--muted); }
+.bgroup { grid-column: 1 / -1; margin: 10px 0 2px; font-weight: 700; color: #f39c12;
+  border-bottom: 1px solid var(--line); padding-bottom: 5px; }
+@media (max-width: 760px) {
+  .blist { grid-template-columns: 1fr; }
+  .bcard-num { font-size: 20px; }
+  .bcard-disk { font-size: 16px; }
+}
