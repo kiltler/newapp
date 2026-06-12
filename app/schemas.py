@@ -203,6 +203,12 @@ class BusSettings(BaseModel):
     review_days: int = 7
 
 
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    role: str = "bus"
+
+
 class EventOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int

@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.api import auth, buses, dashboard, devices, monitoring, plan
+from app.api import auth, buses, dashboard, devices, monitoring, plan, users_api
 from app.config import settings
 from app.database import init_db
 from app.scheduler import shutdown_scheduler, start_scheduler
@@ -45,16 +45,24 @@ app = FastAPI(title="NVR Monitor", version="0.1.0", lifespan=lifespan)
 
 # Открытые без авторизации пути (статика, страница входа, проверки, mock)
 _PUBLIC_PREFIXES = ("/static", "/login", "/logout", "/healthz", "/metrics", "/mock", "/docs", "/openapi.json")
+# Что разрешено роли «bus» (только модуль «Автобусы»)
+_BUS_PREFIXES = ("/buses", "/disks", "/api/buses", "/api/disks")
 
 
 @app.middleware("http")
 async def require_login(request: Request, call_next):
+    path = request.url.path
     # Если пароль не задан — вход отключён (панель открыта).
-    if settings.admin_password and not request.url.path.startswith(_PUBLIC_PREFIXES):
+    if settings.admin_password and not path.startswith(_PUBLIC_PREFIXES):
         if not request.session.get("auth"):
-            if request.url.path.startswith("/api"):
+            if path.startswith("/api"):
                 return JSONResponse({"detail": "Требуется вход"}, status_code=401)
             return RedirectResponse("/login", status_code=303)
+        # Роль «bus» — доступ только к вкладке «Автобусы»
+        if request.session.get("role") == "bus" and not path.startswith(_BUS_PREFIXES):
+            if path.startswith("/api"):
+                return JSONResponse({"detail": "Недостаточно прав"}, status_code=403)
+            return RedirectResponse("/buses", status_code=303)
     return await call_next(request)
 
 
@@ -75,6 +83,7 @@ app.include_router(devices.router)
 app.include_router(monitoring.router)
 app.include_router(plan.router)
 app.include_router(buses.router)
+app.include_router(users_api.router)
 app.include_router(dashboard.router)
 
 # Статика

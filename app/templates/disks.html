@@ -28,6 +28,7 @@
         <td>{{ buses.get(d.assigned_bus_id) or '—' }}</td>
         <td class="muted">{{ d.note or '' }}</td>
         <td>
+          <button class="mini" onclick="editNote({{ d.id }}, {{ (d.note or '') | tojson }})">📝 заметка</button>
           <a class="mini" href="/buses/swaplog?disk_id={{ d.id }}" style="text-decoration:none">📜 история</a>
           {% if d.status == 'removed_review' %}<button class="mini" onclick="reviewed({{ d.id }})">✓ просмотрен</button>{% endif %}
           {% if d.status != 'faulty' %}<button class="mini danger" onclick="faulty({{ d.id }})">неисправен</button>{% endif %}
@@ -45,6 +46,11 @@ async function addDisk(){
   const capStr = prompt("Объём, ГБ (необязательно):","")||"";
   const r = await fetch("/api/disks",{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({label, type, capacity_gb: capStr?parseInt(capStr,10):null, status:"ready"})});
+  r.ok?location.reload():alert(await r.text());
+}
+async function editNote(id, cur){
+  const n = prompt("Заметка по диску (нет записи / замазали камеру / шум и т.п.):", cur||""); if (n===null) return;
+  const r = await fetch(`/api/disks/${id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({note:n||null})});
   r.ok?location.reload():alert(await r.text());
 }
 async function reviewed(id){ const r=await fetch(`/api/disks/${id}/reviewed`,{method:"POST"}); r.ok?location.reload():alert(await r.text()); }

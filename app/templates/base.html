@@ -9,7 +9,9 @@
 <body>
 <header class="topbar">
     <a href="/" class="logo">📹 NVR Monitor</a>
+    {% set _role = request.session.get('role') %}
     <nav>
+        {% if _role != 'bus' %}
         <a href="/">Дашборд</a>
         <a href="/tv">TV</a>
         <a href="/slideshow">Слайдшоу</a>
@@ -19,9 +21,13 @@
         <a href="/calc">Хранилище</a>
         <a href="/labels">QR</a>
         <a href="/audit">Аудит</a>
+        {% if _role in (none, 'admin') %}<a href="/users">Пользователи</a>{% endif %}
+        {% endif %}
         <a href="/buses" class="nav-bus">🚌 Автобусы</a>
+        {% if _role != 'bus' %}
         <a href="#" id="add-device-btn">+ Устройство</a>
         <a href="#" id="bell" title="Системные уведомления">🔕</a>
+        {% endif %}
         <a href="/logout">Выход</a>
     </nav>
 </header>

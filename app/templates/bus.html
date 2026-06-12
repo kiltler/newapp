@@ -10,7 +10,7 @@
   </div>
 
   <section class="info-grid">
-    <div><b>Маршрут:</b> {{ bus.route or '—' }}</div>
+    <div><b>Номер / маршрут:</b> {{ bus.bus_number }} / {{ bus.route or '—' }} <button class="mini" onclick="editBus()">изм.</button></div>
     <div><b>Модель DVR:</b> {{ bus.dvr_model or '—' }} <button class="mini" onclick="editModel()">изм.</button></div>
     <div><b>Статус:</b> {{ reason }}</div>
     <div class="bus-problem">
@@ -34,7 +34,7 @@
 
   <h2>Закреплённые диски</h2>
   <table class="grid">
-    <thead><tr><th>Диск</th><th>Тип</th><th>Статус</th><th>Действия</th></tr></thead>
+    <thead><tr><th>Диск</th><th>Тип</th><th>Статус</th><th>Заметка</th><th>Действия</th></tr></thead>
     <tbody>
     {% set sm = {'installed':'ok','ready':'ok','removed_review':'warn','faulty':'err'} %}
     {% set sl = {'installed':'установлен','ready':'готов (резерв)','removed_review':'на просмотре','faulty':'неисправен'} %}
@@ -42,12 +42,14 @@
       <tr>
         <td><b>{{ d.label }}</b></td><td>{{ d.type }}</td>
         <td><span class="badge {{ sm[d.status] }}">{{ sl[d.status] }}</span></td>
+        <td class="muted">{{ d.note or '' }}</td>
         <td>
+          <button class="mini" onclick="editNote({{ d.id }}, {{ (d.note or '') | tojson }})">📝 заметка</button>
           {% if d.status == 'removed_review' %}<button class="mini" onclick="reviewed({{ d.id }})">✓ просмотрен</button>{% endif %}
           {% if d.status != 'faulty' %}<button class="mini danger" onclick="faulty({{ d.id }})">неисправен</button>{% endif %}
         </td>
       </tr>
-    {% else %}<tr><td colspan="4" class="muted">Диски не закреплены.</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="5" class="muted">Диски не закреплены.</td></tr>{% endfor %}
     </tbody>
   </table>
 
@@ -126,6 +128,19 @@ async function editProblem(){
   if (note===null) return;
   const r = await fetch(`/api/buses/${BUS_ID}`,{method:"PUT",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({ has_problem: !!note.trim(), problem_note: note.trim() || null })});
+  r.ok?location.reload():alert(await r.text());
+}
+async function editBus(){
+  const num = prompt("Номер автобуса:", {{ bus.bus_number | tojson }}); if (num===null || !num.trim()) return;
+  const route = prompt("Маршрут:", {{ (bus.route or '') | tojson }});
+  if (route===null) return;
+  const r = await fetch(`/api/buses/${BUS_ID}`,{method:"PUT",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({bus_number:num.trim(), route:route.trim()||null})});
+  r.ok?location.reload():alert(await r.text());
+}
+async function editNote(id, cur){
+  const n = prompt("Заметка по диску (нет записи / замазали камеру / шум и т.п.):", cur||""); if (n===null) return;
+  const r = await fetch(`/api/disks/${id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({note:n||null})});
   r.ok?location.reload():alert(await r.text());
 }
 async function editModel(){

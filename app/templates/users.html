@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Пользователи{% endblock %}
+{% block content %}
+<h1>Пользователи</h1>
+<p class="muted">Роль <b>«Смотрящий диски»</b> видит только вкладку «Автобусы» и вносит заметки по дискам. <b>«Админ»</b> — полный доступ.</p>
+
+<form id="user-form" class="bus-search" style="max-width:560px">
+  <input id="u-name" placeholder="Логин" required>
+  <input id="u-pass" type="text" placeholder="Пароль (мин. 4)" required>
+  <select id="u-role">
+    <option value="bus">Смотрящий диски (только Автобусы)</option>
+    <option value="admin">Админ (всё)</option>
+  </select>
+  <button type="submit" class="bus-btn">Создать</button>
+</form>
+
+<table class="grid" style="max-width:560px">
+  <thead><tr><th>Логин</th><th>Роль</th><th></th></tr></thead>
+  <tbody>
+  {% for u in users %}
+    <tr>
+      <td><b>{{ u.username }}</b></td>
+      <td>{{ 'Смотрящий диски' if u.role == 'bus' else 'Админ' }}</td>
+      <td><button class="mini danger" onclick="delUser({{ u.id }})">удалить</button></td>
+    </tr>
+  {% else %}<tr><td colspan="3" class="muted">Пользователей нет. Вход работает по ADMIN_PASSWORD из .env.</td></tr>{% endfor %}
+  </tbody>
+</table>
+
+<script>
+document.getElementById("user-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const body = { username: document.getElementById("u-name").value,
+    password: document.getElementById("u-pass").value, role: document.getElementById("u-role").value };
+  const r = await fetch("/api/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (r.ok) location.reload(); else alert("Ошибка: " + (await r.text()));
+};
+async function delUser(id) {
+  if (!confirm("Удалить пользователя?")) return;
+  const r = await fetch(`/api/users/${id}`, { method: "DELETE" });
+  if (r.ok) location.reload(); else alert("Ошибка: " + (await r.text()));
+}
+</script>
+{% endblock %}
