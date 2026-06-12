@@ -21,7 +21,7 @@
         <a href="/calc">Хранилище</a>
         <a href="/labels">QR</a>
         <a href="/audit">Аудит</a>
-        {% if _role in (none, 'admin') %}<a href="/users">Пользователи</a>{% endif %}
+        {% if _role in (none, 'admin') %}<a href="/users">Пользователи</a><a href="/backup">Бэкап</a>{% endif %}
         {% endif %}
         <a href="/buses" class="nav-bus">🚌 Автобусы</a>
         {% if _role != 'bus' %}

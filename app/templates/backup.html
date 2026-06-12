@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Резервное копирование{% endblock %}
+{% block content %}
+<h1>Резервное копирование</h1>
+<p class="muted">Бэкап включает устройства, автобусы, диски, журналы замен и просмотров,
+заметки, метки плана, учётки и настройки. Мониторинг (каналы/HDD) восстановится опросом сам.</p>
+
+<div class="cards" style="margin-bottom:18px">
+  <div class="card">
+    <h3>Скачать сейчас</h3>
+    <p class="muted">Полный снимок данных одним файлом.</p>
+    <button onclick="location.href='/api/backup/download'">⬇ Скачать резервную копию</button>
+  </div>
+  <div class="card">
+    <h3>Восстановить из файла</h3>
+    <p class="muted err-text">⚠️ Заменит текущие данные данными из бэкапа!</p>
+    <form id="restore-form" enctype="multipart/form-data">
+      <input type="file" name="file" accept="application/json,.json" required>
+      <button type="submit" class="danger">Восстановить</button>
+    </form>
+  </div>
+</div>
+
+<h2>Авто-бэкапы на сервере</h2>
+<p class="muted">Создаются автоматически раз в сутки, хранятся в <code>data/backups/</code> (последние 30).</p>
+<table class="grid" style="max-width:520px">
+  <thead><tr><th>Файл</th><th>Дата</th><th>Размер</th></tr></thead>
+  <tbody>
+  {% for f in files %}
+    <tr><td>{{ f.name }}</td><td class="muted">{{ f.time }}</td><td class="muted">{{ f.size_kb }} КБ</td></tr>
+  {% else %}<tr><td colspan="3" class="muted">Авто-бэкапов пока нет (появятся после первого запуска задачи).</td></tr>{% endfor %}
+  </tbody>
+</table>
+
+<script>
+document.getElementById("restore-form").onsubmit = async (e) => {
+  e.preventDefault();
+  if (!confirm("Восстановить из бэкапа? Текущие данные (устройства, автобусы, диски, журналы) будут заменены.")) return;
+  const r = await fetch("/api/backup/restore", { method: "POST", body: new FormData(e.target) });
+  if (r.ok) { alert("Восстановлено: " + JSON.stringify((await r.json()).restored)); location.href = "/"; }
+  else alert("Ошибка: " + (await r.text()));
+};
+</script>
+{% endblock %}

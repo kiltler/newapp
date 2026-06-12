@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.api import auth, buses, dashboard, devices, monitoring, plan, users_api
+from app.api import auth, backup_api, buses, dashboard, devices, monitoring, plan, users_api
 from app.config import settings
 from app.database import init_db
 from app.scheduler import shutdown_scheduler, start_scheduler
@@ -84,6 +84,7 @@ app.include_router(monitoring.router)
 app.include_router(plan.router)
 app.include_router(buses.router)
 app.include_router(users_api.router)
+app.include_router(backup_api.router)
 app.include_router(dashboard.router)
 
 # Статика

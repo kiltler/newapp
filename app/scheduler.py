@@ -8,7 +8,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import settings
-from app.services import archive, poller, quality, watchdog
+from app.services import archive, backup, poller, quality, watchdog
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +59,16 @@ def start_scheduler() -> None:
             coalesce=True,
             replace_existing=True,
         )
+
+    scheduler.add_job(
+        backup.auto_backup,
+        trigger=CronTrigger(hour=3, minute=30),
+        id="auto_backup",
+        name="Ежедневный авто-бэкап",
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+    )
 
     scheduler.start()
     log.info(
