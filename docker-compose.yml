@@ -70,7 +70,27 @@ services:
       - prometheus
     profiles: ["grafana"]
 
+  # ── Caddy: авто-HTTPS (Let's Encrypt) для доступа извне и установки PWA. ──────
+  #    Запуск: задайте DOMAIN в .env и  docker compose --profile https up -d
+  caddy:
+    image: caddy:2.8
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on:
+      - app
+    profiles: ["https"]
+
 volumes:
   pgdata:
   promdata:
   grafanadata:
+  caddydata:
+  caddyconfig:

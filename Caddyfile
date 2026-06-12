@@ -1,0 +1,10 @@
+# Обратный прокси с автоматическим HTTPS (Let's Encrypt).
+# DOMAIN берётся из .env (например xxxxxxxx.sn.mynetname.net от MikroTik IP Cloud).
+# Нужны проброшенные снаружи порты 80 и 443 на этот сервер.
+
+{$DOMAIN} {
+	encode gzip zstd
+	reverse_proxy app:8000 {
+		header_up X-Forwarded-Proto https
+	}
+}
