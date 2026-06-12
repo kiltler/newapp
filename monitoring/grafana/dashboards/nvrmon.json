@@ -1,81 +1,1376 @@
 {
   "uid": "nvrmon-main",
   "title": "NVR Monitor",
-  "tags": ["nvr", "cctv"],
+  "tags": [
+    "nvr",
+    "cctv"
+  ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
-  "refresh": "30s",
-  "time": { "from": "now-6h", "to": "now" },
+  "version": 2,
+  "refresh": "10s",
+  "style": "dark",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "panels": [
     {
-      "type": "stat", "title": "Устройства онлайн",
-      "datasource": { "type": "prometheus", "uid": "nvrmon-prom" },
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
-      "targets": [{ "expr": "nvrmon_devices_online", "refId": "A" }],
-      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "green" }, "unit": "none" }, "overrides": [] },
-      "options": { "colorMode": "background", "graphMode": "area", "textMode": "value_and_name" }
+      "type": "row",
+      "title": "🛰  Обзор",
+      "id": 1,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
     },
     {
-      "type": "stat", "title": "Недоступны",
-      "datasource": { "type": "prometheus", "uid": "nvrmon-prom" },
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
-      "targets": [{ "expr": "nvrmon_devices_unreachable", "refId": "A" }],
-      "fieldConfig": { "defaults": { "unit": "none", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } }, "overrides": [] },
-      "options": { "colorMode": "background", "graphMode": "none" }
-    },
-    {
-      "type": "stat", "title": "Каналы онлайн",
-      "datasource": { "type": "prometheus", "uid": "nvrmon-prom" },
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
-      "targets": [{ "expr": "nvrmon_channels_online", "refId": "A" }],
-      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "blue" }, "unit": "none" }, "overrides": [] },
-      "options": { "colorMode": "background", "graphMode": "area" }
-    },
-    {
-      "type": "stat", "title": "Активные алерты",
-      "datasource": { "type": "prometheus", "uid": "nvrmon-prom" },
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
-      "targets": [{ "expr": "nvrmon_active_alerts", "refId": "A" }],
-      "fieldConfig": { "defaults": { "unit": "none", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 5 } ] } }, "overrides": [] },
-      "options": { "colorMode": "background", "graphMode": "none" }
-    },
-    {
-      "type": "timeseries", "title": "Каналы: онлайн / с проблемой",
-      "datasource": { "type": "prometheus", "uid": "nvrmon-prom" },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 4 },
+      "id": 2,
+      "type": "stat",
+      "title": "Монитор",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 0,
+        "y": 1
+      },
       "targets": [
-        { "expr": "nvrmon_channels_online", "refId": "A", "legendFormat": "онлайн" },
-        { "expr": "nvrmon_channels_problem", "refId": "B", "legendFormat": "проблема" }
+        {
+          "expr": "nvrmon_up",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          }
+        }
       ],
-      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 15, "lineWidth": 2 }, "unit": "none" }, "overrides": [] },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "ОНЛАЙН"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "value_and_name",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
     },
     {
-      "type": "bargauge", "title": "Температура NVR, °C",
-      "datasource": { "type": "prometheus", "uid": "nvrmon-prom" },
-      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 12 },
-      "targets": [{ "expr": "nvrmon_device_temperature_celsius", "refId": "A", "legendFormat": "{{device}}" }],
-      "fieldConfig": { "defaults": { "unit": "celsius", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 55 }, { "color": "red", "value": 65 } ] } }, "overrides": [] },
-      "options": { "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true }
-    },
-    {
-      "type": "bargauge", "title": "Дрейф времени NVR, сек",
-      "datasource": { "type": "prometheus", "uid": "nvrmon-prom" },
-      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 12 },
-      "targets": [{ "expr": "nvrmon_device_time_drift_seconds", "refId": "A", "legendFormat": "{{device}}" }],
-      "fieldConfig": { "defaults": { "unit": "s", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 300 }, { "color": "red", "value": 600 } ] } }, "overrides": [] },
-      "options": { "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true }
-    },
-    {
-      "type": "bargauge", "title": "Каналы онлайн по устройствам",
-      "datasource": { "type": "prometheus", "uid": "nvrmon-prom" },
-      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 21 },
+      "id": 3,
+      "type": "stat",
+      "title": "Свежесть опроса",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 3,
+        "y": 1
+      },
       "targets": [
-        { "expr": "nvrmon_device_channels_online", "refId": "A", "legendFormat": "{{device}}" }
+        {
+          "expr": "nvrmon_last_poll_age_seconds",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          }
+        }
       ],
-      "fieldConfig": { "defaults": { "unit": "none", "color": { "mode": "continuous-GrYlRd" } }, "overrides": [] },
-      "options": { "orientation": "horizontal", "displayMode": "basic", "showUnfilled": true }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 600
+              },
+              {
+                "color": "red",
+                "value": 1200
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "value_and_name",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Устройств онлайн",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 6,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "nvrmon_devices_online",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "value_and_name",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Недоступны",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 9,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "nvrmon_devices_unreachable",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "value_and_name",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Каналы онлайн",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 12,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "nvrmon_channels_online",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "value_and_name",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Каналы: проблема",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 15,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "nvrmon_channels_problem",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "value_and_name",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "HDD ошибки",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 18,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "nvrmon_hdd_error",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "value_and_name",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Активные алерты",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 21,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "nvrmon_active_alerts",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "value_and_name",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "📷  Каналы",
+      "id": 10,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "panels": []
+    },
+    {
+      "id": 11,
+      "type": "piechart",
+      "title": "Состояние каналов",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 6
+      },
+      "targets": [
+        {
+          "expr": "nvrmon_channels_online",
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          },
+          "legendFormat": "онлайн"
+        },
+        {
+          "expr": "nvrmon_channels_offline",
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          },
+          "legendFormat": "offline"
+        },
+        {
+          "expr": "nvrmon_channels_no_video",
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          },
+          "legendFormat": "нет видео"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "pieType": "donut",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Каналы во времени",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 6
+      },
+      "targets": [
+        {
+          "expr": "nvrmon_channels_online",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          },
+          "legendFormat": "онлайн"
+        },
+        {
+          "expr": "nvrmon_channels_problem",
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          },
+          "legendFormat": "проблема"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 18,
+            "lineWidth": 2,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "🧠  Качество картинки",
+      "id": 13,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "panels": []
+    },
+    {
+      "id": 14,
+      "type": "piechart",
+      "title": "Качество (вердикты)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 15
+      },
+      "targets": [
+        {
+          "expr": "nvrmon_channels_quality",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          },
+          "legendFormat": "{{verdict}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "pieType": "donut",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        }
+      }
+    },
+    {
+      "id": 15,
+      "type": "bargauge",
+      "title": "По вердиктам",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 15
+      },
+      "targets": [
+        {
+          "expr": "nvrmon_channels_quality",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          },
+          "legendFormat": "{{verdict}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "Проблемных по картинке",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 15
+      },
+      "targets": [
+        {
+          "expr": "sum(nvrmon_channels_quality{verdict!=\"ok\"})",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 3
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "value_and_name",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "🌡  Здоровье железа",
+      "id": 17,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "panels": []
+    },
+    {
+      "id": 18,
+      "type": "bargauge",
+      "title": "Температура NVR, °C",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 24
+      },
+      "targets": [
+        {
+          "expr": "nvrmon_device_temperature_celsius",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          },
+          "legendFormat": "{{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 55
+              },
+              {
+                "color": "red",
+                "value": 65
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 19,
+      "type": "gauge",
+      "title": "CPU NVR, %",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 24
+      },
+      "targets": [
+        {
+          "expr": "nvrmon_device_cpu_percent",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          },
+          "legendFormat": "{{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 75
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showThresholdMarkers": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 20,
+      "type": "gauge",
+      "title": "Память NVR, %",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 24
+      },
+      "targets": [
+        {
+          "expr": "nvrmon_device_memory_percent",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          },
+          "legendFormat": "{{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 80
+              },
+              {
+                "color": "red",
+                "value": 92
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showThresholdMarkers": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 21,
+      "type": "bargauge",
+      "title": "Дрейф времени, сек",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 24
+      },
+      "targets": [
+        {
+          "expr": "nvrmon_device_time_drift_seconds",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          },
+          "legendFormat": "{{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 300
+              },
+              {
+                "color": "red",
+                "value": 600
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "💽  Диски",
+      "id": 22,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "panels": []
+    },
+    {
+      "id": 23,
+      "type": "bargauge",
+      "title": "Заполнение дисков, %",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 33
+      },
+      "targets": [
+        {
+          "expr": "nvrmon_hdd_usage_percent",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          },
+          "legendFormat": "{{device}} {{hdd}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 80
+              },
+              {
+                "color": "red",
+                "value": 92
+              }
+            ]
+          },
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 24,
+      "type": "table",
+      "title": "Диски",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 33
+      },
+      "targets": [
+        {
+          "expr": "nvrmon_hdd_usage_percent",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          },
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "instance": true,
+              "host": true
+            },
+            "renameByName": {
+              "device": "Объект",
+              "hdd": "Диск",
+              "status": "Статус",
+              "Value": "Заполнение, %"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "🖥  Устройства",
+      "id": 25,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 41
+      },
+      "panels": []
+    },
+    {
+      "id": 26,
+      "type": "bargauge",
+      "title": "Каналы онлайн по устройствам",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 42
+      },
+      "targets": [
+        {
+          "expr": "nvrmon_device_channels_online",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          },
+          "legendFormat": "{{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "showUnfilled": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 27,
+      "type": "bargauge",
+      "title": "Неудачных опросов подряд",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 42
+      },
+      "targets": [
+        {
+          "expr": "nvrmon_device_consecutive_failures",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          },
+          "legendFormat": "{{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 3
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "📈  Статусы каналов во времени",
+      "id": 28,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 50
+      },
+      "panels": []
+    },
+    {
+      "id": 29,
+      "type": "state-timeline",
+      "title": "Каналы (онлайн/нет)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 51
+      },
+      "targets": [
+        {
+          "expr": "nvrmon_channel_up",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          },
+          "legendFormat": "{{device}} · {{name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "онлайн",
+                  "color": "green"
+                },
+                "0": {
+                  "text": "нет",
+                  "color": "red"
+                }
+              }
+            }
+          ],
+          "custom": {
+            "fillOpacity": 85,
+            "lineWidth": 0
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "mergeValues": true,
+        "showValue": "never",
+        "rowHeight": 0.9,
+        "legend": {
+          "displayMode": "hidden"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "🎞  Архив",
+      "id": 30,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 61
+      },
+      "panels": []
+    },
+    {
+      "id": 31,
+      "type": "bargauge",
+      "title": "Глубина архива по каналам, дней",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 62
+      },
+      "targets": [
+        {
+          "expr": "nvrmon_channel_archive_depth_days",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          },
+          "legendFormat": "{{device}} к{{channel}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "showUnfilled": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
     }
   ]
 }
