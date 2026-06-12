@@ -7,7 +7,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 3,
+  "version": 4,
   "refresh": "10s",
   "style": "dark",
   "time": {
@@ -1146,11 +1146,18 @@
         }
       ],
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "unit": "percent",
+          "decimals": 0
+        },
         "overrides": []
       },
       "options": {
-        "showHeader": true
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
       },
       "transformations": [
         {
@@ -1169,6 +1176,18 @@
               "status": "Статус",
               "Value": "Заполнение, %"
             }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Заполнение, %",
+                "desc": true
+              }
+            ]
           }
         }
       ]
@@ -1289,7 +1308,7 @@
     },
     {
       "type": "row",
-      "title": "📈  Статусы каналов во времени",
+      "title": "📈  Проблемные каналы",
       "id": 28,
       "collapsed": false,
       "gridPos": {
@@ -1302,8 +1321,146 @@
     },
     {
       "id": 29,
-      "type": "state-timeline",
-      "title": "Каналы (онлайн/нет)",
+      "type": "timeseries",
+      "title": "Проблемные каналы во времени",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 0,
+        "y": 51
+      },
+      "targets": [
+        {
+          "expr": "nvrmon_channels_offline",
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          },
+          "legendFormat": "offline"
+        },
+        {
+          "expr": "nvrmon_channels_no_video",
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          },
+          "legendFormat": "нет видео"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 18,
+            "lineWidth": 2,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 30,
+      "type": "table",
+      "title": "Сейчас не в норме",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "nvrmon-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 51
+      },
+      "targets": [
+        {
+          "expr": "nvrmon_channel_up == 0",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "nvrmon-prom"
+          },
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "instance": true,
+              "host": true,
+              "Value": true
+            },
+            "renameByName": {
+              "device": "Объект",
+              "channel": "Канал",
+              "name": "Камера"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Объект",
+                "desc": false
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "🎞  Архив",
+      "id": 31,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 59
+      },
+      "panels": []
+    },
+    {
+      "id": 32,
+      "type": "table",
+      "title": "Глубина архива по каналам (короткие сверху)",
       "datasource": {
         "type": "prometheus",
         "uid": "nvrmon-prom"
@@ -1312,78 +1469,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 51
-      },
-      "targets": [
-        {
-          "expr": "nvrmon_channel_up",
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "nvrmon-prom"
-          },
-          "legendFormat": "{{device}} · {{name}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "1": {
-                  "text": "онлайн",
-                  "color": "green"
-                },
-                "0": {
-                  "text": "нет",
-                  "color": "red"
-                }
-              }
-            }
-          ],
-          "custom": {
-            "fillOpacity": 85,
-            "lineWidth": 0
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "mergeValues": true,
-        "showValue": "never",
-        "rowHeight": 0.9,
-        "legend": {
-          "displayMode": "hidden"
-        }
-      }
-    },
-    {
-      "type": "row",
-      "title": "🎞  Архив",
-      "id": 30,
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 61
-      },
-      "panels": []
-    },
-    {
-      "id": 31,
-      "type": "bargauge",
-      "title": "Глубина архива по каналам, дней",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "nvrmon-prom"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 62
+        "y": 60
       },
       "targets": [
         {
@@ -1393,30 +1479,82 @@
             "type": "prometheus",
             "uid": "nvrmon-prom"
           },
-          "legendFormat": "{{device}} к{{channel}}"
+          "format": "table",
+          "instant": true
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "none"
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 7
+              },
+              {
+                "color": "green",
+                "value": 20
+              }
+            ]
+          },
+          "custom": {
+            "cellOptions": {
+              "type": "color-background"
+            }
+          }
         },
         "overrides": []
       },
       "options": {
-        "orientation": "horizontal",
-        "displayMode": "basic",
-        "showUnfilled": true,
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
         }
-      }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "instance": true,
+              "host": true
+            },
+            "renameByName": {
+              "device": "Объект",
+              "channel": "Канал",
+              "name": "Камера",
+              "Value": "Глубина, дней"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Глубина, дней",
+                "desc": false
+              }
+            ]
+          }
+        }
+      ]
     },
     {
       "type": "row",
       "title": "📊  Аптайм / SLA",
-      "id": 32,
+      "id": 33,
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -1427,15 +1565,15 @@
       "panels": []
     },
     {
-      "id": 33,
-      "type": "bargauge",
-      "title": "Аптайм камер за 24ч, %",
+      "id": 34,
+      "type": "table",
+      "title": "Аптайм камер за 24ч, % (худшие сверху)",
       "datasource": {
         "type": "prometheus",
         "uid": "nvrmon-prom"
       },
       "gridPos": {
-        "h": 9,
+        "h": 10,
         "w": 12,
         "x": 0,
         "y": 71
@@ -1448,12 +1586,14 @@
             "type": "prometheus",
             "uid": "nvrmon-prom"
           },
-          "legendFormat": "{{device}} · {{name}}"
+          "format": "table",
+          "instant": true
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "percent",
+          "decimals": 1,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -1471,39 +1611,71 @@
               }
             ]
           },
-          "min": 0,
-          "max": 100
+          "custom": {
+            "cellOptions": {
+              "type": "color-background"
+            }
+          }
         },
         "overrides": []
       },
       "options": {
-        "orientation": "horizontal",
-        "displayMode": "gradient",
-        "showUnfilled": true,
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
         }
-      }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "instance": true,
+              "host": true
+            },
+            "renameByName": {
+              "device": "Объект",
+              "channel": "Канал",
+              "name": "Камера",
+              "Value": "Аптайм 24ч, %"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Аптайм 24ч, %",
+                "desc": false
+              }
+            ]
+          }
+        }
+      ]
     },
     {
-      "id": 34,
+      "id": 35,
       "type": "bargauge",
-      "title": "Top-5 проблемных за 24ч (аптайм %)",
+      "title": "Top-7 проблемных за 24ч (аптайм %)",
       "datasource": {
         "type": "prometheus",
         "uid": "nvrmon-prom"
       },
       "gridPos": {
-        "h": 9,
+        "h": 10,
         "w": 12,
         "x": 12,
         "y": 71
       },
       "targets": [
         {
-          "expr": "bottomk(5, avg_over_time(nvrmon_channel_up[24h]) * 100)",
+          "expr": "bottomk(7, avg_over_time(nvrmon_channel_up[24h]) * 100)",
           "refId": "A",
           "datasource": {
             "type": "prometheus",
@@ -1551,18 +1723,18 @@
     {
       "type": "row",
       "title": "🗺  Карта объектов",
-      "id": 35,
+      "id": 36,
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 80
+        "y": 81
       },
       "panels": []
     },
     {
-      "id": 36,
+      "id": 37,
       "type": "geomap",
       "title": "Объекты на карте",
       "datasource": {
@@ -1573,7 +1745,7 @@
         "h": 12,
         "w": 24,
         "x": 0,
-        "y": 81
+        "y": 82
       },
       "targets": [
         {
@@ -1643,9 +1815,6 @@
                 "opacity": 0.85,
                 "symbol": {
                   "fixed": "img/icons/marker/circle.svg"
-                },
-                "textConfig": {
-                  "fontSize": 12
                 }
               }
             },
