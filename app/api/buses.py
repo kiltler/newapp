@@ -203,10 +203,12 @@ async def disk_faulty(disk_id: int, data: schemas.FaultyRequest, session: AsyncS
 
 # ── Ключевая операция: замена/снятие/установка ──────────────────────────────────
 @router.post("/api/buses/{bus_id}/swap")
-async def swap_disk(bus_id: int, data: schemas.SwapRequest, session: AsyncSession = Depends(get_session)):
+async def swap_disk(bus_id: int, data: schemas.SwapRequest, request: Request,
+                    session: AsyncSession = Depends(get_session)):
     """Атомарно: снять текущий диск (→ на просмотр) и/или установить выбранный."""
     bus = await _bus(session, bus_id)
     now = utcnow()
+    who = request.session.get("user")
 
     removed = None
     if bus.installed_disk_id:
@@ -238,8 +240,20 @@ async def swap_disk(bus_id: int, data: schemas.SwapRequest, session: AsyncSessio
         date=now, bus_id=bus.id,
         removed_disk_id=removed.id if removed else None,
         installed_disk_id=new.id if new else None,
-        note=data.note,
+        note=data.note, user=who,
     ))
+    await session.commit()
+    return {"ok": True}
+
+
+@router.post("/api/disks/{disk_id}/restore")
+async def disk_restore(disk_id: int, session: AsyncSession = Depends(get_session)):
+    """Вернуть неисправный диск в строй (faulty → ready, резерв)."""
+    disk = await _disk(session, disk_id)
+    if disk.status != DiskStatus.FAULTY:
+        raise HTTPException(400, "Вернуть в строй можно только неисправный диск")
+    disk.status = DiskStatus.READY
+    disk.status_since = utcnow()
     await session.commit()
     return {"ok": True}
 
@@ -263,13 +277,13 @@ async def swaplog_csv(bus_id: int | None = None, disk_id: int | None = None,
     disks = {d.id: d.label for d in await _disks(session)}
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=";")
-    w.writerow(["Дата", "Автобус", "Снят диск", "Установлен диск", "Заметка"])
+    w.writerow(["Дата", "Автобус", "Снят диск", "Установлен диск", "Кто", "Заметка"])
     for r in rows:
         w.writerow([
             r.date.strftime("%Y-%m-%d %H:%M"), buses.get(r.bus_id, r.bus_id),
             disks.get(r.removed_disk_id, "") if r.removed_disk_id else "",
             disks.get(r.installed_disk_id, "") if r.installed_disk_id else "",
-            r.note or "",
+            r.user or "", r.note or "",
         ])
     return StreamingResponse(iter(["﻿" + buf.getvalue()]),
                              media_type="text/csv; charset=utf-8",
@@ -352,6 +366,38 @@ async def swaplog_page(request: Request, bus_id: int | None = None, disk_id: int
     })
 
 
+@router.get("/buses/collection", response_class=HTMLResponse)
+async def collection_page(request: Request, session: AsyncSession = Depends(get_session)):
+    """День сбора дисков: быстрый проход по списку с заменой в один клик."""
+    buses = list((await session.execute(select(Bus))).scalars())
+    disks = await _disks(session)
+    by_id = {d.id: d for d in disks}
+    ready = [d for d in disks if d.status == DiskStatus.READY]
+    swap_days, _ = await _thresholds(session)
+
+    today = dt.datetime.now().date()
+    swapped_today = set()
+    for log in await _swaplog(session):
+        d = log.date
+        local = d.astimezone().replace(tzinfo=None) if d.tzinfo else d
+        if local.date() == today:
+            swapped_today.add(log.bus_id)
+
+    rows = []
+    for b in sorted(buses, key=lambda b: (_nat(b.route), _nat(b.bus_number))):
+        color, reason = bus_status(b, disks, swap_days)
+        rows.append({
+            "bus": b, "color": color, "reason": reason,
+            "disk": by_id.get(b.installed_disk_id) if b.installed_disk_id else None,
+            "done": b.id in swapped_today,
+            "ready": sorted(ready, key=lambda d: 0 if d.assigned_bus_id == b.id else 1),
+        })
+    return templates.TemplateResponse("collection.html", {
+        "request": request, "rows": rows,
+        "total": len(buses), "done": len(swapped_today),
+    })
+
+
 @router.get("/buses/{bus_id}", response_class=HTMLResponse)
 async def bus_page(bus_id: int, request: Request, session: AsyncSession = Depends(get_session)):
     bus = (await session.execute(select(Bus).where(Bus.id == bus_id))).scalar_one_or_none()
@@ -370,6 +416,25 @@ async def bus_page(bus_id: int, request: Request, session: AsyncSession = Depend
         "assigned": assigned, "ready_disks": ready, "history": history,
         "disks_by_id": by_id,
     })
+
+
+@router.get("/api/buses/collection.csv")
+async def collection_csv(session: AsyncSession = Depends(get_session)):
+    """Ведомость на сбор: автобус, маршрут, текущий диск, готов ли резерв."""
+    buses = list((await session.execute(select(Bus))).scalars())
+    disks = await _disks(session)
+    by_id = {d.id: d for d in disks}
+    buf = io.StringIO()
+    w = csv.writer(buf, delimiter=";")
+    w.writerow(["Автобус", "Маршрут", "Диск в регистраторе", "Резерв готов", "Заметка по диску"])
+    for b in sorted(buses, key=lambda b: (_nat(b.route), _nat(b.bus_number))):
+        cur = by_id.get(b.installed_disk_id) if b.installed_disk_id else None
+        reserve = any(d.assigned_bus_id == b.id and d.status == DiskStatus.READY for d in disks)
+        w.writerow([b.bus_number, b.route or "", cur.label if cur else "НЕТ ДИСКА",
+                    "да" if reserve else "нет", (cur.note if cur else "") or ""])
+    return StreamingResponse(iter(["﻿" + buf.getvalue()]),
+                             media_type="text/csv; charset=utf-8",
+                             headers={"Content-Disposition": "attachment; filename=collection.csv"})
 
 
 @router.get("/disks", response_class=HTMLResponse)

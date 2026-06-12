@@ -83,6 +83,26 @@ async def test_reviewed_and_faulty(db):
         assert await _disk_status(d) == DiskStatus.FAULTY
 
 
+async def test_restore_faulty(db):
+    async with _client() as c:
+        d = (await c.post("/api/disks", json={"label": "Ф-1"})).json()["id"]
+        await c.post(f"/api/disks/{d}/faulty", json={"note": "битый"})
+        assert await _disk_status(d) == DiskStatus.FAULTY
+        r = await c.post(f"/api/disks/{d}/restore")
+        assert r.status_code == 200
+        assert await _disk_status(d) == DiskStatus.READY
+        # ready нельзя «вернуть в строй»
+        assert (await c.post(f"/api/disks/{d}/restore")).status_code == 400
+
+
+async def test_collection_page_and_csv(db):
+    async with _client() as c:
+        await c.post("/api/buses", json={"bus_number": "55", "route": "5"})
+        assert (await c.get("/buses/collection")).status_code == 200
+        r = await c.get("/api/buses/collection.csv")
+        assert r.status_code == 200 and "text/csv" in r.headers["content-type"]
+
+
 async def test_pages_render(db):
     async with _client() as c:
         bus = (await c.post("/api/buses", json={"bus_number": "100", "route": "5"})).json()["id"]

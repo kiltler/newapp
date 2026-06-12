@@ -15,7 +15,7 @@
   </div>
 
   <table class="grid">
-    <thead><tr><th>Дата</th><th>Автобус</th><th>Снят</th><th>Установлен</th><th>Заметка</th></tr></thead>
+    <thead><tr><th>Дата</th><th>Автобус</th><th>Снят</th><th>Установлен</th><th>Кто</th><th>Заметка</th></tr></thead>
     <tbody>
     {% for r in rows %}
       <tr>
@@ -23,9 +23,10 @@
         <td>{% set b = buses.get(r.bus_id) %}{% if b %}<a href="/buses/{{ b.id }}">{{ b.bus_number }}</a>{% else %}#{{ r.bus_id }}{% endif %}</td>
         <td>{{ disks[r.removed_disk_id].label if r.removed_disk_id and r.removed_disk_id in disks else '—' }}</td>
         <td>{{ disks[r.installed_disk_id].label if r.installed_disk_id and r.installed_disk_id in disks else '—' }}</td>
+        <td class="muted">{{ r.user or '—' }}</td>
         <td>{{ r.note or '' }}</td>
       </tr>
-    {% else %}<tr><td colspan="5" class="muted">Операций ещё не было.</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="6" class="muted">Операций ещё не было.</td></tr>{% endfor %}
     </tbody>
   </table>
 </div>

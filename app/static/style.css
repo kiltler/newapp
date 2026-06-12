@@ -209,6 +209,27 @@ tr.row-muted { opacity: .45; }
   display: flex; flex-direction: column; gap: 10px; min-width: 250px; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
 .bus-settings-body label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
 .bus-settings-body input { padding: 9px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; color: var(--text); }
+
+/* День сбора дисков */
+.collect-progress { font-size: 16px; margin: 8px 0; }
+.pbar { height: 10px; background: var(--line); border-radius: 6px; overflow: hidden; margin-top: 6px; }
+.pbar-fill { height: 100%; background: #2ecc71; transition: width .3s; }
+.collect-filter { width: 100%; max-width: 480px; padding: 11px; margin: 10px 0; background: var(--bg);
+  border: 1px solid var(--line); border-radius: 8px; color: var(--text); font-size: 16px; }
+.collect-list { display: flex; flex-direction: column; gap: 10px; }
+.collect-row { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--line);
+  border-radius: 10px; padding: 12px 14px; }
+.collect-row.done { border-left-color: #2ecc71; opacity: .7; }
+.collect-row .done-badge { display: none; color: #2ecc71; font-weight: 700; margin-left: auto; }
+.collect-row.done .done-badge { display: inline; }
+.collect-head { display: flex; gap: 10px; align-items: center; font-size: 17px; }
+.collect-now { color: var(--muted); margin: 6px 0; }
+.collect-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.collect-controls select, .collect-controls input { padding: 11px; background: var(--bg);
+  border: 1px solid var(--line); border-radius: 8px; color: var(--text); font-size: 15px; }
+.collect-controls input { flex: 1; min-width: 160px; }
+@media (max-width: 640px) { .collect-controls { flex-direction: column; align-items: stretch; }
+  .collect-controls select, .collect-controls input, .collect-controls button { width: 100%; } }
 /* крупные элементы для работы с телефона */
 @media (max-width: 640px) {
   .bus-btn { padding: 12px 18px; font-size: 16px; }

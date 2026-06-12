@@ -31,7 +31,8 @@
           <button class="mini" onclick="editNote({{ d.id }}, {{ (d.note or '') | tojson }})">📝 заметка</button>
           <a class="mini" href="/buses/swaplog?disk_id={{ d.id }}" style="text-decoration:none">📜 история</a>
           {% if d.status == 'removed_review' %}<button class="mini" onclick="reviewed({{ d.id }})">✓ просмотрен</button>{% endif %}
-          {% if d.status != 'faulty' %}<button class="mini danger" onclick="faulty({{ d.id }})">неисправен</button>{% endif %}
+          {% if d.status == 'faulty' %}<button class="mini" onclick="restore({{ d.id }})">↩ в строй</button>
+          {% else %}<button class="mini danger" onclick="faulty({{ d.id }})">неисправен</button>{% endif %}
         </td>
       </tr>
     {% else %}<tr><td colspan="7" class="muted">Дисков нет.</td></tr>{% endfor %}
@@ -54,6 +55,7 @@ async function editNote(id, cur){
   r.ok?location.reload():alert(await r.text());
 }
 async function reviewed(id){ const r=await fetch(`/api/disks/${id}/reviewed`,{method:"POST"}); r.ok?location.reload():alert(await r.text()); }
+async function restore(id){ if(!confirm("Вернуть диск в строй (в резерв)?"))return; const r=await fetch(`/api/disks/${id}/restore`,{method:"POST"}); r.ok?location.reload():alert(await r.text()); }
 async function faulty(id){
   const note = prompt("Заметка о неисправности:"); if(note===null) return;
   const r=await fetch(`/api/disks/${id}/faulty`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({note})});

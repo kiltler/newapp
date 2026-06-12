@@ -350,6 +350,7 @@ class SwapLog(Base):
     removed_disk_id: Mapped[int | None] = mapped_column(Integer, default=None)
     installed_disk_id: Mapped[int | None] = mapped_column(Integer, default=None)
     note: Mapped[str | None] = mapped_column(Text, default=None)
+    user: Mapped[str | None] = mapped_column(String(64), default=None)  # кто выполнил
 
 
 class AppSetting(Base):

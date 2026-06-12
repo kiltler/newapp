@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}День сбора дисков{% endblock %}
+{% block content %}
+<div class="bus-scope">
+  <a href="/buses" class="muted">← к автобусам</a>
+  <div class="bus-banner">
+    <div><span class="bus-ico">📅</span> <b>День сбора дисков</b>
+      <span class="badge-offline">Ручной учёт</span></div>
+    <a class="bus-btn" href="/api/buses/collection.csv">⬇ Ведомость CSV</a>
+  </div>
+
+  <div class="collect-progress">
+    Обработано сегодня: <b id="done-count">{{ done }}</b> из {{ total }}
+    <div class="pbar"><div class="pbar-fill" id="pbar" style="width: {{ (done / total * 100)|round(0,'floor') if total else 0 }}%"></div></div>
+  </div>
+
+  <input id="cfilter" class="collect-filter" placeholder="Фильтр по номеру/маршруту… (печатай)" oninput="filterRows()">
+
+  <div class="collect-list">
+  {% set cm = {'green':'green','yellow':'yellow','orange':'orange','red':'red'} %}
+  {% for r in rows %}
+    <div class="collect-row {{ 'done' if r.done else '' }}" id="row-{{ r.bus.id }}"
+         data-find="{{ (r.bus.bus_number ~ ' ' ~ (r.bus.route or '')) | lower }}">
+      <div class="collect-head">
+        <span class="dot {{ cm[r.color] }}"></span>
+        <a href="/buses/{{ r.bus.id }}"><b>{{ r.bus.bus_number }}</b></a>
+        <span class="muted">марш. {{ r.bus.route or '—' }}</span>
+        <span class="done-badge">✓ сегодня</span>
+      </div>
+      <div class="collect-now">Сейчас: {% if r.disk %}<b>{{ r.disk.label }}</b> ({{ r.disk.type }}){% else %}<span class="badge red">нет диска</span>{% endif %}</div>
+      <div class="collect-controls">
+        <select id="sel-{{ r.bus.id }}">
+          <option value="">— поставить (готовый) —</option>
+          {% for d in r.ready %}
+            <option value="{{ d.id }}">{{ d.label }} ({{ d.type }}){% if d.assigned_bus_id == r.bus.id %} ★{% endif %}</option>
+          {% endfor %}
+        </select>
+        <input id="note-{{ r.bus.id }}" placeholder="заметка (нет записи / замазали…)">
+        <button class="bus-btn" onclick="swapRow({{ r.bus.id }})">Заменить</button>
+        <button class="bus-btn danger" onclick="removeRow({{ r.bus.id }})">Снять</button>
+      </div>
+    </div>
+  {% else %}
+    <p class="muted">Автобусов нет.</p>
+  {% endfor %}
+  </div>
+</div>
+
+<script>
+const TOTAL = {{ total }};
+function filterRows() {
+  const q = document.getElementById("cfilter").value.toLowerCase().trim();
+  document.querySelectorAll(".collect-row").forEach(row => {
+    row.style.display = (!q || row.dataset.find.includes(q)) ? "" : "none";
+  });
+}
+function markDone(busId) {
+  const row = document.getElementById("row-" + busId);
+  if (row && !row.classList.contains("done")) {
+    row.classList.add("done");
+    const dc = document.getElementById("done-count");
+    const n = parseInt(dc.textContent, 10) + 1;
+    dc.textContent = n;
+    document.getElementById("pbar").style.width = (TOTAL ? n / TOTAL * 100 : 0) + "%";
+  }
+}
+async function postSwap(busId, body) {
+  return fetch(`/api/buses/${busId}/swap`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+}
+async function swapRow(busId) {
+  const id = document.getElementById("sel-" + busId).value;
+  const note = document.getElementById("note-" + busId).value || null;
+  const body = { installed_disk_id: id ? parseInt(id, 10) : null, note };
+  let r = await postSwap(busId, body);
+  if (r.status === 409) {
+    if (!confirm("Диск закреплён за другим автобусом. Всё равно поставить?")) return;
+    body.force = true; r = await postSwap(busId, body);
+  }
+  if (r.ok) { markDone(busId); document.getElementById("row-" + busId).querySelector(".collect-now").innerHTML = "Сейчас: обновится после перезагрузки · ✓ замена записана"; }
+  else alert("Ошибка: " + (await r.text()));
+}
+async function removeRow(busId) {
+  if (!confirm("Снять диск без замены (на просмотр)?")) return;
+  const note = document.getElementById("note-" + busId).value || null;
+  const r = await postSwap(busId, { installed_disk_id: null, note });
+  if (r.ok) markDone(busId); else alert("Ошибка: " + (await r.text()));
+}
+</script>
+{% endblock %}

@@ -54,6 +54,7 @@ _NEW_COLUMNS = [
     ("channels", "quality_checked_at", "TIMESTAMP"),
     ("channels", "frame_sig", "TEXT"),
     ("channels", "frozen_count", "INTEGER DEFAULT 0"),
+    ("swap_log", "user", "VARCHAR(64)"),
 ]
 
 
