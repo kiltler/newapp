@@ -198,6 +198,12 @@ class FaultyRequest(BaseModel):
     note: str | None = None
 
 
+class ReviewRequest(BaseModel):
+    tags: list[str] = []
+    note: str | None = None
+    finish: bool = False  # пометить диск готовым (в резерв) после записи наблюдения
+
+
 class BusSettings(BaseModel):
     swap_days: int = 14
     review_days: int = 7

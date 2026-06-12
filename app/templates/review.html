@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Очередь на просмотр{% endblock %}
+{% block content %}
+<div class="bus-scope">
+  <a href="/buses" class="muted">← к автобусам</a>
+  <div class="bus-banner">
+    <div><span class="bus-ico">🔎</span> <b>Очередь на просмотр</b>
+      <span class="badge-offline">{{ items|length }} дисков</span></div>
+  </div>
+  <p class="muted">Диски сняты и ждут просмотра. Отметь, что нашёл, и пометь готовым → в резерв.</p>
+
+  <div class="review-list">
+  {% for it in items %}
+    <div class="review-card" id="rv-{{ it.disk.id }}">
+      <div class="review-head">
+        💿 <b>{{ it.disk.label }}</b> <span class="muted">({{ it.disk.type }})</span>
+        · автобус {% if it.bus %}<a href="/buses/{{ it.bus.id }}">{{ it.bus.bus_number }}</a>{% else %}—{% endif %}
+        {% if it.bus and it.bus.route %}<span class="muted">марш. {{ it.bus.route }}</span>{% endif %}
+        <span class="wait {{ 'late' if it.waiting >= 7 else '' }}">ждёт {{ it.waiting }} дн.</span>
+      </div>
+      {% if it.disk.note %}<div class="muted">прошлая пометка: {{ it.disk.note }}</div>{% endif %}
+      <div class="tags">
+        {% for t in tags %}<button type="button" class="tag" data-tag="{{ t }}" onclick="this.classList.toggle('on')">{{ t }}</button>{% endfor %}
+      </div>
+      <div class="review-controls">
+        <input class="rv-note" placeholder="комментарий (необязательно)">
+        <button class="bus-btn" onclick="review({{ it.disk.id }}, false)">Сохранить пометку</button>
+        <button class="bus-btn" style="background:#2ecc71" onclick="review({{ it.disk.id }}, true)">✓ Просмотрен → резерв</button>
+      </div>
+    </div>
+  {% else %}
+    <p class="muted">Очередь пуста — все снятые диски просмотрены 🎉</p>
+  {% endfor %}
+  </div>
+</div>
+
+<script>
+async function review(diskId, finish) {
+  const card = document.getElementById("rv-" + diskId);
+  const tags = [...card.querySelectorAll(".tag.on")].map(t => t.dataset.tag);
+  const note = card.querySelector(".rv-note").value || null;
+  const r = await fetch(`/api/disks/${diskId}/review`, { method: "POST",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tags, note, finish }) });
+  if (r.ok) location.reload(); else alert("Ошибка: " + (await r.text()));
+}
+</script>
+{% endblock %}

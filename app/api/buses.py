@@ -19,7 +19,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import schemas
 from app.config import settings
 from app.database import get_session
-from app.models import Bus, Disk, DiskStatus, SwapLog, utcnow
+from app.models import (
+    OBSERVATION_TAGS,
+    Bus,
+    Disk,
+    DiskReview,
+    DiskStatus,
+    SwapLog,
+    utcnow,
+)
 from app.services import appsettings
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -202,27 +210,11 @@ async def disk_faulty(disk_id: int, data: schemas.FaultyRequest, session: AsyncS
 
 
 # ── Ключевая операция: замена/снятие/установка ──────────────────────────────────
-@router.post("/api/buses/{bus_id}/swap")
-async def swap_disk(bus_id: int, data: schemas.SwapRequest, request: Request,
-                    session: AsyncSession = Depends(get_session)):
-    """Атомарно: снять текущий диск (→ на просмотр) и/или установить выбранный."""
-    bus = await _bus(session, bus_id)
+async def _perform_swap(session: AsyncSession, bus: Bus, new: Disk | None, note: str | None, who: str | None):
     now = utcnow()
-    who = request.session.get("user")
-
     removed = None
     if bus.installed_disk_id:
         removed = await _disk(session, bus.installed_disk_id)
-
-    new = None
-    if data.installed_disk_id:
-        new = await _disk(session, data.installed_disk_id)
-        if new.status in (DiskStatus.INSTALLED, DiskStatus.FAULTY):
-            raise HTTPException(400, f"Нельзя установить диск со статусом «{new.status}»")
-        if new.assigned_bus_id not in (None, bus.id) and not data.force:
-            raise HTTPException(409, "Диск закреплён за другим автобусом — подтвердите установку")
-
-    # применяем
     if removed:
         removed.status = DiskStatus.REMOVED_REVIEW
         removed.status_since = now
@@ -235,15 +227,43 @@ async def swap_disk(bus_id: int, data: schemas.SwapRequest, request: Request,
     else:
         bus.installed_disk_id = None
         bus.installed_since = None
-
     session.add(SwapLog(
         date=now, bus_id=bus.id,
         removed_disk_id=removed.id if removed else None,
         installed_disk_id=new.id if new else None,
-        note=data.note, user=who,
+        note=note, user=who,
     ))
     await session.commit()
+
+
+@router.post("/api/buses/{bus_id}/swap")
+async def swap_disk(bus_id: int, data: schemas.SwapRequest, request: Request,
+                    session: AsyncSession = Depends(get_session)):
+    """Атомарно: снять текущий диск (→ на просмотр) и/или установить выбранный."""
+    bus = await _bus(session, bus_id)
+    new = None
+    if data.installed_disk_id:
+        new = await _disk(session, data.installed_disk_id)
+        if new.status in (DiskStatus.INSTALLED, DiskStatus.FAULTY):
+            raise HTTPException(400, f"Нельзя установить диск со статусом «{new.status}»")
+        if new.assigned_bus_id not in (None, bus.id) and not data.force:
+            raise HTTPException(409, "Диск закреплён за другим автобусом — подтвердите установку")
+    await _perform_swap(session, bus, new, data.note, request.session.get("user"))
     return {"ok": True}
+
+
+@router.post("/api/buses/{bus_id}/swap-reserve")
+async def swap_reserve(bus_id: int, request: Request, session: AsyncSession = Depends(get_session)):
+    """Замена «парой» в один тап: ставит готовый резерв этого автобуса."""
+    bus = await _bus(session, bus_id)
+    disks = await _disks(session)
+    reserve = next(
+        (d for d in disks if d.assigned_bus_id == bus.id and d.status == DiskStatus.READY), None
+    )
+    if reserve is None:
+        raise HTTPException(400, "Нет готового резерва, закреплённого за этим автобусом")
+    await _perform_swap(session, bus, reserve, "замена парой", request.session.get("user"))
+    return {"ok": True, "installed": reserve.label}
 
 
 @router.post("/api/disks/{disk_id}/restore")
@@ -254,6 +274,28 @@ async def disk_restore(disk_id: int, session: AsyncSession = Depends(get_session
         raise HTTPException(400, "Вернуть в строй можно только неисправный диск")
     disk.status = DiskStatus.READY
     disk.status_since = utcnow()
+    await session.commit()
+    return {"ok": True}
+
+
+@router.post("/api/disks/{disk_id}/review")
+async def disk_review(disk_id: int, data: schemas.ReviewRequest, request: Request,
+                      session: AsyncSession = Depends(get_session)):
+    """Записать наблюдение по диску (теги + заметка); опц. пометить готовым."""
+    disk = await _disk(session, disk_id)
+    session.add(DiskReview(
+        disk_id=disk.id, bus_id=disk.assigned_bus_id,
+        tags=data.tags or [], note=data.note, user=request.session.get("user"),
+    ))
+    # отражаем последнее наблюдение в заметке диска (для быстрого взгляда)
+    summary = ", ".join(data.tags or [])
+    if data.note:
+        summary = (summary + " · " + data.note) if summary else data.note
+    if summary:
+        disk.note = summary
+    if data.finish and disk.status == DiskStatus.REMOVED_REVIEW:
+        disk.status = DiskStatus.READY
+        disk.status_since = utcnow()
     await session.commit()
     return {"ok": True}
 
@@ -398,6 +440,59 @@ async def collection_page(request: Request, session: AsyncSession = Depends(get_
     })
 
 
+@router.get("/buses/review", response_class=HTMLResponse)
+async def review_queue(request: Request, session: AsyncSession = Depends(get_session)):
+    """Очередь на просмотр: диски в статусе 'на просмотре'."""
+    disks = await _disks(session)
+    buses = {b.id: b for b in (await session.execute(select(Bus))).scalars()}
+    now = utcnow()
+    items = []
+    for d in disks:
+        if d.status != DiskStatus.REMOVED_REVIEW:
+            continue
+        waiting = (now - d.status_since).days if d.status_since else 0
+        items.append({"disk": d, "bus": buses.get(d.assigned_bus_id), "waiting": waiting})
+    items.sort(key=lambda x: -x["waiting"])  # дольше всех ждут — сверху
+    return templates.TemplateResponse("review.html", {
+        "request": request, "items": items, "tags": OBSERVATION_TAGS,
+    })
+
+
+@router.get("/buses/stats", response_class=HTMLResponse)
+async def bus_stats(request: Request, days: int = 30, session: AsyncSession = Depends(get_session)):
+    since = utcnow() - dt.timedelta(days=days)
+    def _aware(d):
+        return d if (d and d.tzinfo) else (d.replace(tzinfo=dt.timezone.utc) if d else d)
+
+    reviews = [
+        r for r in (await session.execute(select(DiskReview))).scalars()
+        if _aware(r.created_at) >= since
+    ]
+    swaps = [s for s in await _swaplog(session) if _aware(s.date) >= since]
+    buses = {b.id: b for b in (await session.execute(select(Bus))).scalars()}
+
+    tag_counts: dict[str, int] = {}
+    bus_problems: dict[int, int] = {}
+    for r in reviews:
+        problem = False
+        for t in (r.tags or []):
+            tag_counts[t] = tag_counts.get(t, 0) + 1
+            if t != "ок":
+                problem = True
+        if problem and r.bus_id:
+            bus_problems[r.bus_id] = bus_problems.get(r.bus_id, 0) + 1
+
+    top_buses = sorted(
+        ({"bus": buses.get(bid), "bid": bid, "count": n} for bid, n in bus_problems.items()),
+        key=lambda x: -x["count"],
+    )[:15]
+    tag_rows = sorted(tag_counts.items(), key=lambda kv: -kv[1])
+    return templates.TemplateResponse("stats.html", {
+        "request": request, "days": days, "top_buses": top_buses, "tag_rows": tag_rows,
+        "reviews_total": len(reviews), "swaps_total": len(swaps),
+    })
+
+
 @router.get("/buses/{bus_id}", response_class=HTMLResponse)
 async def bus_page(bus_id: int, request: Request, session: AsyncSession = Depends(get_session)):
     bus = (await session.execute(select(Bus).where(Bus.id == bus_id))).scalar_one_or_none()
@@ -438,12 +533,29 @@ async def collection_csv(session: AsyncSession = Depends(get_session)):
 
 
 @router.get("/disks", response_class=HTMLResponse)
-async def disks_page(request: Request, status: str = "", session: AsyncSession = Depends(get_session)):
-    disks = await _disks(session)
+async def disks_page(request: Request, status: str = "", q: str = "",
+                     session: AsyncSession = Depends(get_session)):
+    all_disks = await _disks(session)
+    buses = {b.id: b.bus_number for b in (await session.execute(select(Bus))).scalars()}
+    # дубли меток (без учёта регистра)
+    seen: dict[str, int] = {}
+    for d in all_disks:
+        key = (d.label or "").strip().lower()
+        seen[key] = seen.get(key, 0) + 1
+    dup_labels = sorted({d.label for d in all_disks if seen.get((d.label or "").strip().lower(), 0) > 1})
+
+    disks = all_disks
     if status:
         disks = [d for d in disks if d.status == status]
-    disks.sort(key=lambda d: (d.status, d.label))
-    buses = {b.id: b.bus_number for b in (await session.execute(select(Bus))).scalars()}
+    if q:
+        ql = q.lower()
+        disks = [
+            d for d in disks
+            if ql in (d.label or "").lower() or ql in (d.note or "").lower()
+            or ql in (buses.get(d.assigned_bus_id, "") or "").lower()
+        ]
+    disks = sorted(disks, key=lambda d: (d.status, d.label))
     return templates.TemplateResponse("disks.html", {
         "request": request, "disks": disks, "buses": buses, "status": status,
+        "q": q, "dup_labels": dup_labels,
     })

@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Статистика автобусов{% endblock %}
+{% block content %}
+<div class="bus-scope">
+  <a href="/buses" class="muted">← к автобусам</a>
+  <div class="bus-banner">
+    <div><span class="bus-ico">📊</span> <b>Статистика за {{ days }} дн.</b></div>
+  </div>
+
+  <section class="bus-summary">
+    <div class="bus-tile"><span class="num">{{ swaps_total }}</span><span>замен дисков</span></div>
+    <div class="bus-tile"><span class="num">{{ reviews_total }}</span><span>просмотров</span></div>
+  </section>
+
+  <h2>🚍 Проблемные автобусы (по наблюдениям)</h2>
+  <table class="grid">
+    <thead><tr><th>Автобус</th><th>Маршрут</th><th>Проблемных просмотров</th></tr></thead>
+    <tbody>
+    {% for r in top_buses %}
+      <tr>
+        <td>{% if r.bus %}<a href="/buses/{{ r.bus.id }}">{{ r.bus.bus_number }}</a>{% else %}#{{ r.bid }}{% endif %}</td>
+        <td>{{ r.bus.route if r.bus and r.bus.route else '—' }}</td>
+        <td><b>{{ r.count }}</b></td>
+      </tr>
+    {% else %}<tr><td colspan="3" class="muted">Проблем за период не зафиксировано 🎉</td></tr>{% endfor %}
+    </tbody>
+  </table>
+
+  <h2>🏷 Что находили (теги)</h2>
+  <table class="grid">
+    <thead><tr><th>Наблюдение</th><th>Сколько раз</th></tr></thead>
+    <tbody>
+    {% for tag, n in tag_rows %}
+      <tr><td>{{ tag }}</td><td><b>{{ n }}</b></td></tr>
+    {% else %}<tr><td colspan="2" class="muted">Пометок пока нет.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

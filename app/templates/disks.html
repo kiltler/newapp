@@ -8,12 +8,20 @@
     <button class="bus-btn" onclick="addDisk()">+ Диск</button>
   </div>
 
+  {% if dup_labels %}
+  <div class="attention"><h3>⚠️ Дубли меток</h3>
+    <div>Одинаковые метки у разных дисков: <b>{{ dup_labels|join(', ') }}</b> — лучше переименовать, чтобы не путать.</div>
+  </div>
+  {% endif %}
+
   <form class="bus-search" method="get">
+    <input name="q" value="{{ q }}" placeholder="Поиск диска по метке / заметке / автобусу…">
     <select name="status" onchange="this.form.submit()">
       <option value="">Все статусы</option>
       {% set sl = {'installed':'установлен','ready':'готов (резерв)','removed_review':'на просмотре','faulty':'неисправен'} %}
       {% for k,v in sl.items() %}<option value="{{ k }}" {{ 'selected' if status==k else '' }}>{{ v }}</option>{% endfor %}
     </select>
+    <button class="bus-btn">Найти</button>
   </form>
 
   <table class="grid">

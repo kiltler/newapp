@@ -18,8 +18,10 @@
       <span class="badge-offline">OFFLINE · Ручной учёт</span></div>
     <div>
       <a class="bus-btn" href="/buses/collection">📅 День сбора</a>
+      <a class="bus-btn" href="/buses/review">🔎 Очередь</a>
       <a class="bus-btn" href="/disks">Реестр дисков</a>
-      <a class="bus-btn" href="/buses/swaplog">Журнал замен</a>
+      <a class="bus-btn" href="/buses/swaplog">Журнал</a>
+      <a class="bus-btn" href="/buses/stats">📊 Статистика</a>
       <button class="bus-btn" onclick="addBus()">+ Автобус</button>
     </div>
   </div>
@@ -30,7 +32,7 @@
     <div class="bus-tile {{ 'bad' if summary.no_disk else '' }}"><span class="num">{{ summary.no_disk }}</span><span>без диска</span></div>
     <div class="bus-tile {{ 'warn' if summary.overdue else '' }}"><span class="num">{{ summary.overdue }}</span><span>просрочка замены</span></div>
     <div class="bus-tile"><span class="num">{{ summary.disk_ready }}</span><span>дисков в резерве</span></div>
-    <div class="bus-tile {{ 'warn' if summary.disk_review else '' }}"><span class="num">{{ summary.disk_review }}</span><span>на просмотре</span></div>
+    <a class="bus-tile {{ 'warn' if summary.disk_review else '' }}" href="/buses/review" style="text-decoration:none;color:inherit"><span class="num">{{ summary.disk_review }}</span><span>на просмотре →</span></a>
     <div class="bus-tile {{ 'bad' if summary.disk_faulty else '' }}"><span class="num">{{ summary.disk_faulty }}</span><span>неисправных</span></div>
   </section>
 

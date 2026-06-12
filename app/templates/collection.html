@@ -36,7 +36,8 @@
           {% endfor %}
         </select>
         <input id="note-{{ r.bus.id }}" placeholder="заметка (нет записи / замазали…)">
-        <button class="bus-btn" onclick="swapRow({{ r.bus.id }})">Заменить</button>
+        <button class="bus-btn" style="background:#2ecc71" onclick="swapReserve({{ r.bus.id }})">⚡ Поставить резерв</button>
+        <button class="bus-btn" onclick="swapRow({{ r.bus.id }})">Заменить выбранный</button>
         <button class="bus-btn danger" onclick="removeRow({{ r.bus.id }})">Снять</button>
       </div>
     </div>
@@ -78,6 +79,14 @@ async function swapRow(busId) {
   }
   if (r.ok) { markDone(busId); document.getElementById("row-" + busId).querySelector(".collect-now").innerHTML = "Сейчас: обновится после перезагрузки · ✓ замена записана"; }
   else alert("Ошибка: " + (await r.text()));
+}
+async function swapReserve(busId) {
+  const r = await fetch(`/api/buses/${busId}/swap-reserve`, { method: "POST" });
+  if (r.ok) {
+    const j = await r.json();
+    markDone(busId);
+    document.getElementById("row-" + busId).querySelector(".collect-now").innerHTML = "✓ поставлен резерв: <b>" + j.installed + "</b>";
+  } else alert("Ошибка: " + (await r.text()));
 }
 async function removeRow(busId) {
   if (!confirm("Снять диск без замены (на просмотр)?")) return;

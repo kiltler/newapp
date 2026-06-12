@@ -103,6 +103,46 @@ async def test_collection_page_and_csv(db):
         assert r.status_code == 200 and "text/csv" in r.headers["content-type"]
 
 
+async def test_swap_reserve_pair(db):
+    async with _client() as c:
+        bus = (await c.post("/api/buses", json={"bus_number": "21"})).json()["id"]
+        d1 = (await c.post("/api/disks", json={"label": "П-1", "assigned_bus_id": bus})).json()["id"]
+        d2 = (await c.post("/api/disks", json={"label": "П-2", "assigned_bus_id": bus})).json()["id"]
+        await c.post(f"/api/buses/{bus}/swap", json={"installed_disk_id": d1})  # d1 стоит, d2 резерв
+        r = await c.post(f"/api/buses/{bus}/swap-reserve")                       # пара в один тап
+        assert r.status_code == 200 and r.json()["installed"] == "П-2"
+        assert await _disk_status(d2) == DiskStatus.INSTALLED
+        assert await _disk_status(d1) == DiskStatus.REMOVED_REVIEW
+        # резерва больше нет → 400
+        assert (await c.post(f"/api/buses/{bus}/swap-reserve")).status_code == 400
+
+
+async def test_disk_review_and_stats(db):
+    async with _client() as c:
+        bus = (await c.post("/api/buses", json={"bus_number": "30", "route": "7"})).json()["id"]
+        d = (await c.post("/api/disks", json={"label": "Р-1", "assigned_bus_id": bus})).json()["id"]
+        await c.post(f"/api/buses/{bus}/swap", json={"installed_disk_id": d})
+        await c.post(f"/api/buses/{bus}/swap", json={"installed_disk_id": None})  # снят → review
+        # запись наблюдения с проблемой + пометить готовым
+        r = await c.post(f"/api/disks/{d}/review", json={"tags": ["нет записи"], "note": "канал 3", "finish": True})
+        assert r.status_code == 200
+        assert await _disk_status(d) == DiskStatus.READY
+        # статистика видит проблемный автобус
+        stats = (await c.get("/buses/stats")).text
+        assert "нет записи" in stats and "30" in stats
+
+
+async def test_review_and_dup_pages(db):
+    async with _client() as c:
+        bus = (await c.post("/api/buses", json={"bus_number": "40"})).json()["id"]
+        await c.post("/api/disks", json={"label": "ДУБ", "assigned_bus_id": bus})
+        await c.post("/api/disks", json={"label": "дуб", "assigned_bus_id": bus})  # дубль (регистр)
+        assert (await c.get("/buses/review")).status_code == 200
+        page = (await c.get("/disks")).text
+        assert "Дубли меток" in page
+        assert (await c.get("/disks?q=ДУБ")).status_code == 200
+
+
 async def test_pages_render(db):
     async with _client() as c:
         bus = (await c.post("/api/buses", json={"bus_number": "100", "route": "5"})).json()["id"]

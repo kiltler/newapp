@@ -372,3 +372,24 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(Text)
     role: Mapped[str] = mapped_column(String(16), default="bus")
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DiskReview(Base):
+    """Запись просмотра диска: что нашли (теги + заметка), кто и когда."""
+
+    __tablename__ = "disk_reviews"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    disk_id: Mapped[int] = mapped_column(Integer)
+    bus_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    note: Mapped[str | None] = mapped_column(Text, default=None)
+    user: Mapped[str | None] = mapped_column(String(64), default=None)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# Стандартные теги наблюдений при просмотре диска
+OBSERVATION_TAGS = [
+    "нет записи", "дыра в записи", "камера замазана",
+    "нет звука", "засвет/темно", "ок",
+]
