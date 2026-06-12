@@ -114,7 +114,14 @@ async def raise_alert(
         if photo is not None:
             sent = await telegram.send_photo(photo, caption=text)
         else:
-            sent = await telegram.send_message(text)
+            # Для алертов уровня устройства — кнопки «перезагрузить/синхр. время»
+            markup = None
+            if device_id is not None and channel_id is None:
+                markup = {"inline_keyboard": [[
+                    {"text": "🔄 Перезагрузить", "callback_data": f"rb:{device_id}"},
+                    {"text": "🕐 Синхр. время", "callback_data": f"st:{device_id}"},
+                ]]}
+            sent = await telegram.send_message(text, reply_markup=markup)
         if sent:
             state.last_notified_at = now
     return True

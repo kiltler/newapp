@@ -5,6 +5,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import asyncio
 import secrets
 
 from fastapi import FastAPI, Request
@@ -16,6 +17,7 @@ from app.api import auth, dashboard, devices, monitoring, plan
 from app.config import settings
 from app.database import init_db
 from app.scheduler import shutdown_scheduler, start_scheduler
+from app.services import bot
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
@@ -30,11 +32,13 @@ BASE_DIR = Path(__file__).resolve().parent
 async def lifespan(app: FastAPI):
     await init_db()
     start_scheduler()
+    bot_task = asyncio.create_task(bot.run_bot())
     log.info("NVR Monitor запущен (mock_mode=%s)", settings.mock_mode)
     try:
         yield
     finally:
         shutdown_scheduler()
+        bot_task.cancel()
 
 
 app = FastAPI(title="NVR Monitor", version="0.1.0", lifespan=lifespan)

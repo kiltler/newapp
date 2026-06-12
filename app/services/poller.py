@@ -29,18 +29,22 @@ log = logging.getLogger(__name__)
 # Один общий semaphore на процесс — щадим VPN-каналы
 _semaphore = asyncio.Semaphore(settings.max_concurrent_polls)
 
+# Время последнего завершённого полного опроса (для watchdog — детект «опрос завис»)
+last_poll_at: dt.datetime | None = None
+
 
 async def poll_all() -> None:
     """Опрашивает все включённые устройства параллельно (с ограничением)."""
+    global last_poll_at
     async with SessionLocal() as session:
         devices = (
             await session.execute(select(Device).where(Device.enabled.is_(True)))
         ).scalars().all()
         ids = [d.id for d in devices]
-    if not ids:
-        return
-    log.info("Опрос %d устройств", len(ids))
-    await asyncio.gather(*(poll_device(did) for did in ids), return_exceptions=True)
+    if ids:
+        log.info("Опрос %d устройств", len(ids))
+        await asyncio.gather(*(poll_device(did) for did in ids), return_exceptions=True)
+    last_poll_at = utcnow()
 
 
 async def poll_device(device_id: int) -> None:

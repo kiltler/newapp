@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
     telegram_enabled: bool = True
+    telegram_bot_enabled: bool = True  # двусторонний бот (команды/кнопки)
+
+    # Watchdog (внешний «пульс»: healthchecks.io и т.п.)
+    watchdog_url: str = ""
+    watchdog_interval_minutes: int = 1
 
     # Вход в панель (если admin_password пуст — вход отключён, панель открыта)
     admin_username: str = "admin"

@@ -8,7 +8,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import settings
-from app.services import archive, poller, quality
+from app.services import archive, poller, quality, watchdog
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +44,17 @@ def start_scheduler() -> None:
             trigger=IntervalTrigger(minutes=settings.quality_check_minutes),
             id="quality_check",
             name="Контроль качества картинки",
+            max_instances=1,
+            coalesce=True,
+            replace_existing=True,
+        )
+
+    if settings.watchdog_url:
+        scheduler.add_job(
+            watchdog.ping,
+            trigger=IntervalTrigger(minutes=settings.watchdog_interval_minutes),
+            id="watchdog",
+            name="Watchdog-пульс",
             max_instances=1,
             coalesce=True,
             replace_existing=True,

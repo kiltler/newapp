@@ -17,7 +17,9 @@ def is_configured() -> bool:
     return bool(settings.telegram_bot_token and settings.telegram_chat_id)
 
 
-async def send_message(text: str, *, chat_id: str | None = None) -> bool:
+async def send_message(
+    text: str, *, chat_id: str | None = None, reply_markup: dict | None = None
+) -> bool:
     """Отправляет HTML-сообщение. Возвращает True при успехе.
 
     Глобально управляется TELEGRAM_ENABLED; молча пропускает, если не настроено.
@@ -36,6 +38,8 @@ async def send_message(text: str, *, chat_id: str | None = None) -> bool:
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
     try:
         async with httpx.AsyncClient(timeout=15.0) as http:
             resp = await http.post(url, json=payload)
