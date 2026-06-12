@@ -63,6 +63,17 @@ def _parse_hik_time(value: str) -> dt.datetime:
         return dt.datetime.strptime(v[:19], "%Y-%m-%dT%H:%M:%S")
 
 
+def _isapi_error(resp) -> str:
+    """Достаёт причину отказа из тела ISAPI (statusString/subStatusCode)."""
+    try:
+        root = _strip_ns(_body(resp))
+        parts = [_text(root, "statusString"), _text(root, "subStatusCode")]
+        detail = ", ".join(p for p in parts if p)
+        return detail or f"HTTP {resp.status_code}"
+    except Exception:  # noqa: BLE001
+        return f"HTTP {resp.status_code}"
+
+
 class HikvisionClient(NVRClient):
     api_type = ApiType.HIKVISION
 
@@ -249,12 +260,12 @@ class HikvisionClient(NVRClient):
             headers={"Content-Type": "application/xml"},
         )
         if resp.status_code not in (200, 201):
-            raise FeatureUnavailable(f"time PUT: HTTP {resp.status_code}")
+            raise FeatureUnavailable(f"установка времени отклонена ({_isapi_error(resp)})")
 
     async def reboot(self) -> None:
         resp = await self._request("PUT", "/ISAPI/System/reboot")
         if resp.status_code not in (200, 201):
-            raise FeatureUnavailable(f"reboot: HTTP {resp.status_code}")
+            raise FeatureUnavailable(f"перезагрузка отклонена ({_isapi_error(resp)})")
 
     async def get_health(self) -> HealthInfo:
         resp = await self._request("GET", "/ISAPI/System/status")
