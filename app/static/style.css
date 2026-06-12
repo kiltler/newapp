@@ -287,3 +287,26 @@ tr.audit-stale { background: rgba(231,76,60,.10); }
 .login-card button { width: 100%; margin-top: 16px; padding: 10px; }
 .login-error { background: rgba(231,76,60,.15); color: var(--err); padding: 8px 12px;
   border-radius: 6px; font-size: 13px; text-align: center; }
+
+/* ── Мобильная адаптация (телефон) ── */
+@media (max-width: 760px) {
+  .container { padding: 12px 12px 84px; }
+  h1 { font-size: 21px; margin: 6px 0; }
+  h2 { font-size: 17px; margin: 18px 0 8px; }
+
+  /* широкие таблицы — горизонтальная прокрутка вместо «разъезда» */
+  table.grid { display: block; overflow-x: auto; white-space: nowrap;
+    -webkit-overflow-scrolling: touch; }
+  table.grid th, table.grid td { padding: 10px 9px; }
+
+  /* шапки разделов автобусов — компактнее, кнопки в ряд с переносом */
+  .bus-banner { font-size: 16px; padding: 10px 12px; }
+  .bus-banner > div { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .bus-btn { padding: 9px 12px; font-size: 14px; }
+  .badge-offline { margin-left: 4px; }
+
+  .info-grid { grid-template-columns: 1fr; }
+  .bus-search { flex-wrap: wrap; }
+  .bus-search input, .bus-search select { max-width: none; }
+  .cards { grid-template-columns: 1fr 1fr; }
+}

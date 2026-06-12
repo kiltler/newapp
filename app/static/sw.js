@@ -1,12 +1,9 @@
-// Service worker: установка PWA + кэш статики + офлайн-заглушка.
-const CACHE = "nvrmon-v1";
-const SHELL = [
-  "/static/style.css", "/static/app.js", "/static/notify.js",
-  "/static/icons/icon-192.png", "/offline",
-];
+// Service worker: установка PWA + офлайн-заглушка.
+// Стратегия "сначала сеть" — чтобы обновления стилей/страниц всегда подтягивались,
+// а кэш использовался только когда нет связи.
+const CACHE = "nvrmon-v3";
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).catch(() => {}));
   self.skipWaiting();
 });
 
@@ -19,15 +16,11 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   const req = e.request;
   if (req.method !== "GET") return; // действия (POST/PUT) — всегда напрямую в сеть
-  const url = new URL(req.url);
-  // статика — из кэша, потом сеть
-  if (url.pathname.startsWith("/static/")) {
-    e.respondWith(caches.match(req).then((r) => r || fetch(req).then((resp) => {
-      caches.open(CACHE).then((c) => c.put(req, resp.clone()));
+  e.respondWith(
+    fetch(req).then((resp) => {
+      const copy = resp.clone();
+      caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
       return resp;
-    })));
-    return;
-  }
-  // страницы — сеть, при оффлайне → заглушка
-  e.respondWith(fetch(req).catch(() => caches.match(req).then((r) => r || caches.match("/offline"))));
+    }).catch(() => caches.match(req).then((r) => r || caches.match("/offline")))
+  );
 });
