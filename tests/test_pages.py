@@ -59,11 +59,27 @@ async def test_plan_markers(db):
 async def test_pages_render(db):
     did = await _make_device()
     async with _client() as c:
-        for path in ["/", "/tv", "/history", "/plan", "/firmware", "/calc",
+        for path in ["/", "/tv", "/slideshow", "/history", "/plan", "/firmware", "/calc",
                      "/audit", "/labels", f"/m/{did}",
                      f"/devices/{did}", f"/devices/{did}/report", f"/devices/{did}/wall"]:
             r = await c.get(path)
             assert r.status_code == 200, f"{path} -> {r.status_code}"
+
+
+async def test_recent_alerts(db):
+    from app.database import SessionLocal
+    from app.models import Event, Severity
+
+    async with SessionLocal() as s:
+        s.add(Event(type="camera_down", severity=Severity.WARNING, message="канал упал"))
+        s.add(Event(type="camera_added", severity=Severity.INFO, message="инфо"))
+        await s.commit()
+    async with _client() as c:
+        r = await c.get("/api/alerts/recent?after_id=0")
+        assert r.status_code == 200
+        msgs = [e["message"] for e in r.json()]
+        assert "канал упал" in msgs          # проблема — есть
+        assert "инфо" not in msgs            # info-событие не показываем
 
 
 async def test_qr_png(db):

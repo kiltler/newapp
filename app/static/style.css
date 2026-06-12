@@ -157,6 +157,17 @@ tr.row-muted { opacity: .45; }
 .m-note { display: flex; gap: 8px; }
 .m-note input { flex: 1; padding: 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; color: var(--text); }
 
+/* Тосты живых оповещений */
+.toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column;
+  gap: 8px; z-index: 9999; max-width: 380px; }
+.toast { padding: 12px 34px 12px 14px; border-radius: 10px; color: #06121f; font-size: 14px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.5); position: relative; animation: toast-in .25s ease; }
+.toast.err { background: var(--err); color: #fff; }
+.toast.warn { background: var(--warn); }
+.toast.ok { background: var(--ok); }
+.toast-x { position: absolute; right: 10px; top: 10px; cursor: pointer; opacity: .7; }
+@keyframes toast-in { from { transform: translateX(20px); opacity: 0; } to { transform: none; opacity: 1; } }
+
 /* Страница входа */
 .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; }
 .login-card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;

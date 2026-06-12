@@ -62,6 +62,24 @@ async def tv_mode(request: Request, session: AsyncSession = Depends(get_session)
     return templates.TemplateResponse("tv.html", {"request": request})
 
 
+@router.get("/slideshow", response_class=HTMLResponse)
+async def slideshow(request: Request, session: AsyncSession = Depends(get_session)):
+    devices = await crud.list_devices(session)
+    cams = []
+    for d in devices:
+        if not d.enabled:
+            continue
+        for c in sorted(d.channels, key=lambda c: c.channel_id):
+            if c.enabled is False:
+                continue
+            cams.append({
+                "device_id": d.id, "channel_id": c.channel_id,
+                "name": c.name or f"канал {c.channel_id}",
+                "device": d.name, "status": c.status,
+            })
+    return templates.TemplateResponse("slideshow.html", {"request": request, "cams": cams})
+
+
 @router.get("/history", response_class=HTMLResponse)
 async def history(request: Request, session: AsyncSession = Depends(get_session)):
     days = 30

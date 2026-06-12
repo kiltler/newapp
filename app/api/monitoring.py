@@ -8,7 +8,7 @@ import io
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import crud, schemas
@@ -90,6 +90,33 @@ async def export_events_csv(
         iter([data]), media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": "attachment; filename=events.csv"},
     )
+
+
+@router.get("/alerts/recent")
+async def recent_alerts(after_id: int = 0, session: AsyncSession = Depends(get_session)):
+    """Свежие алерты (проблемы + 'восстановлено') с id больше after_id.
+
+    Для живых браузерных оповещений: клиент опрашивает раз в несколько секунд.
+    """
+    from app.models import Event
+
+    rows = (
+        await session.execute(
+            select(Event)
+            .where(
+                Event.id > after_id,
+                or_(Event.severity != "info", Event.type.like("%_resolved")),
+            )
+            .order_by(Event.id.desc())
+            .limit(40)
+        )
+    ).scalars().all()
+    rows = list(reversed(rows))  # по возрастанию id
+    return [
+        {"id": e.id, "type": e.type, "severity": e.severity, "message": e.message,
+         "device_id": e.device_id, "created_at": e.created_at.isoformat()}
+        for e in rows
+    ]
 
 
 @router.get("/devices/{device_id}/archive")

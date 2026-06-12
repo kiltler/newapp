@@ -12,6 +12,7 @@
     <nav>
         <a href="/">Дашборд</a>
         <a href="/tv">TV</a>
+        <a href="/slideshow">Слайдшоу</a>
         <a href="/history">История</a>
         <a href="/plan">План</a>
         <a href="/firmware">Прошивки</a>
@@ -19,6 +20,7 @@
         <a href="/labels">QR</a>
         <a href="/audit">Аудит</a>
         <a href="#" id="add-device-btn">+ Устройство</a>
+        <a href="#" id="bell" title="Системные уведомления">🔕</a>
         <a href="/logout">Выход</a>
     </nav>
 </header>
@@ -60,7 +62,9 @@
   </div>
 </div>
 
+<div id="toasts" class="toasts"></div>
 <script src="/static/app.js"></script>
+<script src="/static/notify.js"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>
