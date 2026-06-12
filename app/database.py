@@ -59,8 +59,11 @@ _NEW_COLUMNS = [
 
 
 def _lightweight_migrate(sync_conn) -> None:
+    import logging
+
     from sqlalchemy import inspect, text
 
+    log = logging.getLogger("nvrmon.migrate")
     insp = inspect(sync_conn)
     tables = set(insp.get_table_names())
     for table, column, ddl in _NEW_COLUMNS:
@@ -68,7 +71,13 @@ def _lightweight_migrate(sync_conn) -> None:
             continue
         existing = {c["name"] for c in insp.get_columns(table)}
         if column not in existing:
-            sync_conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+            # Имена в кавычках — column может быть зарезервированным словом (напр. "user" в Postgres).
+            # SAVEPOINT, чтобы сбой одной миграции не ронял весь старт и не «портил» транзакцию.
+            try:
+                with sync_conn.begin_nested():
+                    sync_conn.execute(text(f'ALTER TABLE "{table}" ADD COLUMN "{column}" {ddl}'))
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Миграция %s.%s пропущена: %s", table, column, exc)
 
 
 async def init_db() -> None:
