@@ -373,3 +373,15 @@ async def test_review_to_shelf_flow(db):
         async with SessionLocal() as s:
             disk = (await s.execute(select(Disk).where(Disk.id == d))).scalar_one()
             assert disk.status == DiskStatus.READY and disk.location == "shelf"
+
+
+async def test_bus_location(db):
+    async with _client() as c:
+        bus = (await c.post("/api/buses", json={"bus_number": "L1", "route": "9"})).json()["id"]
+        r = await c.put(f"/api/buses/{bus}", json={"location": "Парковка №3, бокс 12"})
+        assert r.status_code == 200
+        page = (await c.get(f"/buses/{bus}")).text
+        assert "Где стоит" in page and "Парковка №3, бокс 12" in page
+    async with SessionLocal() as s:
+        b = (await s.execute(select(Bus).where(Bus.id == bus))).scalar_one()
+        assert b.location == "Парковка №3, бокс 12"

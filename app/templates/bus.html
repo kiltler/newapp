@@ -12,6 +12,7 @@
   <section class="info-grid">
     <div><b>Номер / маршрут:</b> {{ bus.bus_number }} / {{ bus.route or '—' }} <button class="mini" onclick="editBus()">изм.</button></div>
     <div><b>Модель DVR:</b> {{ bus.dvr_model or '—' }} <button class="mini" onclick="editModel()">изм.</button></div>
+    <div><b>Где стоит:</b> {{ bus.location or '—' }} <button class="mini" onclick="editLocation()">изм.</button></div>
     <div><b>Статус:</b> {{ reason }}</div>
     <div class="bus-problem">
       <b>Проблема:</b>
@@ -151,6 +152,11 @@ async function editNote(id, cur){
 async function editModel(){
   const m = prompt("Модель регистратора:", {{ (bus.dvr_model or '') | tojson }}); if (m===null) return;
   const r = await fetch(`/api/buses/${BUS_ID}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({dvr_model:m||null})});
+  r.ok?location.reload():alert(await r.text());
+}
+async function editLocation(){
+  const v = prompt("Где стоит автобус (адрес/парковка/бокс):", {{ (bus.location or '') | tojson }}); if (v===null) return;
+  const r = await fetch(`/api/buses/${BUS_ID}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({location:v||null})});
   r.ok?location.reload():alert(await r.text());
 }
 async function delBus(){ if(!confirm("Удалить автобус?"))return; const r=await fetch(`/api/buses/${BUS_ID}`,{method:"DELETE"}); if(r.ok)location.href="/buses"; else alert(await r.text()); }

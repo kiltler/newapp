@@ -167,6 +167,7 @@ class BusUpdate(BaseModel):
     bus_number: str | None = None
     route: str | None = None
     dvr_model: str | None = None
+    location: str | None = None
     problem_note: str | None = None
     has_problem: bool | None = None
     collect_weekday: int | None = None

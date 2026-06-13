@@ -314,6 +314,7 @@ class Bus(Base):
     bus_number: Mapped[str] = mapped_column(String(64))
     route: Mapped[str | None] = mapped_column(String(64), default=None)
     dvr_model: Mapped[str | None] = mapped_column(String(128), default=None)
+    location: Mapped[str | None] = mapped_column(String(128), default=None)  # где стоит автобус
     installed_disk_id: Mapped[int | None] = mapped_column(Integer, default=None)
     installed_since: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     collect_weekday: Mapped[int | None] = mapped_column(Integer, default=None)  # день недели сбора 0=Пн
