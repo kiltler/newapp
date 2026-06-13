@@ -20,6 +20,7 @@ from app import schemas
 from app.config import settings
 from app.database import get_session
 from app.models import (
+    COLLECTION_ISSUES,
     DISK_LOCATIONS,
     OBSERVATION_TAGS,
     WEEKDAYS,
@@ -330,6 +331,27 @@ async def swap_reserve(bus_id: int, request: Request, session: AsyncSession = De
     return {"ok": True, "installed": reserve.label}
 
 
+# Префикс заметки для записей «диск не собрали» (без замены диска).
+NOT_COLLECTED_PREFIX = "не собрали: "
+
+
+@router.post("/api/buses/{bus_id}/not-collected")
+async def bus_not_collected(bus_id: int, data: schemas.NotCollectedRequest, request: Request,
+                            session: AsyncSession = Depends(get_session)):
+    """Отметить в день сбора, что диск не забрали (с причиной). Замены диска нет —
+    пишем запись в журнал, автобус считается обработанным на сегодня."""
+    bus = await _bus(session, bus_id)
+    reason = (data.reason or "").strip()
+    if not reason:
+        raise HTTPException(400, "Укажите причину")
+    session.add(SwapLog(
+        date=utcnow(), bus_id=bus.id, removed_disk_id=None, installed_disk_id=None,
+        note=NOT_COLLECTED_PREFIX + reason, user=request.session.get("user"),
+    ))
+    await session.commit()
+    return {"ok": True}
+
+
 @router.post("/api/disks/{disk_id}/restore")
 async def disk_restore(disk_id: int, session: AsyncSession = Depends(get_session)):
     """Вернуть неисправный диск в строй (faulty → ready, резерв)."""
@@ -497,11 +519,15 @@ async def collection_page(request: Request, today: int = 0, session: AsyncSessio
     today_date = dt.datetime.now().date()
     today_wd = dt.datetime.now().weekday()
     swapped_today = set()
+    issue_today: dict[int, str] = {}  # bus_id -> причина «не собрали» за сегодня
     for log in await _swaplog(session):
         d = log.date
         local = d.astimezone().replace(tzinfo=None) if d.tzinfo else d
         if local.date() == today_date:
             swapped_today.add(log.bus_id)
+            if (log.removed_disk_id is None and log.installed_disk_id is None
+                    and log.note and log.note.startswith(NOT_COLLECTED_PREFIX)):
+                issue_today[log.bus_id] = log.note[len(NOT_COLLECTED_PREFIX):]
 
     rows = []
     for b in sorted(buses, key=lambda b: (_nat(b.route), _nat(b.bus_number))):
@@ -512,6 +538,7 @@ async def collection_page(request: Request, today: int = 0, session: AsyncSessio
             "bus": b, "color": color, "reason": reason,
             "disk": by_id.get(b.installed_disk_id) if b.installed_disk_id else None,
             "done": b.id in swapped_today,
+            "issue": issue_today.get(b.id),
             "ready": sorted(ready, key=lambda d: 0 if d.assigned_bus_id == b.id else 1),
         })
     planned_today = sum(1 for b in buses if b.collect_weekday == today_wd)
@@ -519,6 +546,7 @@ async def collection_page(request: Request, today: int = 0, session: AsyncSessio
         "request": request, "rows": rows, "today_only": bool(today),
         "total": len(rows), "done": sum(1 for r in rows if r["done"]),
         "planned_today": planned_today, "weekday": WEEKDAYS[today_wd],
+        "issues": COLLECTION_ISSUES,
     })
 
 
@@ -573,7 +601,11 @@ async def bus_stats(request: Request, days: int = 30, session: AsyncSession = De
         r for r in (await session.execute(select(DiskReview))).scalars()
         if _aware(r.created_at) >= since
     ]
-    swaps = [s for s in await _swaplog(session) if _aware(s.date) >= since]
+    # Только реальные замены (записи «не собрали» без движения диска не считаем).
+    swaps = [
+        s for s in await _swaplog(session)
+        if _aware(s.date) >= since and (s.removed_disk_id or s.installed_disk_id)
+    ]
     buses = {b.id: b for b in (await session.execute(select(Bus))).scalars()}
     disks = await _disks(session)
     swap_days, _ = await _thresholds(session)

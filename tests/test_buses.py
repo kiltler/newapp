@@ -330,3 +330,20 @@ async def test_stats_reset(db):
         assert r.status_code == 200 and r.json()["removed"]["swaps"] >= 1
     async with SessionLocal() as s:
         assert (await s.execute(select(SwapLog))).scalars().all() == []
+
+
+async def test_not_collected(db):
+    async with _client() as c:
+        bus = (await c.post("/api/buses", json={"bus_number": "400"})).json()["id"]
+        r = await c.post(f"/api/buses/{bus}/not-collected", json={"reason": "автобус не найден"})
+        assert r.status_code == 200
+        # пустая причина → 400
+        assert (await c.post(f"/api/buses/{bus}/not-collected", json={"reason": "  "})).status_code == 400
+        # на странице сбора видна отметка и список причин
+        page = (await c.get("/buses/collection")).text
+        assert "не собрали: автобус не найден" in page
+        assert "Не собрали" in page
+    async with SessionLocal() as s:
+        logs = (await s.execute(select(SwapLog).where(SwapLog.bus_id == bus))).scalars().all()
+        assert len(logs) == 1
+        assert logs[0].removed_disk_id is None and logs[0].installed_disk_id is None

@@ -204,6 +204,10 @@ class FaultyRequest(BaseModel):
     note: str | None = None
 
 
+class NotCollectedRequest(BaseModel):
+    reason: str
+
+
 class ReviewRequest(BaseModel):
     tags: list[str] = []
     note: str | None = None

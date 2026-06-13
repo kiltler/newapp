@@ -33,6 +33,7 @@
         <span class="done-badge">✓ сегодня</span>
       </div>
       <div class="collect-now">Сейчас: {% if r.disk %}<b>{{ r.disk.label }}</b> ({{ r.disk.type }}){% else %}<span class="badge red">нет диска</span>{% endif %}</div>
+      {% if r.issue %}<div class="collect-now"><span class="badge warn">✖ не собрали: {{ r.issue }}</span></div>{% endif %}
       <div class="collect-controls">
         <select id="sel-{{ r.bus.id }}">
           <option value="">— поставить (готовый) —</option>
@@ -44,6 +45,12 @@
         <button class="bus-btn" style="background:#2ecc71" onclick="swapReserve({{ r.bus.id }})">⚡ Поставить резерв</button>
         <button class="bus-btn" onclick="swapRow({{ r.bus.id }})">Заменить выбранный</button>
         <button class="bus-btn danger" onclick="removeRow({{ r.bus.id }})">Снять</button>
+      </div>
+      <div class="collect-controls">
+        <select id="issue-{{ r.bus.id }}">
+          {% for iss in issues %}<option value="{{ iss }}">{{ iss }}</option>{% endfor %}
+        </select>
+        <button class="bus-btn" style="background:#7f8c8d" onclick="notCollected({{ r.bus.id }})">✖ Не собрали</button>
       </div>
     </div>
   {% else %}
@@ -98,6 +105,13 @@ async function removeRow(busId) {
   const note = document.getElementById("note-" + busId).value || null;
   const r = await postSwap(busId, { installed_disk_id: null, note });
   if (r.ok) markDone(busId); else alert("Ошибка: " + (await r.text()));
+}
+async function notCollected(busId) {
+  const reason = document.getElementById("issue-" + busId).value;
+  if (!confirm(`Отметить, что диск не собрали (${reason})?`)) return;
+  const r = await fetch(`/api/buses/${busId}/not-collected`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason }) });
+  if (r.ok) { markDone(busId); document.getElementById("row-" + busId).querySelector(".collect-now").innerHTML = "✖ не собрали: <b>" + reason + "</b>"; }
+  else alert("Ошибка: " + (await r.text()));
 }
 </script>
 {% endblock %}
