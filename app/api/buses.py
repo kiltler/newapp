@@ -147,6 +147,15 @@ async def update_bus(bus_id: int, data: schemas.BusUpdate, session: AsyncSession
 @router.delete("/api/buses/{bus_id}")
 async def delete_bus(bus_id: int, session: AsyncSession = Depends(get_session)):
     bus = await _bus(session, bus_id)
+    # Освобождаем диски этого автобуса, чтобы не остались «установленными» без
+    # автобуса (висячая ссылка). Стоявший диск возвращаем в резерв на полку.
+    for d in (await session.execute(
+            select(Disk).where(Disk.assigned_bus_id == bus.id))).scalars():
+        d.assigned_bus_id = None
+        if d.status == DiskStatus.INSTALLED or d.id == bus.installed_disk_id:
+            d.status = DiskStatus.READY
+            d.status_since = utcnow()
+            d.location = DiskLocation.SHELF
     await session.delete(bus)
     await session.commit()
     return {"ok": True}
@@ -178,7 +187,12 @@ async def create_disk(data: schemas.DiskCreate, session: AsyncSession = Depends(
 @router.put("/api/disks/{disk_id}")
 async def update_disk(disk_id: int, data: schemas.DiskUpdate, session: AsyncSession = Depends(get_session)):
     disk = await _disk(session, disk_id)
-    for k, v in data.model_dump(exclude_unset=True).items():
+    fields = data.model_dump(exclude_unset=True)
+    # Место установленного диска руками не меняем — оно задаётся установкой/снятием.
+    if ("location" in fields and disk.status == DiskStatus.INSTALLED
+            and fields["location"] != DiskLocation.IN_BUS):
+        raise HTTPException(400, "У установленного диска нельзя менять место — он в автобусе. Сначала снимите его.")
+    for k, v in fields.items():
         setattr(disk, k, v)
     await session.commit()
     return {"ok": True}
@@ -186,15 +200,15 @@ async def update_disk(disk_id: int, data: schemas.DiskUpdate, session: AsyncSess
 
 @router.delete("/api/disks/{disk_id}")
 async def delete_disk(disk_id: int, session: AsyncSession = Depends(get_session)):
-    """Удалить диск из реестра. Установленный диск удалять нельзя — сначала снимите
-    его с автобуса. История замен/наблюдений остаётся в журналах как есть."""
+    """Удалить диск из реестра. Если он числится установленным в автобусе — сначала
+    снимаем ссылку у автобуса (он останется без диска), чтобы не было висячей
+    ссылки. История замен/наблюдений остаётся в журналах как есть."""
     disk = await _disk(session, disk_id)
-    if disk.status == DiskStatus.INSTALLED:
-        raise HTTPException(400, "Нельзя удалить установленный диск — сначала снимите его с автобуса")
     bus = (await session.execute(
         select(Bus).where(Bus.installed_disk_id == disk.id))).scalar_one_or_none()
     if bus is not None:
-        raise HTTPException(400, f"Диск числится установленным в автобусе {bus.bus_number} — сначала снимите его")
+        bus.installed_disk_id = None
+        bus.installed_since = None
     await session.delete(disk)
     await session.commit()
     return {"ok": True}
@@ -216,12 +230,14 @@ async def disk_reviewed(disk_id: int, session: AsyncSession = Depends(get_sessio
 @router.post("/api/disks/{disk_id}/faulty")
 async def disk_faulty(disk_id: int, data: schemas.FaultyRequest, session: AsyncSession = Depends(get_session)):
     disk = await _disk(session, disk_id)
-    # если был установлен — автобус остаётся без диска
+    # если был установлен — автобус остаётся без диска, а диск уже не «в автобусе»
     if disk.assigned_bus_id:
         bus = (await session.execute(select(Bus).where(Bus.id == disk.assigned_bus_id))).scalar_one_or_none()
         if bus and bus.installed_disk_id == disk.id:
             bus.installed_disk_id = None
             bus.installed_since = None
+    if disk.location == DiskLocation.IN_BUS:
+        disk.location = DiskLocation.SHELF
     disk.status = DiskStatus.FAULTY
     disk.status_since = utcnow()
     if data.note:

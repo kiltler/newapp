@@ -37,9 +37,13 @@
         <td>{{ d.capacity_gb ~ ' ГБ' if d.capacity_gb else '—' }}</td>
         <td><span class="badge {{ sm[d.status] }}">{{ sl[d.status] }}</span></td>
         <td>
+          {% if d.status == 'installed' %}
+            <span class="muted">🚌 в автобусе</span>
+          {% else %}
           <select class="loc-sel" onchange="setLoc({{ d.id }}, this.value)">
             {% for k, v in locations.items() %}<option value="{{ k }}" {{ 'selected' if d.location == k else '' }}>{{ v }}</option>{% endfor %}
           </select>
+          {% endif %}
         </td>
         <td>{{ buses.get(d.assigned_bus_id) or '—' }}</td>
         <td class="muted">{{ d.note or '' }}</td>
@@ -49,7 +53,7 @@
           {% if d.status == 'removed_review' %}<button class="mini" onclick="reviewed({{ d.id }})">✓ просмотрен</button>{% endif %}
           {% if d.status == 'faulty' %}<button class="mini" onclick="restore({{ d.id }})">↩ в строй</button>
           {% else %}<button class="mini danger" onclick="faulty({{ d.id }})">неисправен</button>{% endif %}
-          {% if d.status != 'installed' %}<button class="mini danger" onclick="delDisk({{ d.id }}, {{ d.label | tojson }})">🗑 удалить</button>{% endif %}
+          <button class="mini danger" onclick="delDisk({{ d.id }}, {{ d.label | tojson }}, {{ (d.status == 'installed') | tojson }})">🗑 удалить</button>
         </td>
       </tr>
     {% else %}<tr><td colspan="7" class="muted">Дисков нет.</td></tr>{% endfor %}
@@ -72,8 +76,10 @@ async function editNote(id, cur){
   r.ok?location.reload():alert(await r.text());
 }
 async function reviewed(id){ const r=await fetch(`/api/disks/${id}/reviewed`,{method:"POST"}); r.ok?location.reload():alert(await r.text()); }
-async function delDisk(id, label){
-  if(!confirm(`Удалить диск «${label}» из реестра? Действие необратимо.`)) return;
+async function delDisk(id, label, installed){
+  let msg = `Удалить диск «${label}» из реестра? Действие необратимо.`;
+  if(installed) msg = `Диск «${label}» сейчас числится установленным. Удалить его из реестра? Автобус останется без диска. Действие необратимо.`;
+  if(!confirm(msg)) return;
   const r=await fetch(`/api/disks/${id}`,{method:"DELETE"});
   r.ok?location.reload():alert(await r.text());
 }
