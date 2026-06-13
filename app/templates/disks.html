@@ -49,7 +49,10 @@
           {% if d.status == 'installed' %}
             {{ buses.get(d.assigned_bus_id) or '—' }}
           {% else %}
-          <select class="loc-sel" onchange="assignBus({{ d.id }}, this.value)" title="Закрепить диск за автобусом">
+          <select class="loc-sel" title="Жёсткое закрепление за автобусом"
+                  data-disk="{{ d.id }}" data-cur="{{ d.assigned_bus_id or '' }}"
+                  data-curname="{{ buses.get(d.assigned_bus_id) or '' }}" data-label="{{ d.label }}"
+                  onchange="assignBus(this)">
             <option value="">— не закреплён —</option>
             {% for bid, bnum in bus_options %}<option value="{{ bid }}" {{ 'selected' if d.assigned_bus_id == bid else '' }}>{{ bnum }}</option>{% endfor %}
           </select>
@@ -94,10 +97,20 @@ async function delDisk(id, label, installed){
 }
 async function restore(id){ if(!confirm("Вернуть диск в строй (в резерв)?"))return; const r=await fetch(`/api/disks/${id}/restore`,{method:"POST"}); r.ok?location.reload():alert(await r.text()); }
 async function setLoc(id, location){ const r=await fetch(`/api/disks/${id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({location})}); if(!r.ok) alert(await r.text()); }
-async function assignBus(id, busId){
-  const r=await fetch(`/api/disks/${id}`,{method:"PUT",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({assigned_bus_id: busId ? parseInt(busId,10) : null})});
-  r.ok?location.reload():alert(await r.text());
+async function assignBus(sel){
+  const id = sel.dataset.disk, cur = sel.dataset.cur, val = sel.value;
+  if (val === cur) return;
+  // Жёсткое закрепление: смена уже закреплённого автобуса — только с подтверждением.
+  if (cur) {
+    const from = sel.dataset.curname || "автобусом";
+    const to = val ? sel.options[sel.selectedIndex].text : "— не закреплён —";
+    const msg = `Диск «${sel.dataset.label}» жёстко закреплён за автобусом ${from}.\n\n`
+      + `Переназначить на «${to}»? Это разорвёт закрепление за ${from}.`;
+    if (!confirm(msg)) { sel.value = cur; return; }
+  }
+  const r = await fetch(`/api/disks/${id}`,{method:"PUT",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({assigned_bus_id: val ? parseInt(val,10) : null})});
+  if (r.ok) location.reload(); else { alert(await r.text()); sel.value = cur; }
 }
 async function faulty(id){
   const note = prompt("Заметка о неисправности:"); if(note===null) return;
