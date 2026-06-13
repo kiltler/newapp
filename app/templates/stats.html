@@ -5,11 +5,36 @@
   <a href="/buses" class="muted">← к автобусам</a>
   <div class="bus-banner">
     <div><span class="bus-ico">📊</span> <b>Статистика за {{ days }} дн.</b></div>
+    <div>
+      <a class="bus-btn {{ 'secondary' if days != 7 else '' }}" href="/buses/stats?days=7">7 дн.</a>
+      <a class="bus-btn {{ 'secondary' if days != 30 else '' }}" href="/buses/stats?days=30">30 дн.</a>
+      <a class="bus-btn {{ 'secondary' if days != 90 else '' }}" href="/buses/stats?days=90">90 дн.</a>
+      {% if request.session.get('role') != 'bus' %}
+      <button class="bus-btn danger" onclick="resetStats()">🧹 Обнулить статистику</button>
+      {% endif %}
+    </div>
   </div>
 
+  <h2>За период ({{ days }} дн.)</h2>
   <section class="bus-summary">
     <div class="bus-tile"><span class="num">{{ swaps_total }}</span><span>замен дисков</span></div>
     <div class="bus-tile"><span class="num">{{ reviews_total }}</span><span>просмотров</span></div>
+  </section>
+
+  <h2>Сейчас по парку</h2>
+  <section class="bus-summary">
+    <div class="bus-tile"><span class="num">{{ park.buses }}</span><span>автобусов</span></div>
+    <div class="bus-tile {{ 'err' if park.no_disk else '' }}"><span class="num">{{ park.no_disk }}</span><span>без диска</span></div>
+    <div class="bus-tile {{ 'warn' if park.overdue else '' }}"><span class="num">{{ park.overdue }}</span><span>пора менять</span></div>
+  </section>
+
+  <h2>Диски</h2>
+  <section class="bus-summary">
+    <div class="bus-tile"><span class="num">{{ disk_stats.total }}</span><span>всего</span></div>
+    <div class="bus-tile"><span class="num">{{ disk_stats.installed }}</span><span>установлено</span></div>
+    <div class="bus-tile"><span class="num">{{ disk_stats.ready }}</span><span>готов (резерв)</span></div>
+    <div class="bus-tile {{ 'warn' if disk_stats.review else '' }}"><span class="num">{{ disk_stats.review }}</span><span>на просмотре</span></div>
+    <div class="bus-tile {{ 'err' if disk_stats.faulty else '' }}"><span class="num">{{ disk_stats.faulty }}</span><span>неисправны</span></div>
   </section>
 
   <h2>🚍 Проблемные автобусы (по наблюдениям)</h2>
@@ -35,5 +60,38 @@
     {% else %}<tr><td colspan="2" class="muted">Пометок пока нет.</td></tr>{% endfor %}
     </tbody>
   </table>
+
+  <h2>💿 Самые «гоняемые» диски (по числу установок)</h2>
+  <table class="grid">
+    <thead><tr><th>Диск</th><th>Установок за период</th></tr></thead>
+    <tbody>
+    {% for r in top_disks %}
+      <tr>
+        <td>{% if r.disk %}<a href="/disks/{{ r.disk.id }}/passport">{{ r.disk.label }}</a>{% else %}#{{ r.did }}{% endif %}</td>
+        <td><b>{{ r.count }}</b></td>
+      </tr>
+    {% else %}<tr><td colspan="2" class="muted">Замен за период не было.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+
+  <h2>👤 Кто делал замены</h2>
+  <table class="grid">
+    <thead><tr><th>Сотрудник</th><th>Замен за период</th></tr></thead>
+    <tbody>
+    {% for user, n in user_rows %}
+      <tr><td>{{ user }}</td><td><b>{{ n }}</b></td></tr>
+    {% else %}<tr><td colspan="2" class="muted">Замен за период не было.</td></tr>{% endfor %}
+    </tbody>
+  </table>
 </div>
+
+<script>
+async function resetStats(){
+  if(!confirm("Обнулить статистику?\n\nБудут безвозвратно удалены журнал замен и записи просмотров. История замен в паспортах дисков тоже очистится.\n\nПродолжить?")) return;
+  if(!confirm("Точно? Это нельзя отменить.")) return;
+  const r = await fetch("/api/buses/stats/reset", {method:"POST"});
+  if(r.ok){ const d = await r.json(); alert(`Готово. Удалено замен: ${d.removed.swaps}, просмотров: ${d.removed.reviews}.`); location.reload(); }
+  else alert(await r.text());
+}
+</script>
 {% endblock %}

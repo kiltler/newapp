@@ -41,7 +41,7 @@
             <span class="muted">🚌 в автобусе</span>
           {% else %}
           <select class="loc-sel" onchange="setLoc({{ d.id }}, this.value)">
-            {% for k, v in locations.items() %}<option value="{{ k }}" {{ 'selected' if d.location == k else '' }}>{{ v }}</option>{% endfor %}
+            {% for k, v in locations.items() if k != 'in_bus' %}<option value="{{ k }}" {{ 'selected' if d.location == k else '' }}>{{ v }}</option>{% endfor %}
           </select>
           {% endif %}
         </td>
@@ -96,7 +96,7 @@ async function delDisk(id, label, installed){
   r.ok?location.reload():alert(await r.text());
 }
 async function restore(id){ if(!confirm("Вернуть диск в строй (в резерв)?"))return; const r=await fetch(`/api/disks/${id}/restore`,{method:"POST"}); r.ok?location.reload():alert(await r.text()); }
-async function setLoc(id, location){ const r=await fetch(`/api/disks/${id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({location})}); if(!r.ok) alert(await r.text()); }
+async function setLoc(id, loc){ const r=await fetch(`/api/disks/${id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({location:loc})}); r.ok?window.location.reload():alert(await r.text()); }
 async function assignBus(sel){
   const id = sel.dataset.disk, cur = sel.dataset.cur, val = sel.value;
   if (val === cur) return;

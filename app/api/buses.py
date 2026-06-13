@@ -13,7 +13,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
@@ -202,8 +202,21 @@ async def update_disk(disk_id: int, data: schemas.DiskUpdate, session: AsyncSess
     if ("assigned_bus_id" in fields and disk.status == DiskStatus.INSTALLED
             and fields["assigned_bus_id"] != disk.assigned_bus_id):
         raise HTTPException(400, "Установленный диск закреплён за своим автобусом — сначала снимите его.")
+    # «В автобусе» — только через установку (Замену), не руками.
+    if ("location" in fields and fields["location"] == DiskLocation.IN_BUS
+            and disk.status != DiskStatus.INSTALLED):
+        raise HTTPException(400, "Место «в автобусе» ставится установкой диска через «Замену».")
     for k, v in fields.items():
         setattr(disk, k, v)
+    # Синхронизируем статус с местом, чтобы они не расходились
+    # (установленный/неисправный не трогаем — у них своя логика).
+    if "location" in fields and disk.status not in (DiskStatus.INSTALLED, DiskStatus.FAULTY):
+        if disk.location == DiskLocation.REVIEWER and disk.status != DiskStatus.REMOVED_REVIEW:
+            disk.status = DiskStatus.REMOVED_REVIEW
+            disk.status_since = utcnow()
+        elif disk.location in (DiskLocation.SHELF, DiskLocation.SAFE) and disk.status == DiskStatus.REMOVED_REVIEW:
+            disk.status = DiskStatus.READY
+            disk.status_since = utcnow()
     await session.commit()
     return {"ok": True}
 
@@ -536,18 +549,50 @@ async def review_queue(request: Request, session: AsyncSession = Depends(get_ses
     })
 
 
+@router.post("/api/buses/stats/reset")
+async def reset_stats(request: Request, session: AsyncSession = Depends(get_session)):
+    """Обнулить статистику: очистить журнал замен и записи просмотров.
+    Доступно только администратору (роль не 'bus')."""
+    if request.session.get("role") == "bus":
+        raise HTTPException(403, "Обнуление статистики доступно только администратору")
+    swaps = len((await session.execute(select(SwapLog))).scalars().all())
+    reviews = len((await session.execute(select(DiskReview))).scalars().all())
+    await session.execute(delete(SwapLog))
+    await session.execute(delete(DiskReview))
+    await session.commit()
+    return {"ok": True, "removed": {"swaps": swaps, "reviews": reviews}}
+
+
 @router.get("/buses/stats", response_class=HTMLResponse)
 async def bus_stats(request: Request, days: int = 30, session: AsyncSession = Depends(get_session)):
     since = utcnow() - dt.timedelta(days=days)
-    def _aware(d):
-        return d if (d and d.tzinfo) else (d.replace(tzinfo=dt.timezone.utc) if d else d)
-
+    now = utcnow()
     reviews = [
         r for r in (await session.execute(select(DiskReview))).scalars()
         if _aware(r.created_at) >= since
     ]
     swaps = [s for s in await _swaplog(session) if _aware(s.date) >= since]
     buses = {b.id: b for b in (await session.execute(select(Bus))).scalars()}
+    disks = await _disks(session)
+    by_id = {d.id: d for d in disks}
+    swap_days, _ = await _thresholds(session)
+
+    # Сводка по парку и дискам
+    park = {
+        "buses": len(buses),
+        "no_disk": sum(1 for b in buses.values() if b.installed_disk_id is None),
+        "overdue": sum(
+            1 for b in buses.values()
+            if _aware(b.installed_since) and (now - _aware(b.installed_since)).days >= swap_days
+        ),
+    }
+    disk_stats = {
+        "total": len(disks),
+        "installed": sum(1 for d in disks if d.status == DiskStatus.INSTALLED),
+        "ready": sum(1 for d in disks if d.status == DiskStatus.READY),
+        "review": sum(1 for d in disks if d.status == DiskStatus.REMOVED_REVIEW),
+        "faulty": sum(1 for d in disks if d.status == DiskStatus.FAULTY),
+    }
 
     tag_counts: dict[str, int] = {}
     bus_problems: dict[int, int] = {}
@@ -565,9 +610,24 @@ async def bus_stats(request: Request, days: int = 30, session: AsyncSession = De
         key=lambda x: -x["count"],
     )[:15]
     tag_rows = sorted(tag_counts.items(), key=lambda kv: -kv[1])
+
+    # Кто делал замены (по сотрудникам) и самые «гоняемые» диски
+    by_user: dict[str, int] = {}
+    disk_installs: dict[int, int] = {}
+    for s in swaps:
+        by_user[s.user or "—"] = by_user.get(s.user or "—", 0) + 1
+        if s.installed_disk_id:
+            disk_installs[s.installed_disk_id] = disk_installs.get(s.installed_disk_id, 0) + 1
+    user_rows = sorted(by_user.items(), key=lambda kv: -kv[1])
+    top_disks = sorted(
+        ({"disk": by_id.get(did), "did": did, "count": n} for did, n in disk_installs.items()),
+        key=lambda x: -x["count"],
+    )[:10]
+
     return templates.TemplateResponse("stats.html", {
         "request": request, "days": days, "top_buses": top_buses, "tag_rows": tag_rows,
         "reviews_total": len(reviews), "swaps_total": len(swaps),
+        "park": park, "disk_stats": disk_stats, "user_rows": user_rows, "top_disks": top_disks,
     })
 
 

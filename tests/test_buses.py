@@ -301,3 +301,29 @@ async def test_reserve_assignment_and_reasons(db):
         # после замены снятый диск реально на просмотре → текст про просмотр корректен
         await c.post(f"/api/buses/{bus}/swap", json={"installed_disk_id": res})  # main->review, res главный
         assert "просмотре" in await reason()
+
+
+async def test_location_status_sync(db):
+    async with _client() as c:
+        d = (await c.post("/api/disks", json={"label": "С-1", "status": "ready"})).json()["id"]
+        # «у смотрящего» → статус «на просмотре»
+        assert (await c.put(f"/api/disks/{d}", json={"location": "reviewer"})).status_code == 200
+        assert await _disk_status(d) == DiskStatus.REMOVED_REVIEW
+        # обратно на полку → снова «готов»
+        assert (await c.put(f"/api/disks/{d}", json={"location": "shelf"})).status_code == 200
+        assert await _disk_status(d) == DiskStatus.READY
+        # «в автобусе» руками нельзя
+        assert (await c.put(f"/api/disks/{d}", json={"location": "in_bus"})).status_code == 400
+
+
+async def test_stats_reset(db):
+    async with _client() as c:
+        bus = (await c.post("/api/buses", json={"bus_number": "300"})).json()["id"]
+        d = (await c.post("/api/disks", json={"label": "СТ", "assigned_bus_id": bus})).json()["id"]
+        await c.post(f"/api/buses/{bus}/swap", json={"installed_disk_id": d})
+        page = (await c.get("/buses/stats")).text
+        assert "гоняемые" in page and "Кто делал замены" in page  # новые секции
+        r = await c.post("/api/buses/stats/reset")
+        assert r.status_code == 200 and r.json()["removed"]["swaps"] >= 1
+    async with SessionLocal() as s:
+        assert (await s.execute(select(SwapLog))).scalars().all() == []
