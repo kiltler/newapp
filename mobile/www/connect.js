@@ -1,10 +1,14 @@
 /*
- * Экран подключения нативной оболочки NVR Monitor.
+ * Лаунчер нативной оболочки NVR Monitor.
  *
- * Логика:
- *  1. При запуске читаем сохранённый адрес сервера.
- *  2. Если он есть — молча пингуем /healthz и, если сервер жив, грузим панель в webview.
- *  3. Если адреса нет или сервер недоступен — показываем форму.
+ * Поведение:
+ *  1. При обычном запуске берём сохранённый адрес (а если его нет — зашитый
+ *     адрес по умолчанию) и СРАЗУ открываем панель. Никакого ввода вручную —
+ *     приложение ведёт себя как нативное.
+ *  2. Экран настроек (форма смены адреса) показывается только когда:
+ *      - пользователь вернулся сюда кнопкой «Назад» с панели, ИЛИ
+ *      - сервер недоступен.
+ *  3. Адрес можно сменить и сбросить на адрес по умолчанию.
  *
  * Работает и внутри Capacitor (плагин Preferences), и в обычном браузере
  * (localStorage) — чтобы экран можно было отлаживать без сборки apk.
@@ -12,14 +16,18 @@
 (function () {
   "use strict";
 
+  // Зашитый адрес по умолчанию. Сменить — здесь и в README.
+  var DEFAULT_SERVER = "http://192.168.11.231:8000";
+
   var KEY = "nvrmon.serverUrl";
   var PING_TIMEOUT_MS = 6000;
 
   var form = document.getElementById("form");
   var input = document.getElementById("url");
   var btn = document.getElementById("connect");
+  var resetBtn = document.getElementById("reset");
   var status = document.getElementById("status");
-  var forgetBtn = document.getElementById("forget");
+  var subtitle = document.getElementById("subtitle");
 
   // ── Хранилище: Capacitor Preferences, иначе localStorage ──────────────────
   function prefs() {
@@ -45,9 +53,8 @@
   function normalize(raw) {
     var v = (raw || "").trim();
     if (!v) return "";
-    if (!/^https?:\/\//i.test(v)) v = "http://" + v; // по умолчанию http (Tailscale без TLS)
-    v = v.replace(/\/+$/, "");                        // убрать хвостовой слэш
-    return v;
+    if (!/^https?:\/\//i.test(v)) v = "http://" + v;
+    return v.replace(/\/+$/, "");
   }
 
   // ── Проверка доступности сервера: /healthz (публичный, без авторизации) ───
@@ -68,9 +75,8 @@
 
   function go(base) {
     // Помечаем, что в этой сессии уже уходили на панель: если пользователь
-    // нажмёт «назад» и вернётся сюда — покажем форму, а не зациклим редирект.
+    // нажмёт «Назад» и вернётся — покажем настройки, а не зациклим редирект.
     try { sessionStorage.setItem("nvrmon.navigated", "1"); } catch (e) {}
-    // Уходим из локального бандла оболочки в саму панель на сервере.
     window.location.href = base + "/";
   }
 
@@ -90,18 +96,20 @@
       go(base);
       return true;
     }
+    subtitle.textContent = "Сервер недоступен";
     setStatus(
-      "Сервер недоступен. Проверьте, что Tailscale включён на телефоне " +
-      "и адрес введён верно.",
+      "Не удалось подключиться. Проверьте, что включён VPN (WireGuard) и что " +
+      "сервер работает, либо укажите другой адрес.",
       "err"
     );
-    if (opts.revealForm) showForm(base);
+    if (opts.revealForm) input.focus();
     return false;
   }
 
-  function showForm(prefill) {
+  function showSettings(prefill, note) {
+    subtitle.textContent = "Настройки подключения";
     if (prefill) input.value = prefill;
-    forgetBtn.classList.toggle("hidden", !prefill);
+    if (note) setStatus(note);
     input.focus();
   }
 
@@ -114,27 +122,25 @@
     tryConnect(base);
   });
 
-  forgetBtn.addEventListener("click", async function () {
+  resetBtn.addEventListener("click", async function () {
     await clearUrl();
-    input.value = "";
-    forgetBtn.classList.add("hidden");
-    setStatus("");
+    input.value = DEFAULT_SERVER;
+    setStatus("Адрес сброшен на стандартный.", "ok");
     input.focus();
   });
 
-  // ── Старт: автоподключение по сохранённому адресу ─────────────────────────
+  // ── Старт ──────────────────────────────────────────────────────────────────
   (async function init() {
     var saved = await loadUrl();
-    if (saved && cameBack()) {
-      // Вернулись кнопкой «назад» с панели — даём сменить сервер, не редиректим.
-      setStatus("Подключение разорвано. Можно сменить сервер или подключиться снова.");
-      showForm(saved);
-    } else if (saved) {
-      input.value = saved;
-      forgetBtn.classList.remove("hidden");
-      await tryConnect(saved, { revealForm: true });
+    var target = saved || DEFAULT_SERVER;
+    input.value = target;
+
+    if (cameBack()) {
+      // Вернулись кнопкой «Назад» с панели — это и есть «экран настроек».
+      showSettings(target, "Можно сменить адрес сервера или вернуться на панель кнопкой «Подключиться».");
     } else {
-      showForm("");
+      // Обычный запуск — сразу в панель.
+      await tryConnect(target, { revealForm: true });
     }
   })();
 })();

@@ -106,32 +106,59 @@ cd ~/newapp/mobile/android
 > живут в каталоге `android/`, которого нет в git, — настраиваются один раз на
 > сборочной машине.
 
+## HTTP-сервер без TLS (cleartext)
+
+Если сервер отдаёт по `http://` (без TLS), Android по умолчанию блокирует такой
+трафик из приложения. Один раз на сборочной машине разрешите cleartext:
+
+```bash
+# 1. сетевая политика
+mkdir -p android/app/src/main/res/xml
+cat > android/app/src/main/res/xml/network_security_config.xml <<'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors><certificates src="system" /></trust-anchors>
+    </base-config>
+</network-security-config>
+EOF
+```
+
+И добавьте в тег `<application>` в `android/app/src/main/AndroidManifest.xml`
+атрибуты `android:usesCleartextTraffic="true"` и
+`android:networkSecurityConfig="@xml/network_security_config"`. Эти файлы лежат в
+`android/` (нет в git), так что правки делаются один раз на сборочной машине.
+
 ## Как пользоваться
 
-Адрес сервера **зашит в сборку** (`capacitor.config.json` → `server.url`), поэтому
-приложение работает как обычное нативное: запустил — сразу открылась панель, без
-ввода адресов «как в браузере».
+Адрес сервера по умолчанию **зашит** (`www/connect.js` → `DEFAULT_SERVER`),
+поэтому приложение работает как обычное нативное: запустил — сразу открылась
+панель, без ввода адресов «как в браузере».
 
 1. Включите VPN (WireGuard/Tailscale) на телефоне, если вы вне сети предприятия.
 2. Откройте NVR Monitor — загрузится панель, спросит логин/пароль
    (`ADMIN_PASSWORD`).
-3. Если сервер недоступен, покажется локальная заглушка с кнопкой «Повторить».
+3. Если сервер недоступен, вместо панели покажется экран с пояснением и полем
+   для другого адреса.
 
-### Сменить адрес сервера
+### Сменить адрес сервера прямо в приложении
 
-Поменяйте `server.url` (и `SERVER` в `www/error.html`) на свой адрес, затем
-пересоберите:
+Адрес можно поменять **без пересборки**:
 
-```bash
-# пример: домен через Caddy
-"url": "https://nvr.example.com"
-# или Tailscale MagicDNS
-"url": "http://nvrmon.<tailnet>.ts.net:8000"
-```
+1. На панели нажмите системную кнопку **«Назад»** — откроется экран
+   «Настройки подключения» с текущим адресом.
+2. Впишите новый адрес (напр. `https://nvr.example.com` или
+   `http://nvrmon.<tailnet>.ts.net:8000`) → «Подключиться». Адрес сохранится и
+   будет использоваться дальше.
+3. Кнопка **«Сбросить на адрес по умолчанию»** возвращает зашитый адрес.
 
-`cleartext: true` оставлено, потому что сервер по умолчанию отдаёт http без TLS
-(трафик и так шифрует VPN). `allowNavigation` ограничивает webview адресами
-локальных сетей и VPN — приложение не уйдёт на сторонние сайты.
+Чтобы поменять сам адрес по умолчанию (для новых установок), правьте
+`DEFAULT_SERVER` в `www/connect.js` и пересоберите.
+
+`allowNavigation` ограничивает webview адресами локальных сетей и VPN —
+приложение не уйдёт на сторонние сайты. Сервер по умолчанию отдаёт http без TLS
+(трафик шифрует VPN), поэтому в приложении разрешён cleartext-трафик
+(`network_security_config.xml`, см. ниже).
 
 ## Что внутри
 

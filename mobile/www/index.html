@@ -4,29 +4,30 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0f1419">
-  <title>NVR Monitor — подключение</title>
+  <title>NVR Monitor</title>
   <link rel="stylesheet" href="connect.css">
 </head>
 <body>
   <main class="wrap">
     <img class="logo" src="icon-192.png" alt="">
     <h1>NVR Monitor</h1>
-    <p class="sub">Подключение к серверу в локальной сети предприятия</p>
+    <p class="sub" id="subtitle">Подключение к серверу мониторинга…</p>
 
     <form id="form" autocomplete="off">
-      <label for="url">Адрес сервера (Tailscale)</label>
+      <label for="url">Адрес сервера</label>
       <input id="url" name="url" type="url" inputmode="url" autocapitalize="off"
              autocorrect="off" spellcheck="false"
-             placeholder="http://nvrmon.tailnet.ts.net:8000">
-      <p class="hint">Например <code>http://nvrmon.&lt;tailnet&gt;.ts.net:8000</code>
-        или Tailscale-IP <code>http://100.x.y.z:8000</code>. Адрес запомнится.</p>
+             placeholder="http://192.168.11.231:8000">
+      <p class="hint">Адрес сервера мониторинга в локальной сети предприятия.
+        Если вы вне офиса — включите VPN (WireGuard). Адрес сохранится.</p>
 
       <button id="connect" type="submit">Подключиться</button>
+      <button id="reset" class="link" type="button">Сбросить на адрес по умолчанию</button>
       <p id="status" class="status" role="status" aria-live="polite"></p>
     </form>
 
-    <button id="forget" class="link hidden" type="button">Сменить сервер</button>
-    <p class="foot muted">Связь идёт по приватной сети Tailscale — ничего не торчит в интернет.</p>
+    <p class="foot muted">Соединение идёт по локальной сети / приватному VPN —
+      ничего не торчит в интернет.</p>
   </main>
 
   <script src="connect.js"></script>
