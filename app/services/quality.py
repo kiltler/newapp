@@ -86,10 +86,19 @@ def analyze(jpeg: bytes, prev_sig: str | None = None) -> QualityResult:
     # Вердикт по приоритету проблем. ФРИЗ здесь НЕ выносим — он требует
     # подтверждения во времени (одинаковость кадра подряд несколько проверок),
     # иначе статичную живую сцену примем за зависание. Это решает вызывающий код.
-    if brightness < settings.quality_dark_threshold:
+    if contrast < settings.quality_uniform_threshold:
+        # Однотонный кадр бывает по двум причинам: залеплен/закрыт объектив ИЛИ
+        # просто темно (тёмная комната, аналог без ИК даёт ровный тусклый кадр).
+        # «Залеплен» выносим только если кадр достаточно светлый — иначе это
+        # темнота, а не закрытый объектив.
+        if brightness >= settings.quality_uniform_min_brightness:
+            verdict = Quality.UNIFORM
+        elif brightness < settings.quality_dark_threshold:
+            verdict = Quality.DARK
+        else:
+            verdict = Quality.OK
+    elif brightness < settings.quality_dark_threshold:
         verdict = Quality.DARK
-    elif contrast < settings.quality_uniform_threshold:
-        verdict = Quality.UNIFORM
     elif sharpness < settings.quality_blur_threshold:
         verdict = Quality.BLURRY
     else:

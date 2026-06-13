@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     quality_check_minutes: int = 0          # период проверки, 0 = выключено
     quality_dark_threshold: float = 30.0    # средняя яркость ниже → тёмный/чёрный кадр
     quality_uniform_threshold: float = 8.0  # контраст (ст.откл.) ниже → однотонный (залеплен)
+    quality_uniform_min_brightness: float = 50.0  # «залеплен» только если кадр светлее (иначе это просто темнота)
     quality_blur_threshold: float = 15.0    # резкость (дисперсия лапласиана) ниже → расфокус
     quality_frozen_diff: float = 1.0        # отличие кадров меньше → кадр идентичен
     quality_frozen_checks: int = 3          # сколько идентичных проверок ПОДРЯД = фриз

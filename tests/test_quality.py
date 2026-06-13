@@ -27,6 +27,13 @@ def test_uniform_grey_is_uniform():
     assert res.verdict == Quality.UNIFORM
 
 
+def test_dim_uniform_is_not_covered():
+    # Тёмная комната без ИК: ровный тусклый кадр — это НЕ «залеплен».
+    arr = np.full((240, 320), 40, dtype="uint8")
+    res = analyze(_jpeg(arr))
+    assert res.verdict != Quality.UNIFORM
+
+
 def test_sharp_noise_is_ok():
     rng = np.random.default_rng(42)
     arr = rng.integers(0, 256, size=(240, 320))  # резкий шум — резкость высокая
