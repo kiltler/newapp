@@ -264,3 +264,14 @@ async def test_installed_location_locked(db):
         assert r.status_code == 400
     async with SessionLocal() as s:
         assert (await s.execute(select(Disk).where(Disk.id == d))).scalar_one().location == "in_bus"
+
+
+async def test_disk_action_buttons_well_formed(db):
+    """Регрессия: строковый аргумент в onclick (метка/заметка) не должен рвать
+    HTML-атрибут. tojson не экранирует двойные кавычки, поэтому onclick обёрнут
+    в одинарные кавычки."""
+    async with _client() as c:
+        await c.post("/api/disks", json={"label": 'A"B', "status": "faulty"})
+        html = (await c.get("/disks")).text
+    assert "onclick='delDisk(" in html and "onclick='editNote(" in html
+    assert 'onclick="delDisk(' not in html and 'onclick="editNote(' not in html

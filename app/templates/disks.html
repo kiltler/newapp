@@ -48,12 +48,12 @@
         <td>{{ buses.get(d.assigned_bus_id) or '—' }}</td>
         <td class="muted">{{ d.note or '' }}</td>
         <td>
-          <button class="mini" onclick="editNote({{ d.id }}, {{ (d.note or '') | tojson }})">📝 заметка</button>
+          <button class="mini" onclick='editNote({{ d.id }}, {{ (d.note or "") | tojson }})'>📝 заметка</button>
           <a class="mini" href="/disks/{{ d.id }}/passport" style="text-decoration:none">🪪 паспорт</a>
           {% if d.status == 'removed_review' %}<button class="mini" onclick="reviewed({{ d.id }})">✓ просмотрен</button>{% endif %}
           {% if d.status == 'faulty' %}<button class="mini" onclick="restore({{ d.id }})">↩ в строй</button>
           {% else %}<button class="mini danger" onclick="faulty({{ d.id }})">неисправен</button>{% endif %}
-          <button class="mini danger" onclick="delDisk({{ d.id }}, {{ d.label | tojson }}, {{ (d.status == 'installed') | tojson }})">🗑 удалить</button>
+          <button class="mini danger" onclick='delDisk({{ d.id }}, {{ d.label | tojson }}, {{ (d.status == "installed") | tojson }})'>🗑 удалить</button>
         </td>
       </tr>
     {% else %}<tr><td colspan="7" class="muted">Дисков нет.</td></tr>{% endfor %}

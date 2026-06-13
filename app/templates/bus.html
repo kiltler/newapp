@@ -44,7 +44,7 @@
         <td><span class="badge {{ sm[d.status] }}">{{ sl[d.status] }}</span></td>
         <td class="muted">{{ d.note or '' }}</td>
         <td>
-          <button class="mini" onclick="editNote({{ d.id }}, {{ (d.note or '') | tojson }})">📝 заметка</button>
+          <button class="mini" onclick='editNote({{ d.id }}, {{ (d.note or "") | tojson }})'>📝 заметка</button>
           {% if d.status == 'removed_review' %}<button class="mini" onclick="reviewed({{ d.id }})">✓ просмотрен</button>{% endif %}
           {% if d.status == 'faulty' %}<button class="mini" onclick="restore({{ d.id }})">↩ в строй</button>
           {% else %}<button class="mini danger" onclick="faulty({{ d.id }})">неисправен</button>{% endif %}
