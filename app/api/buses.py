@@ -47,6 +47,13 @@ async def _thresholds(session: AsyncSession) -> tuple[int, int]:
 
 
 # ── Статус автобуса (для индикации) ─────────────────────────────────────────────
+def _aware(d: dt.datetime | None) -> dt.datetime | None:
+    """Приводим время к timezone-aware (БД может отдавать наивное)."""
+    if d is None:
+        return None
+    return d if d.tzinfo else d.replace(tzinfo=dt.timezone.utc)
+
+
 def bus_status(bus: Bus, disks: list[Disk], swap_days: int = 14) -> tuple[str, str]:
     """Возвращает (цвет, причина): red/orange/yellow/green."""
     now = utcnow()
@@ -54,19 +61,19 @@ def bus_status(bus: Bus, disks: list[Disk], swap_days: int = 14) -> tuple[str, s
         return "red", "регистратор без диска"
     if bus.has_problem:
         return "red", "отмечена проблема"
-    overdue = (
-        bus.installed_since is not None
-        and (now - bus.installed_since).days >= swap_days
-    )
-    if overdue:
-        days = (now - bus.installed_since).days
+    since = _aware(bus.installed_since)
+    if since is not None and (now - since).days >= swap_days:
+        days = (now - since).days
         return "orange", f"диск стоит {days} дн. — пора менять"
-    ready_reserve = any(
-        d.assigned_bus_id == bus.id and d.status == DiskStatus.READY for d in disks
-    )
-    if not ready_reserve:
+    # Резерв = закреплённый за автобусом готовый диск (кроме установленного).
+    others = [d for d in disks if d.assigned_bus_id == bus.id and d.id != bus.installed_disk_id]
+    if any(d.status == DiskStatus.READY for d in others):
+        return "green", "всё ок"
+    if not others:
+        return "yellow", "нет закреплённого резерва"
+    if any(d.status == DiskStatus.REMOVED_REVIEW for d in others):
         return "yellow", "резерв не готов (второй диск на просмотре)"
-    return "green", "всё ок"
+    return "yellow", "резерв не готов"
 
 
 _RANK = {"red": 0, "orange": 1, "yellow": 2, "green": 3}
@@ -192,6 +199,9 @@ async def update_disk(disk_id: int, data: schemas.DiskUpdate, session: AsyncSess
     if ("location" in fields and disk.status == DiskStatus.INSTALLED
             and fields["location"] != DiskLocation.IN_BUS):
         raise HTTPException(400, "У установленного диска нельзя менять место — он в автобусе. Сначала снимите его.")
+    if ("assigned_bus_id" in fields and disk.status == DiskStatus.INSTALLED
+            and fields["assigned_bus_id"] != disk.assigned_bus_id):
+        raise HTTPException(400, "Установленный диск закреплён за своим автобусом — сначала снимите его.")
     for k, v in fields.items():
         setattr(disk, k, v)
     await session.commit()
@@ -623,9 +633,11 @@ async def disks_page(request: Request, status: str = "", q: str = "",
             or ql in (buses.get(d.assigned_bus_id, "") or "").lower()
         ]
     disks = sorted(disks, key=lambda d: (d.status, d.label))
+    bus_options = sorted(buses.items(), key=lambda kv: _nat(kv[1]))  # для закрепления
     return templates.TemplateResponse("disks.html", {
         "request": request, "disks": disks, "buses": buses, "status": status,
         "q": q, "dup_labels": dup_labels, "locations": DISK_LOCATIONS,
+        "bus_options": bus_options,
     })
 
 

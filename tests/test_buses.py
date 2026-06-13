@@ -275,3 +275,29 @@ async def test_disk_action_buttons_well_formed(db):
         html = (await c.get("/disks")).text
     assert "onclick='delDisk(" in html and "onclick='editNote(" in html
     assert 'onclick="delDisk(' not in html and 'onclick="editNote(' not in html
+
+
+async def test_reserve_assignment_and_reasons(db):
+    async with _client() as c:
+        bus = (await c.post("/api/buses", json={"bus_number": "200"})).json()["id"]
+        other = (await c.post("/api/buses", json={"bus_number": "201"})).json()["id"]
+        main = (await c.post("/api/disks", json={"label": "ОСН", "assigned_bus_id": bus})).json()["id"]
+        await c.post(f"/api/buses/{bus}/swap", json={"installed_disk_id": main})
+
+        async def reason():
+            return next(b["reason"] for b in (await c.get("/api/buses")).json() if b["id"] == bus)
+
+        # нет закреплённого резерва — честный текст (не "второй диск на просмотре")
+        assert await reason() == "нет закреплённого резерва"
+
+        # закрепляем готовый резерв за автобусом → всё ок
+        res = (await c.post("/api/disks", json={"label": "РЕЗ", "status": "ready"})).json()["id"]
+        assert (await c.put(f"/api/disks/{res}", json={"assigned_bus_id": bus})).status_code == 200
+        assert await reason() == "всё ок"
+
+        # установленный диск нельзя перезакрепить за другим автобусом
+        assert (await c.put(f"/api/disks/{main}", json={"assigned_bus_id": other})).status_code == 400
+
+        # после замены снятый диск реально на просмотре → текст про просмотр корректен
+        await c.post(f"/api/buses/{bus}/swap", json={"installed_disk_id": res})  # main->review, res главный
+        assert "просмотре" in await reason()
