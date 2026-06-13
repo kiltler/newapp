@@ -213,3 +213,21 @@ async def test_route_sort_order(db):
         body = r.text
         # маршрут 5 должен идти раньше маршрута 10 (натуральная сортировка)
         assert body.index("марш. 5") < body.index("марш. 10")
+
+
+async def test_delete_disk(db):
+    async with _client() as c:
+        bus = (await c.post("/api/buses", json={"bus_number": "77", "route": "77"})).json()["id"]
+        # обычный диск (резерв) удаляется
+        d = (await c.post("/api/disks", json={"label": "У-1"})).json()["id"]
+        assert (await c.delete(f"/api/disks/{d}")).status_code == 200
+        async with SessionLocal() as s:
+            assert (await s.execute(select(Disk).where(Disk.id == d))).scalar_one_or_none() is None
+        # установленный диск удалить нельзя — сначала снять
+        d2 = (await c.post("/api/disks", json={"label": "У-2", "assigned_bus_id": bus})).json()["id"]
+        await c.post(f"/api/buses/{bus}/swap", json={"installed_disk_id": d2})
+        assert await _disk_status(d2) == DiskStatus.INSTALLED
+        assert (await c.delete(f"/api/disks/{d2}")).status_code == 400
+        assert await _disk_status(d2) == DiskStatus.INSTALLED  # остался на месте
+        # несуществующий — 404
+        assert (await c.delete("/api/disks/999999")).status_code == 404

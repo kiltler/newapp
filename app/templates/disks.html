@@ -49,6 +49,7 @@
           {% if d.status == 'removed_review' %}<button class="mini" onclick="reviewed({{ d.id }})">✓ просмотрен</button>{% endif %}
           {% if d.status == 'faulty' %}<button class="mini" onclick="restore({{ d.id }})">↩ в строй</button>
           {% else %}<button class="mini danger" onclick="faulty({{ d.id }})">неисправен</button>{% endif %}
+          {% if d.status != 'installed' %}<button class="mini danger" onclick="delDisk({{ d.id }}, {{ d.label | tojson }})">🗑 удалить</button>{% endif %}
         </td>
       </tr>
     {% else %}<tr><td colspan="7" class="muted">Дисков нет.</td></tr>{% endfor %}
@@ -71,6 +72,11 @@ async function editNote(id, cur){
   r.ok?location.reload():alert(await r.text());
 }
 async function reviewed(id){ const r=await fetch(`/api/disks/${id}/reviewed`,{method:"POST"}); r.ok?location.reload():alert(await r.text()); }
+async function delDisk(id, label){
+  if(!confirm(`Удалить диск «${label}» из реестра? Действие необратимо.`)) return;
+  const r=await fetch(`/api/disks/${id}`,{method:"DELETE"});
+  r.ok?location.reload():alert(await r.text());
+}
 async function restore(id){ if(!confirm("Вернуть диск в строй (в резерв)?"))return; const r=await fetch(`/api/disks/${id}/restore`,{method:"POST"}); r.ok?location.reload():alert(await r.text()); }
 async function setLoc(id, location){ const r=await fetch(`/api/disks/${id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({location})}); if(!r.ok) alert(await r.text()); }
 async function faulty(id){

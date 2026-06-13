@@ -184,6 +184,23 @@ async def update_disk(disk_id: int, data: schemas.DiskUpdate, session: AsyncSess
     return {"ok": True}
 
 
+@router.delete("/api/disks/{disk_id}")
+async def delete_disk(disk_id: int, session: AsyncSession = Depends(get_session)):
+    """Удалить диск из реестра. Установленный диск удалять нельзя — сначала снимите
+    его с автобуса. История замен/наблюдений остаётся в журналах как есть."""
+    disk = await _disk(session, disk_id)
+    if disk.status == DiskStatus.INSTALLED:
+        raise HTTPException(400, "Нельзя удалить установленный диск — сначала снимите его с автобуса")
+    bus = (await session.execute(
+        select(Bus).where(Bus.installed_disk_id == disk.id))).scalar_one_or_none()
+    if bus is not None:
+        raise HTTPException(400, f"Диск числится установленным в автобусе {bus.bus_number} — сначала снимите его")
+    await session.delete(disk)
+    await session.commit()
+    return {"ok": True}
+
+
+
 @router.post("/api/disks/{disk_id}/reviewed")
 async def disk_reviewed(disk_id: int, session: AsyncSession = Depends(get_session)):
     disk = await _disk(session, disk_id)
