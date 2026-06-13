@@ -38,6 +38,10 @@
         {% endif %}
         <a href="/logout">Выход</a>
     </nav>
+    <!-- Кнопка смены адреса сервера — видна только в нативном приложении -->
+    <a href="https://localhost/" id="app-server-btn"
+       title="Сменить адрес сервера"
+       style="display:none;font-size:20px;margin-left:12px">⚙</a>
 </header>
 <main class="container">
     {% block content %}{% endblock %}
@@ -96,6 +100,11 @@
 <script src="/static/notify.js?v=7"></script>
 <script>
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+  // Кнопка "⚙ Сервер" — только в нативной оболочке (метка в User-Agent)
+  if (navigator.userAgent.includes("NVRMonApp")) {
+    const b = document.getElementById("app-server-btn");
+    if (b) b.style.display = "inline-block";
+  }
   // подсветка активной вкладки
   document.querySelectorAll(".tabbar a[data-path]").forEach((a) => {
     if (location.pathname === a.dataset.path || (a.dataset.path !== "/buses" && location.pathname.startsWith(a.dataset.path))) a.classList.add("active");

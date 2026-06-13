@@ -2,6 +2,7 @@
   "appId": "ru.nvrmon.app",
   "appName": "NVR Monitor",
   "webDir": "www",
+  "appendUserAgent": "NVRMonApp",
   "server": {
     "androidScheme": "https",
     "allowNavigation": [
