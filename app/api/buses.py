@@ -574,7 +574,6 @@ async def bus_stats(request: Request, days: int = 30, session: AsyncSession = De
     swaps = [s for s in await _swaplog(session) if _aware(s.date) >= since]
     buses = {b.id: b for b in (await session.execute(select(Bus))).scalars()}
     disks = await _disks(session)
-    by_id = {d.id: d for d in disks}
     swap_days, _ = await _thresholds(session)
 
     # Сводка по парку и дискам
@@ -611,23 +610,16 @@ async def bus_stats(request: Request, days: int = 30, session: AsyncSession = De
     )[:15]
     tag_rows = sorted(tag_counts.items(), key=lambda kv: -kv[1])
 
-    # Кто делал замены (по сотрудникам) и самые «гоняемые» диски
+    # Кто делал замены (по сотрудникам)
     by_user: dict[str, int] = {}
-    disk_installs: dict[int, int] = {}
     for s in swaps:
         by_user[s.user or "—"] = by_user.get(s.user or "—", 0) + 1
-        if s.installed_disk_id:
-            disk_installs[s.installed_disk_id] = disk_installs.get(s.installed_disk_id, 0) + 1
     user_rows = sorted(by_user.items(), key=lambda kv: -kv[1])
-    top_disks = sorted(
-        ({"disk": by_id.get(did), "did": did, "count": n} for did, n in disk_installs.items()),
-        key=lambda x: -x["count"],
-    )[:10]
 
     return templates.TemplateResponse("stats.html", {
         "request": request, "days": days, "top_buses": top_buses, "tag_rows": tag_rows,
         "reviews_total": len(reviews), "swaps_total": len(swaps),
-        "park": park, "disk_stats": disk_stats, "user_rows": user_rows, "top_disks": top_disks,
+        "park": park, "disk_stats": disk_stats, "user_rows": user_rows,
     })
 
 

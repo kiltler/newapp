@@ -322,7 +322,7 @@ async def test_stats_reset(db):
         d = (await c.post("/api/disks", json={"label": "СТ", "assigned_bus_id": bus})).json()["id"]
         await c.post(f"/api/buses/{bus}/swap", json={"installed_disk_id": d})
         page = (await c.get("/buses/stats")).text
-        assert "гоняемые" in page and "Кто делал замены" in page  # новые секции
+        assert "Кто делал замены" in page and "Сейчас по парку" in page  # новые секции
         r = await c.post("/api/buses/stats/reset")
         assert r.status_code == 200 and r.json()["removed"]["swaps"] >= 1
     async with SessionLocal() as s:

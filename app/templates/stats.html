@@ -61,19 +61,6 @@
     </tbody>
   </table>
 
-  <h2>💿 Самые «гоняемые» диски (по числу установок)</h2>
-  <table class="grid">
-    <thead><tr><th>Диск</th><th>Установок за период</th></tr></thead>
-    <tbody>
-    {% for r in top_disks %}
-      <tr>
-        <td>{% if r.disk %}<a href="/disks/{{ r.disk.id }}/passport">{{ r.disk.label }}</a>{% else %}#{{ r.did }}{% endif %}</td>
-        <td><b>{{ r.count }}</b></td>
-      </tr>
-    {% else %}<tr><td colspan="2" class="muted">Замен за период не было.</td></tr>{% endfor %}
-    </tbody>
-  </table>
-
   <h2>👤 Кто делал замены</h2>
   <table class="grid">
     <thead><tr><th>Сотрудник</th><th>Замен за период</th></tr></thead>
