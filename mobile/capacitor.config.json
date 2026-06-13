@@ -3,10 +3,12 @@
   "appName": "NVR Monitor",
   "webDir": "www",
   "server": {
+    "url": "http://192.168.11.231:8000",
+    "cleartext": true,
+    "errorPath": "error.html",
     "androidScheme": "https",
     "allowNavigation": [
-      "*.ts.net",
-      "100.*",
+      "192.168.11.231",
       "192.168.*",
       "10.*",
       "172.16.*",
@@ -16,6 +18,8 @@
       "172.2*.*",
       "172.30.*",
       "172.31.*",
+      "*.ts.net",
+      "100.*",
       "localhost",
       "127.0.0.1"
     ]
@@ -25,9 +29,10 @@
   },
   "plugins": {
     "SplashScreen": {
-      "launchShowDuration": 600,
+      "launchShowDuration": 800,
       "backgroundColor": "#0f1419",
-      "showSpinner": false,
+      "showSpinner": true,
+      "spinnerColor": "#e67e22",
       "androidSplashResourceName": "splash"
     },
     "StatusBar": {

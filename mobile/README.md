@@ -77,18 +77,61 @@ npx cap open ios            # подпись и сборка в Xcode
 воссоздаются командой `cap add`. Версионируются только исходники оболочки в
 `www/`, конфиг и ресурсы.
 
+## Подписанный release-APK
+
+`assembleDebug` даёт debug-сборку (подписана временным ключом). Для нормальной
+раздачи на телефоны сотрудников нужен **release**, подписанный своим ключом.
+Один раз создайте keystore (храните его и пароли — без них нельзя выпускать
+обновления):
+
+```bash
+keytool -genkeypair -v \
+  -keystore ~/newapp/mobile/android/app/nvrmon-release.keystore \
+  -alias nvrmon -keyalg RSA -keysize 2048 -validity 10000 \
+  -storepass 'ВАШ_ПАРОЛЬ' -keypass 'ВАШ_ПАРОЛЬ' \
+  -dname "CN=NVR Monitor, O=MCC, C=RU"
+```
+
+Параметры подписи кладутся в `android/app/keystore.properties` (этот файл и
+keystore **не** коммитятся), а `android/app/build.gradle` ссылается на них в
+`signingConfigs.release`. Затем:
+
+```bash
+cd ~/newapp/mobile/android
+./gradlew assembleRelease
+# готовый файл: android/app/build/outputs/apk/release/app-release.apk
+```
+
+> Эти правки (`keystore.properties`, блок `signingConfigs` в `build.gradle`)
+> живут в каталоге `android/`, которого нет в git, — настраиваются один раз на
+> сборочной машине.
+
 ## Как пользоваться
 
-1. Включите Tailscale на телефоне.
-2. Откройте NVR Monitor → на экране подключения введите адрес сервера, например
-   `http://nvrmon.<tailnet>.ts.net:8000` или `http://100.x.y.z:8000`.
-3. Приложение проверит связь (`/healthz`) и откроет панель. Адрес запомнится —
-   при следующем запуске вход произойдёт автоматически.
-4. Сменить сервер: кнопка «назад» с панели возвращает на экран подключения, где
-   есть «Сменить сервер».
+Адрес сервера **зашит в сборку** (`capacitor.config.json` → `server.url`), поэтому
+приложение работает как обычное нативное: запустил — сразу открылась панель, без
+ввода адресов «как в браузере».
 
-Логин/пароль панели (если задан `ADMIN_PASSWORD`) спрашиваются уже самой панелью
-внутри webview — как в браузере.
+1. Включите VPN (WireGuard/Tailscale) на телефоне, если вы вне сети предприятия.
+2. Откройте NVR Monitor — загрузится панель, спросит логин/пароль
+   (`ADMIN_PASSWORD`).
+3. Если сервер недоступен, покажется локальная заглушка с кнопкой «Повторить».
+
+### Сменить адрес сервера
+
+Поменяйте `server.url` (и `SERVER` в `www/error.html`) на свой адрес, затем
+пересоберите:
+
+```bash
+# пример: домен через Caddy
+"url": "https://nvr.example.com"
+# или Tailscale MagicDNS
+"url": "http://nvrmon.<tailnet>.ts.net:8000"
+```
+
+`cleartext: true` оставлено, потому что сервер по умолчанию отдаёт http без TLS
+(трафик и так шифрует VPN). `allowNavigation` ограничивает webview адресами
+локальных сетей и VPN — приложение не уйдёт на сторонние сайты.
 
 ## Что внутри
 

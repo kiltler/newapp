@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419">
+  <title>NVR Monitor</title>
+  <link rel="stylesheet" href="connect.css">
+</head>
+<body>
+  <main class="wrap">
+    <img class="logo" src="icon-192.png" alt="">
+    <h1>NVR Monitor</h1>
+    <p class="sub">Сервер не отвечает</p>
+    <form id="form" onsubmit="return false">
+      <p class="hint" style="margin-top:0">
+        Не удалось подключиться к серверу мониторинга. Проверьте, что включён VPN
+        (WireGuard) и что сервер в локальной сети предприятия работает.
+      </p>
+      <button id="connect" type="button" onclick="retry()">Повторить</button>
+      <p id="status" class="status"></p>
+    </form>
+    <p class="foot muted">Соединение идёт по приватной сети — ничего не торчит в интернет.</p>
+  </main>
+  <script>
+    // Адрес сервера зашит в сборку (capacitor.config.json → server.url).
+    var SERVER = "http://192.168.11.231:8000";
+    function retry() {
+      document.getElementById("status").textContent = "Пробую снова…";
+      window.location.href = SERVER + "/";
+    }
+  </script>
+</body>
+</html>
