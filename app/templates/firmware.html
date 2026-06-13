@@ -2,7 +2,6 @@
 {% block title %}Прошивки — NVR Monitor{% endblock %}
 {% block content %}
 <h1>Контроль прошивок</h1>
-<p class="muted">Если у одной модели разные прошивки — подсвечено как «разнобой».</p>
 
 {% for r in rows %}
   <h2>{{ r.model }} {% if r.mixed %}<span class="badge warn">разнобой прошивок</span>{% endif %}</h2>

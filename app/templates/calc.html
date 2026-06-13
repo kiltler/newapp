@@ -2,7 +2,6 @@
 {% block title %}Калькулятор хранилища — NVR Monitor{% endblock %}
 {% block content %}
 <h1>Калькулятор хранилища</h1>
-<p class="muted">Прикидка нужного объёма дисков под заданную глубину архива.</p>
 
 <div class="calc">
   <label>Камер, шт <input id="c-cams" type="number" value="16"></label>
@@ -12,7 +11,6 @@
   <label>Запас на сбои, % <input id="c-spare" type="number" value="10"></label>
 </div>
 <h2 id="calc-out">—</h2>
-<p class="muted">Формула: камеры × битрейт(Мбит/с) ÷ 8 × 3600 × часов × дней → ГБ (+ запас).</p>
 
 <script>
 function calc() {
