@@ -1,0 +1,11 @@
+# Зависимости и сгенерированные нативные платформы Capacitor.
+# Платформы воссоздаются командой `npx cap add android` / `add ios`.
+node_modules/
+package-lock.json
+android/
+ios/
+.gradle/
+*.apk
+*.aab
+*.ipa
+.DS_Store

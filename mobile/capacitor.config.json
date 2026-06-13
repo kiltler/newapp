@@ -1,0 +1,38 @@
+{
+  "appId": "ru.nvrmon.app",
+  "appName": "NVR Monitor",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https",
+    "allowNavigation": [
+      "*.ts.net",
+      "100.*",
+      "192.168.*",
+      "10.*",
+      "172.16.*",
+      "172.17.*",
+      "172.18.*",
+      "172.19.*",
+      "172.2*.*",
+      "172.30.*",
+      "172.31.*",
+      "localhost",
+      "127.0.0.1"
+    ]
+  },
+  "android": {
+    "allowMixedContent": true
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 600,
+      "backgroundColor": "#0f1419",
+      "showSpinner": false,
+      "androidSplashResourceName": "splash"
+    },
+    "StatusBar": {
+      "style": "DARK",
+      "backgroundColor": "#0f1419"
+    }
+  }
+}
