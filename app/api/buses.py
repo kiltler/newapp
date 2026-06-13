@@ -211,12 +211,14 @@ async def update_disk(disk_id: int, data: schemas.DiskUpdate, session: AsyncSess
     # Синхронизируем статус с местом, чтобы они не расходились
     # (установленный/неисправный не трогаем — у них своя логика).
     if "location" in fields and disk.status not in (DiskStatus.INSTALLED, DiskStatus.FAULTY):
-        if disk.location == DiskLocation.REVIEWER and disk.status != DiskStatus.REMOVED_REVIEW:
-            disk.status = DiskStatus.REMOVED_REVIEW
-            disk.status_since = utcnow()
-        elif disk.location in (DiskLocation.SHELF, DiskLocation.SAFE) and disk.status == DiskStatus.REMOVED_REVIEW:
-            disk.status = DiskStatus.READY
-            disk.status_since = utcnow()
+        if disk.location in (DiskLocation.REVIEWER, DiskLocation.TRANSIT):
+            if disk.status != DiskStatus.REMOVED_REVIEW:
+                disk.status = DiskStatus.REMOVED_REVIEW
+                disk.status_since = utcnow()
+        elif disk.location == DiskLocation.SHELF:
+            if disk.status != DiskStatus.READY:
+                disk.status = DiskStatus.READY
+                disk.status_since = utcnow()
     await session.commit()
     return {"ok": True}
 

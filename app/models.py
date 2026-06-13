@@ -403,7 +403,6 @@ class DiskLocation:
     REVIEWER = "reviewer"    # у смотрящего (на просмотре)
     SHELF = "shelf"          # на полке (резерв)
     TRANSIT = "transit"      # в пути
-    SAFE = "safe"            # в сейфе/хранилище
 
 
 DISK_LOCATIONS = {
@@ -411,7 +410,6 @@ DISK_LOCATIONS = {
     DiskLocation.REVIEWER: "у смотрящего",
     DiskLocation.SHELF: "на полке",
     DiskLocation.TRANSIT: "в пути",
-    DiskLocation.SAFE: "в сейфе",
 }
 
 WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]

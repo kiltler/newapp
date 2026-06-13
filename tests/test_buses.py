@@ -309,9 +309,12 @@ async def test_location_status_sync(db):
         # «у смотрящего» → статус «на просмотре»
         assert (await c.put(f"/api/disks/{d}", json={"location": "reviewer"})).status_code == 200
         assert await _disk_status(d) == DiskStatus.REMOVED_REVIEW
-        # обратно на полку → снова «готов»
+        # «на полке» → снова «готов»
         assert (await c.put(f"/api/disks/{d}", json={"location": "shelf"})).status_code == 200
         assert await _disk_status(d) == DiskStatus.READY
+        # «в пути» → тоже «на просмотре» (диск в цепочке просмотра)
+        assert (await c.put(f"/api/disks/{d}", json={"location": "transit"})).status_code == 200
+        assert await _disk_status(d) == DiskStatus.REMOVED_REVIEW
         # «в автобусе» руками нельзя
         assert (await c.put(f"/api/disks/{d}", json={"location": "in_bus"})).status_code == 400
 
