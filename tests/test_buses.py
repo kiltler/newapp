@@ -178,7 +178,8 @@ async def test_plan_and_today(db):
         bus = (await c.post("/api/buses", json={"bus_number": "14", "route": "5"})).json()["id"]
         wd = dt.datetime.now().weekday()
         await c.put(f"/api/buses/{bus}", json={"collect_weekday": wd})
-        assert (await c.get("/buses/plan")).status_code == 200
+        plan = (await c.get("/buses/plan")).text
+        assert "Маршрут 5" in plan and "Назначить всему маршруту" in plan  # группировка + массовое назначение
         page = (await c.get("/buses/collection?today=1")).text
         assert "14" in page  # автобус с сегодняшним днём сбора попал в список
 

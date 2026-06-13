@@ -7,35 +7,69 @@
     <div><span class="bus-ico">📅</span> <b>План сбора по дням недели</b></div>
     <a class="bus-btn" href="/buses/collection?today=1">Сегодня к сбору →</a>
   </div>
-  <p class="muted">Назначь каждому автобусу день недели сбора. В «Дне сбора» можно отфильтровать только сегодняшние.</p>
 
-  <table class="grid">
-    <thead><tr><th>Автобус</th><th>Маршрут</th><th>День сбора</th></tr></thead>
-    <tbody>
-    {% for b in buses %}
-      <tr>
-        <td><a href="/buses/{{ b.id }}"><b>{{ b.bus_number }}</b></a></td>
-        <td>{{ b.route or '—' }}</td>
-        <td>
-          <select onchange="setDay({{ b.id }}, this.value)">
-            <option value="">— не задан —</option>
-            {% for i in range(7) %}
-              <option value="{{ i }}" {{ 'selected' if b.collect_weekday == i else '' }}>{{ weekdays[i] }}</option>
-            {% endfor %}
-          </select>
-        </td>
-      </tr>
-    {% else %}<tr><td colspan="3" class="muted">Автобусов нет.</td></tr>{% endfor %}
-    </tbody>
-  </table>
+  {% for g in groups %}
+    {% set gi = loop.index %}
+    <div class="plan-group-head">
+      <h2 style="margin:18px 0 8px">🚌 Маршрут {{ g.label }} <span class="muted" style="font-size:14px">({{ g.buses|length }})</span></h2>
+      <label class="muted" style="font-size:14px">Назначить всему маршруту:
+        <select data-label="{{ g.label }}" data-buses="{{ g.buses|map(attribute='id')|join(',') }}" onchange="setRouteDay(this)">
+          <option value="">— выбрать день —</option>
+          {% for i in range(7) %}<option value="{{ i }}">{{ weekdays[i] }}</option>{% endfor %}
+          <option value="clear">— очистить день —</option>
+        </select>
+      </label>
+    </div>
+    <table class="grid">
+      <thead><tr><th>Автобус</th><th>Маршрут</th><th>День сбора</th></tr></thead>
+      <tbody>
+      {% for b in g.buses %}
+        <tr>
+          <td><a href="/buses/{{ b.id }}"><b>{{ b.bus_number }}</b></a></td>
+          <td>{{ b.route or '—' }}</td>
+          <td>
+            <select id="day-{{ b.id }}" onchange="setDay({{ b.id }}, this.value)">
+              <option value="">— не задан —</option>
+              {% for i in range(7) %}
+                <option value="{{ i }}" {{ 'selected' if b.collect_weekday == i else '' }}>{{ weekdays[i] }}</option>
+              {% endfor %}
+            </select>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">Автобусов нет.</p>
+  {% endfor %}
 </div>
 
 <script>
-async function setDay(busId, val) {
-  const collect_weekday = val === "" ? null : parseInt(val, 10);
+async function putDay(busId, collect_weekday) {
   const r = await fetch(`/api/buses/${busId}`, { method: "PUT",
     headers: { "Content-Type": "application/json" }, body: JSON.stringify({ collect_weekday }) });
   if (!r.ok) alert("Ошибка: " + (await r.text()));
+  return r.ok;
+}
+async function setDay(busId, val) {
+  await putDay(busId, val === "" ? null : parseInt(val, 10));
+}
+async function setRouteDay(sel) {
+  const v = sel.value;
+  if (v === "") return;
+  const ids = (sel.dataset.buses || "").split(",").filter(Boolean);
+  const dayName = v === "clear" ? "не задан" : sel.options[sel.selectedIndex].text;
+  if (!confirm(`Назначить «${dayName}» всем автобусам маршрута ${sel.dataset.label} (${ids.length} шт.)?`)) {
+    sel.value = ""; return;
+  }
+  const collect_weekday = v === "clear" ? null : parseInt(v, 10);
+  for (const id of ids) {
+    if (await putDay(id, collect_weekday)) {
+      const s = document.getElementById("day-" + id);
+      if (s) s.value = (collect_weekday === null ? "" : String(collect_weekday));
+    }
+  }
+  sel.value = "";
 }
 </script>
 {% endblock %}

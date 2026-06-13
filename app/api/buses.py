@@ -571,8 +571,15 @@ async def plan_page(request: Request, session: AsyncSession = Depends(get_sessio
         (await session.execute(select(Bus))).scalars(),
         key=lambda b: (_nat(b.route), _nat(b.bus_number)),
     )
+    # Группируем по маршрутам — чтобы можно было назначить день всему маршруту разом.
+    groups: list[dict] = []
+    for b in buses:
+        label = b.route or "Без маршрута"
+        if not groups or groups[-1]["label"] != label:
+            groups.append({"label": label, "buses": []})
+        groups[-1]["buses"].append(b)
     return templates.TemplateResponse("plan.html", {
-        "request": request, "buses": buses, "weekdays": WEEKDAYS,
+        "request": request, "groups": groups, "weekdays": WEEKDAYS,
     })
 
 
