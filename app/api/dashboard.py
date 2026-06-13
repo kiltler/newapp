@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import crud
-from app.api.monitoring import archive_calendar, summary
+from app.api.monitoring import archive_calendar, archive_overview, summary
 from app.database import get_session
 from app.models import ArchiveCoverage, AuditLog, ChannelState, Group, PlanMarker
 
@@ -42,6 +42,8 @@ async def index(request: Request, session: AsyncSession = Depends(get_session)):
     groups = {g.id: g for g in (await session.execute(select(Group))).scalars()}
     stats = await summary(session)
     events = await crud.list_events(session, limit=20)
+    archive = await archive_overview(session)
+    arch_by_id = {a["device_id"]: a for a in archive["devices"]}
     return templates.TemplateResponse(
         "index.html",
         {
@@ -50,6 +52,8 @@ async def index(request: Request, session: AsyncSession = Depends(get_session)):
             "groups": groups,
             "stats": stats,
             "events": events,
+            "archive": archive,
+            "arch_by_id": arch_by_id,
         },
     )
 

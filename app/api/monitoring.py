@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app import crud, schemas
 from app.database import get_session
@@ -147,3 +148,57 @@ async def archive_calendar(
             "gaps": r.gaps,
         }
     return {"days": day_list, "channels": matrix}
+
+
+async def archive_overview(session: AsyncSession, day: dt.date | None = None) -> dict:
+    """Сводка покрытия архива за один день по всем устройствам (для дашборда/TV).
+
+    Берёт самый свежий проверенный день (по умолчанию) и считает по каждому
+    устройству, сколько каналов с записью / частично / без записи / без данных.
+    """
+    rows = (await session.execute(select(ArchiveCoverage))).scalars().all()
+    if day is None:
+        day = max((r.day for r in rows), default=None)
+    cov = {(r.device_id, r.channel_id): r.status for r in rows if day and r.day == day}
+
+    devices = (
+        await session.execute(select(Device).options(selectinload(Device.channels)))
+    ).scalars().all()
+
+    out_devices = []
+    totals = {"full": 0, "partial": 0, "none": 0, "no_data": 0}
+    for d in devices:
+        if not d.enabled:
+            continue
+        chans = [c for c in d.channels if c.enabled is not False]
+        cnt = {"full": 0, "partial": 0, "none": 0, "no_data": 0}
+        for c in chans:
+            st = cov.get((d.id, c.channel_id))
+            cnt[st if st in ("full", "partial", "none") else "no_data"] += 1
+        for k in totals:
+            totals[k] += cnt[k]
+        covered = cnt["full"] + cnt["partial"] + cnt["none"]
+        if not chans or covered == 0:
+            status = "gray"
+        elif cnt["none"]:
+            status = "red"
+        elif cnt["partial"]:
+            status = "yellow"
+        else:
+            status = "green"
+        out_devices.append({
+            "device_id": d.id, "name": d.name, "total": len(chans),
+            "full": cnt["full"], "partial": cnt["partial"],
+            "none": cnt["none"], "no_data": cnt["no_data"], "status": status,
+        })
+    problem = sum(1 for x in out_devices if x["status"] in ("red", "yellow"))
+    return {
+        "day": day.isoformat() if day else None,
+        "devices": out_devices,
+        "totals": {**totals, "devices": len(out_devices), "problem_devices": problem},
+    }
+
+
+@router.get("/archive/overview")
+async def archive_overview_api(session: AsyncSession = Depends(get_session)):
+    return await archive_overview(session)

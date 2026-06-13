@@ -8,6 +8,19 @@
   <div class="card"><span class="num">{{ stats.channels_down }}</span><span>Каналов не в норме</span></div>
 </section>
 
+{% if archive.day %}
+<h2>🎞 Архив записи <span class="muted" style="font-size:14px">за {{ archive.day[8:10] }}.{{ archive.day[5:7] }}</span></h2>
+<section class="cards">
+  <div class="card ok"><span class="num">{{ archive.totals.full }}</span><span>каналов с записью</span></div>
+  <div class="card warn"><span class="num">{{ archive.totals.partial }}</span><span>частично (дыры)</span></div>
+  <div class="card err"><span class="num">{{ archive.totals.none }}</span><span>без записи</span></div>
+  <div class="card"><span class="num">{{ archive.totals.no_data }}</span><span>нет данных</span></div>
+</section>
+{% else %}
+<h2>🎞 Архив записи</h2>
+<p class="muted">Проверок архива ещё не было — он проверяется автоматически раз в сутки (за прошедшие сутки).</p>
+{% endif %}
+
 <h2>Объекты</h2>
 <div class="bulkbar">
   <select id="bulk-group">
@@ -18,7 +31,7 @@
   <button onclick="bulkSyncTime(document.getElementById('bulk-group').value)">Синхр. время</button>
 </div>
 <table class="grid">
-  <thead><tr><th></th><th>Объект</th><th>Группа</th><th>Host</th><th>Тип</th><th>Каналы</th><th>Статус</th></tr></thead>
+  <thead><tr><th></th><th>Объект</th><th>Группа</th><th>Host</th><th>Тип</th><th>Каналы</th><th>Статус</th><th>Архив</th></tr></thead>
   <tbody>
   {% for d in devices %}
     {% set health = device_health(d) %}
@@ -38,9 +51,16 @@
           <span class="badge warn" title="дрейф времени">⏱ {{ (d.time_drift_seconds//60) }}м</span>
         {% endif %}
       </td>
+      <td>
+        {% set a = arch_by_id.get(d.id) %}
+        {% if a and a.total %}
+          <span class="dot {{ a.status }}" title="запись {{ a.full }}/{{ a.total }}{% if a.partial %}, частично {{ a.partial }}{% endif %}{% if a.none %}, без записи {{ a.none }}{% endif %}{% if a.no_data %}, нет данных {{ a.no_data }}{% endif %}"></span>
+          {{ a.full }}/{{ a.total }}{% if a.none %} <span class="badge err">{{ a.none }}✖</span>{% elif a.partial %} <span class="badge warn">{{ a.partial }}!</span>{% endif %}
+        {% else %}<span class="muted">—</span>{% endif %}
+      </td>
     </tr>
   {% else %}
-    <tr><td colspan="7" class="muted">Устройств нет. Нажмите «+ Устройство».</td></tr>
+    <tr><td colspan="8" class="muted">Устройств нет. Нажмите «+ Устройство».</td></tr>
   {% endfor %}
   </tbody>
 </table>
