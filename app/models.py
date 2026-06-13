@@ -294,8 +294,9 @@ class AlertState(Base):
 # ── Модуль «Автобусы» (ручной офлайн-учёт дисковой ротации) ──────────────────
 class DiskStatus:
     INSTALLED = "installed"          # стоит в автобусе
-    REMOVED_REVIEW = "removed_review"  # снят, на просмотре
-    READY = "ready"                  # просмотрен/готов к установке (резерв)
+    REMOVED_REVIEW = "removed_review"  # снят, ждёт просмотра (в очереди)
+    REVIEWED = "reviewed"            # просмотрен, но ещё лежит у смотрящего
+    READY = "ready"                  # вернули на полку — готов к установке (резерв)
     FAULTY = "faulty"                # неисправен/списан
 
 

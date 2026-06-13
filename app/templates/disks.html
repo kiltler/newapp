@@ -21,7 +21,7 @@
     <input name="q" value="{{ q }}" placeholder="Поиск диска по метке / заметке / автобусу…">
     <select name="status" onchange="this.form.submit()">
       <option value="">Все статусы</option>
-      {% set sl = {'installed':'установлен','ready':'готов (резерв)','removed_review':'на просмотре','faulty':'неисправен'} %}
+      {% set sl = {'installed':'установлен','ready':'готов (резерв)','removed_review':'на просмотре','reviewed':'просмотрен (у смотрящего)','faulty':'неисправен'} %}
       {% for k,v in sl.items() %}<option value="{{ k }}" {{ 'selected' if status==k else '' }}>{{ v }}</option>{% endfor %}
     </select>
     <button class="bus-btn">Найти</button>
@@ -30,7 +30,7 @@
   <table class="grid">
     <thead><tr><th>Метка</th><th>Тип</th><th>Объём</th><th>Статус</th><th>Где</th><th>Автобус</th><th>Заметка</th><th>Действия</th></tr></thead>
     <tbody>
-    {% set sm = {'installed':'ok','ready':'ok','removed_review':'warn','faulty':'err'} %}
+    {% set sm = {'installed':'ok','ready':'ok','removed_review':'warn','reviewed':'warn','faulty':'err'} %}
     {% for d in disks %}
       <tr>
         <td><a href="/disks/{{ d.id }}/passport"><b>{{ d.label }}</b></a></td><td>{{ d.type }}</td>
@@ -63,6 +63,7 @@
           <button class="mini" onclick='editNote({{ d.id }}, {{ (d.note or "") | tojson }})'>📝 заметка</button>
           <a class="mini" href="/disks/{{ d.id }}/passport" style="text-decoration:none">🪪 паспорт</a>
           {% if d.status == 'removed_review' %}<button class="mini" onclick="reviewed({{ d.id }})">✓ просмотрен</button>{% endif %}
+          {% if d.status in ('removed_review', 'reviewed') %}<button class="mini" onclick="toShelf({{ d.id }})">↩ на полку</button>{% endif %}
           {% if d.status == 'faulty' %}<button class="mini" onclick="restore({{ d.id }})">↩ в строй</button>
           {% else %}<button class="mini danger" onclick="faulty({{ d.id }})">неисправен</button>{% endif %}
           <button class="mini danger" onclick='delDisk({{ d.id }}, {{ d.label | tojson }}, {{ (d.status == "installed") | tojson }})'>🗑 удалить</button>
@@ -88,6 +89,7 @@ async function editNote(id, cur){
   r.ok?location.reload():alert(await r.text());
 }
 async function reviewed(id){ const r=await fetch(`/api/disks/${id}/reviewed`,{method:"POST"}); r.ok?location.reload():alert(await r.text()); }
+async function toShelf(id){ const r=await fetch(`/api/disks/${id}/to-shelf`,{method:"POST"}); r.ok?location.reload():alert(await r.text()); }
 async function delDisk(id, label, installed){
   let msg = `Удалить диск «${label}» из реестра? Действие необратимо.`;
   if(installed) msg = `Диск «${label}» сейчас числится установленным. Удалить его из реестра? Автобус останется без диска. Действие необратимо.`;

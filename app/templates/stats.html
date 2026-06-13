@@ -34,6 +34,7 @@
     <div class="bus-tile"><span class="num">{{ disk_stats.installed }}</span><span>установлено</span></div>
     <div class="bus-tile"><span class="num">{{ disk_stats.ready }}</span><span>готов (резерв)</span></div>
     <div class="bus-tile {{ 'warn' if disk_stats.review else '' }}"><span class="num">{{ disk_stats.review }}</span><span>на просмотре</span></div>
+    <div class="bus-tile {{ 'warn' if disk_stats.reviewed else '' }}"><span class="num">{{ disk_stats.reviewed }}</span><span>у смотрящего</span></div>
     <div class="bus-tile {{ 'err' if disk_stats.faulty else '' }}"><span class="num">{{ disk_stats.faulty }}</span><span>неисправны</span></div>
   </section>
 

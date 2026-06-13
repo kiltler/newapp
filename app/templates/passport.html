@@ -10,7 +10,7 @@
 
   <section class="info-grid">
     <div><b>Тип:</b> {{ disk.type }}{% if disk.capacity_gb %} · {{ disk.capacity_gb }} ГБ{% endif %}</div>
-    {% set sl = {'installed':'установлен','ready':'резерв','removed_review':'на просмотре','faulty':'неисправен'} %}
+    {% set sl = {'installed':'установлен','ready':'резерв','removed_review':'на просмотре','reviewed':'просмотрен','faulty':'неисправен'} %}
     <div><b>Статус:</b> {{ sl.get(disk.status, disk.status) }}</div>
     <div><b>Где:</b> {{ locations.get(disk.location, disk.location) }}</div>
     <div><b>Закреплён за:</b> {% if bus %}<a href="/buses/{{ bus.id }}">{{ bus.bus_number }}</a>{% else %}—{% endif %}</div>

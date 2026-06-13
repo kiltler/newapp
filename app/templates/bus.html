@@ -36,8 +36,8 @@
   <table class="grid">
     <thead><tr><th>Диск</th><th>Тип</th><th>Статус</th><th>Заметка</th><th>Действия</th></tr></thead>
     <tbody>
-    {% set sm = {'installed':'ok','ready':'ok','removed_review':'warn','faulty':'err'} %}
-    {% set sl = {'installed':'установлен','ready':'готов (резерв)','removed_review':'на просмотре','faulty':'неисправен'} %}
+    {% set sm = {'installed':'ok','ready':'ok','removed_review':'warn','reviewed':'warn','faulty':'err'} %}
+    {% set sl = {'installed':'установлен','ready':'готов (резерв)','removed_review':'на просмотре','reviewed':'просмотрен (у смотрящего)','faulty':'неисправен'} %}
     {% for d in assigned %}
       <tr>
         <td><b>{{ d.label }}</b></td><td>{{ d.type }}</td>
@@ -46,6 +46,7 @@
         <td>
           <button class="mini" onclick='editNote({{ d.id }}, {{ (d.note or "") | tojson }})'>📝 заметка</button>
           {% if d.status == 'removed_review' %}<button class="mini" onclick="reviewed({{ d.id }})">✓ просмотрен</button>{% endif %}
+          {% if d.status in ('removed_review', 'reviewed') %}<button class="mini" onclick="toShelf({{ d.id }})">↩ на полку</button>{% endif %}
           {% if d.status == 'faulty' %}<button class="mini" onclick="restore({{ d.id }})">↩ в строй</button>
           {% else %}<button class="mini danger" onclick="faulty({{ d.id }})">неисправен</button>{% endif %}
         </td>
@@ -119,6 +120,7 @@ async function removeDisk(){
   if (r.ok) location.reload(); else alert("Ошибка: " + (await r.text()));
 }
 async function reviewed(id){ const r = await fetch(`/api/disks/${id}/reviewed`,{method:"POST"}); r.ok?location.reload():alert(await r.text()); }
+async function toShelf(id){ const r = await fetch(`/api/disks/${id}/to-shelf`,{method:"POST"}); r.ok?location.reload():alert(await r.text()); }
 async function restore(id){ if(!confirm("Вернуть диск в строй (в резерв)?"))return; const r=await fetch(`/api/disks/${id}/restore`,{method:"POST"}); r.ok?location.reload():alert(await r.text()); }
 async function faulty(id){
   const note = prompt("Что с диском? (заметка о неисправности):"); if (note===null) return;

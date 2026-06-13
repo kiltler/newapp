@@ -15,7 +15,7 @@
   <table class="grid">
     <thead><tr><th>✓</th><th>Метка</th><th>Тип</th><th>Статус</th><th>Где (по системе)</th><th>Автобус</th><th>Последняя ревизия</th></tr></thead>
     <tbody>
-    {% set sl = {'installed':'установлен','ready':'резерв','removed_review':'на просмотре','faulty':'неисправен'} %}
+    {% set sl = {'installed':'установлен','ready':'резерв','removed_review':'на просмотре','reviewed':'просмотрен','faulty':'неисправен'} %}
     {% for it in items %}
       <tr class="{{ 'audit-stale' if it.audit_age is none or it.audit_age > 30 else '' }}">
         <td><input type="checkbox" class="audit-chk" value="{{ it.disk.id }}"></td>

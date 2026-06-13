@@ -77,6 +77,10 @@ async def test_reviewed_and_faulty(db):
         await c.post(f"/api/buses/{bus}/swap", json={"installed_disk_id": None})  # снят -> review
         r = await c.post(f"/api/disks/{d}/reviewed")
         assert r.status_code == 200
+        assert await _disk_status(d) == DiskStatus.REVIEWED  # просмотрен, ещё у смотрящего
+        # вернули на полку → готов (резерв)
+        r = await c.post(f"/api/disks/{d}/to-shelf")
+        assert r.status_code == 200
         assert await _disk_status(d) == DiskStatus.READY
         r = await c.post(f"/api/disks/{d}/faulty", json={"note": "битый"})
         assert r.status_code == 200
@@ -123,10 +127,10 @@ async def test_disk_review_and_stats(db):
         d = (await c.post("/api/disks", json={"label": "Р-1", "assigned_bus_id": bus})).json()["id"]
         await c.post(f"/api/buses/{bus}/swap", json={"installed_disk_id": d})
         await c.post(f"/api/buses/{bus}/swap", json={"installed_disk_id": None})  # снят → review
-        # запись наблюдения с проблемой + пометить готовым
+        # запись наблюдения с проблемой + пометить просмотренным
         r = await c.post(f"/api/disks/{d}/review", json={"tags": ["нет записи"], "note": "канал 3", "finish": True})
         assert r.status_code == 200
-        assert await _disk_status(d) == DiskStatus.READY
+        assert await _disk_status(d) == DiskStatus.REVIEWED  # просмотрен, у смотрящего
         # статистика видит проблемный автобус
         stats = (await c.get("/buses/stats")).text
         assert "нет записи" in stats and "30" in stats
@@ -347,3 +351,24 @@ async def test_not_collected(db):
         logs = (await s.execute(select(SwapLog).where(SwapLog.bus_id == bus))).scalars().all()
         assert len(logs) == 1
         assert logs[0].removed_disk_id is None and logs[0].installed_disk_id is None
+
+
+async def test_review_to_shelf_flow(db):
+    async with _client() as c:
+        bus = (await c.post("/api/buses", json={"bus_number": "501"})).json()["id"]
+        d = (await c.post("/api/disks", json={"label": "ПР-1", "assigned_bus_id": bus})).json()["id"]
+        await c.post(f"/api/buses/{bus}/swap", json={"installed_disk_id": d})
+        await c.post(f"/api/buses/{bus}/swap", json={"installed_disk_id": None})  # снят → на просмотр
+        assert await _disk_status(d) == DiskStatus.REMOVED_REVIEW
+        # просмотрели → остаётся у смотрящего, место НЕ меняется
+        assert (await c.post(f"/api/disks/{d}/reviewed")).status_code == 200
+        assert await _disk_status(d) == DiskStatus.REVIEWED
+        async with SessionLocal() as s:
+            assert (await s.execute(select(Disk).where(Disk.id == d))).scalar_one().location == "reviewer"
+        # очередь показывает раздел «у смотрящего»
+        assert "у смотрящего" in (await c.get("/buses/review")).text
+        # вернули на полку → готов + место «на полке»
+        assert (await c.post(f"/api/disks/{d}/to-shelf")).status_code == 200
+        async with SessionLocal() as s:
+            disk = (await s.execute(select(Disk).where(Disk.id == d))).scalar_one()
+            assert disk.status == DiskStatus.READY and disk.location == "shelf"

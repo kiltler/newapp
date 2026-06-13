@@ -5,12 +5,12 @@
   <a href="/buses" class="muted">← к автобусам</a>
   <div class="bus-banner">
     <div><span class="bus-ico">🔎</span> <b>Очередь на просмотр</b>
-      <span class="badge-offline">{{ items|length }} дисков</span></div>
+      <span class="badge-offline">{{ waiting_items|length }} ждут · {{ held_items|length }} у смотрящего</span></div>
   </div>
-  <p class="muted">Диски сняты и ждут просмотра. Отметь, что нашёл, и пометь готовым → в резерв.</p>
 
+  <h2>Ждут просмотра</h2>
   <div class="review-list">
-  {% for it in items %}
+  {% for it in waiting_items %}
     <div class="review-card" id="rv-{{ it.disk.id }}">
       <div class="review-head">
         💿 <b>{{ it.disk.label }}</b> <span class="muted">({{ it.disk.type }})</span>
@@ -25,11 +25,31 @@
       <div class="review-controls">
         <input class="rv-note" placeholder="комментарий (необязательно)">
         <button class="bus-btn" onclick="review({{ it.disk.id }}, false)">Сохранить пометку</button>
-        <button class="bus-btn" style="background:#2ecc71" onclick="review({{ it.disk.id }}, true)">✓ Просмотрен → резерв</button>
+        <button class="bus-btn" style="background:#2ecc71" onclick="review({{ it.disk.id }}, true)">✓ Просмотрен</button>
       </div>
     </div>
   {% else %}
-    <p class="muted">Очередь пуста — все снятые диски просмотрены 🎉</p>
+    <p class="muted">Никто не ждёт просмотра 🎉</p>
+  {% endfor %}
+  </div>
+
+  <h2>Просмотрены — лежат у смотрящего</h2>
+  <p class="muted">Просмотр сделан, диск пока у смотрящего. Когда вернут — «↩ Вернуть на полку» (→ в резерв).</p>
+  <div class="review-list">
+  {% for it in held_items %}
+    <div class="review-card" id="hv-{{ it.disk.id }}">
+      <div class="review-head">
+        💿 <b>{{ it.disk.label }}</b> <span class="muted">({{ it.disk.type }})</span>
+        · автобус {% if it.bus %}<a href="/buses/{{ it.bus.id }}">{{ it.bus.bus_number }}</a>{% else %}—{% endif %}
+        <span class="wait">у смотрящего {{ it.waiting }} дн.</span>
+      </div>
+      {% if it.disk.note %}<div class="muted">пометка: {{ it.disk.note }}</div>{% endif %}
+      <div class="review-controls">
+        <button class="bus-btn" style="background:#2ecc71" onclick="toShelf({{ it.disk.id }})">↩ Вернуть на полку</button>
+      </div>
+    </div>
+  {% else %}
+    <p class="muted">У смотрящего ничего не задержалось.</p>
   {% endfor %}
   </div>
 </div>
@@ -41,6 +61,10 @@ async function review(diskId, finish) {
   const note = card.querySelector(".rv-note").value || null;
   const r = await fetch(`/api/disks/${diskId}/review`, { method: "POST",
     headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tags, note, finish }) });
+  if (r.ok) location.reload(); else alert("Ошибка: " + (await r.text()));
+}
+async function toShelf(diskId) {
+  const r = await fetch(`/api/disks/${diskId}/to-shelf`, { method: "POST" });
   if (r.ok) location.reload(); else alert("Ошибка: " + (await r.text()));
 }
 </script>

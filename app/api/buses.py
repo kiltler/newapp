@@ -212,14 +212,14 @@ async def update_disk(disk_id: int, data: schemas.DiskUpdate, session: AsyncSess
     # Синхронизируем статус с местом, чтобы они не расходились
     # (установленный/неисправный не трогаем — у них своя логика).
     if "location" in fields and disk.status not in (DiskStatus.INSTALLED, DiskStatus.FAULTY):
-        if disk.location in (DiskLocation.REVIEWER, DiskLocation.TRANSIT):
-            if disk.status != DiskStatus.REMOVED_REVIEW:
-                disk.status = DiskStatus.REMOVED_REVIEW
-                disk.status_since = utcnow()
-        elif disk.location == DiskLocation.SHELF:
-            if disk.status != DiskStatus.READY:
-                disk.status = DiskStatus.READY
-                disk.status_since = utcnow()
+        if disk.location == DiskLocation.SHELF and disk.status in (
+                DiskStatus.REMOVED_REVIEW, DiskStatus.REVIEWED):
+            disk.status = DiskStatus.READY          # вернули на полку → резерв
+            disk.status_since = utcnow()
+        elif disk.location in (DiskLocation.REVIEWER, DiskLocation.TRANSIT) and (
+                disk.status == DiskStatus.READY):
+            disk.status = DiskStatus.REMOVED_REVIEW  # резерв отдали на (пере)просмотр
+            disk.status_since = utcnow()
     await session.commit()
     return {"ok": True}
 
@@ -243,12 +243,26 @@ async def delete_disk(disk_id: int, session: AsyncSession = Depends(get_session)
 
 @router.post("/api/disks/{disk_id}/reviewed")
 async def disk_reviewed(disk_id: int, session: AsyncSession = Depends(get_session)):
+    """Отметить диск просмотренным. Диск остаётся У СМОТРЯЩЕГО (место не меняем) —
+    на полку он возвращается отдельным действием «вернуть на полку»."""
     disk = await _disk(session, disk_id)
     if disk.status != DiskStatus.REMOVED_REVIEW:
         raise HTTPException(400, "Просмотренным можно пометить только диск 'на просмотре'")
+    disk.status = DiskStatus.REVIEWED
+    disk.status_since = utcnow()
+    await session.commit()
+    return {"ok": True}
+
+
+@router.post("/api/disks/{disk_id}/to-shelf")
+async def disk_to_shelf(disk_id: int, session: AsyncSession = Depends(get_session)):
+    """Вернуть диск на полку → готов (резерв). Из 'на просмотре' или 'просмотрен'."""
+    disk = await _disk(session, disk_id)
+    if disk.status not in (DiskStatus.REMOVED_REVIEW, DiskStatus.REVIEWED):
+        raise HTTPException(400, "Вернуть на полку можно диск, который на просмотре или просмотрен")
     disk.status = DiskStatus.READY
     disk.status_since = utcnow()
-    disk.location = DiskLocation.SHELF  # готов → на полке (резерв)
+    disk.location = DiskLocation.SHELF
     await session.commit()
     return {"ok": True}
 
@@ -393,7 +407,8 @@ async def disk_review(disk_id: int, data: schemas.ReviewRequest, request: Reques
     if summary:
         disk.note = summary
     if data.finish and disk.status == DiskStatus.REMOVED_REVIEW:
-        disk.status = DiskStatus.READY
+        # Просмотрен, но остаётся у смотрящего (на полку — отдельной кнопкой).
+        disk.status = DiskStatus.REVIEWED
         disk.status_since = utcnow()
     await session.commit()
     return {"ok": True}
@@ -469,7 +484,7 @@ async def buses_page(request: Request, q: str = "", sort: str = "status",
     stale = [
         d for d in disks
         if d.status == DiskStatus.REMOVED_REVIEW and d.status_since
-        and (now - d.status_since).days >= review_days
+        and (now - _aware(d.status_since)).days >= review_days
     ]
     # сводка по парку
     summary = {
@@ -480,7 +495,7 @@ async def buses_page(request: Request, q: str = "", sort: str = "status",
             and (now - b.installed_since).days >= swap_days
         ),
         "disk_ready": sum(1 for d in disks if d.status == DiskStatus.READY),
-        "disk_review": sum(1 for d in disks if d.status == DiskStatus.REMOVED_REVIEW),
+        "disk_review": sum(1 for d in disks if d.status in (DiskStatus.REMOVED_REVIEW, DiskStatus.REVIEWED)),
         "disk_faulty": sum(1 for d in disks if d.status == DiskStatus.FAULTY),
     }
     return templates.TemplateResponse("buses.html", {
@@ -567,15 +582,19 @@ async def review_queue(request: Request, session: AsyncSession = Depends(get_ses
     disks = await _disks(session)
     buses = {b.id: b for b in (await session.execute(select(Bus))).scalars()}
     now = utcnow()
-    items = []
+    waiting_items, held_items = [], []
     for d in disks:
-        if d.status != DiskStatus.REMOVED_REVIEW:
+        if d.status not in (DiskStatus.REMOVED_REVIEW, DiskStatus.REVIEWED):
             continue
-        waiting = (now - d.status_since).days if d.status_since else 0
-        items.append({"disk": d, "bus": buses.get(d.assigned_bus_id), "waiting": waiting})
-    items.sort(key=lambda x: -x["waiting"])  # дольше всех ждут — сверху
+        since = _aware(d.status_since)
+        days = (now - since).days if since else 0
+        row = {"disk": d, "bus": buses.get(d.assigned_bus_id), "waiting": days}
+        (waiting_items if d.status == DiskStatus.REMOVED_REVIEW else held_items).append(row)
+    waiting_items.sort(key=lambda x: -x["waiting"])  # дольше всех ждут — сверху
+    held_items.sort(key=lambda x: -x["waiting"])
     return templates.TemplateResponse("review.html", {
-        "request": request, "items": items, "tags": OBSERVATION_TAGS,
+        "request": request, "waiting_items": waiting_items, "held_items": held_items,
+        "tags": OBSERVATION_TAGS,
     })
 
 
@@ -624,6 +643,7 @@ async def bus_stats(request: Request, days: int = 30, session: AsyncSession = De
         "installed": sum(1 for d in disks if d.status == DiskStatus.INSTALLED),
         "ready": sum(1 for d in disks if d.status == DiskStatus.READY),
         "review": sum(1 for d in disks if d.status == DiskStatus.REMOVED_REVIEW),
+        "reviewed": sum(1 for d in disks if d.status == DiskStatus.REVIEWED),
         "faulty": sum(1 for d in disks if d.status == DiskStatus.FAULTY),
     }
 
