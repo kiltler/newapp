@@ -81,7 +81,7 @@
       <label>Поставить диск (готовые к установке):
         <select id="swap-disk">
           <option value="">— не ставить (только снять) —</option>
-          {% for d in ready_disks|sort(attribute='assigned_bus_id') %}
+          {% for d in ready_disks %}
             <option value="{{ d.id }}" data-other="{{ 0 if d.assigned_bus_id in (none, bus.id) else 1 }}">
               {{ d.label }} ({{ d.type }}){% if d.assigned_bus_id and d.assigned_bus_id != bus.id %} — чужой!{% endif %}
             </option>

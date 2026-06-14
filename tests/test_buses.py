@@ -385,3 +385,15 @@ async def test_bus_location(db):
     async with SessionLocal() as s:
         b = (await s.execute(select(Bus).where(Bus.id == bus))).scalar_one()
         assert b.location == "Парковка №3, бокс 12"
+
+
+async def test_bus_page_mixed_ready_disks(db):
+    """Регрессия: страница автобуса не должна падать, когда среди готовых дисков
+    есть и закреплённые (assigned_bus_id=int), и незакреплённые (None)."""
+    async with _client() as c:
+        bus = (await c.post("/api/buses", json={"bus_number": "22T", "route": "14"})).json()["id"]
+        await c.post("/api/disks", json={"label": "R1", "status": "ready", "assigned_bus_id": bus})
+        await c.post("/api/disks", json={"label": "R2", "status": "ready"})  # assigned_bus_id=None
+        r = await c.get(f"/buses/{bus}")
+        assert r.status_code == 200
+        assert "R1" in r.text and "R2" in r.text

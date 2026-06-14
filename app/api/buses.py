@@ -697,7 +697,11 @@ async def bus_page(bus_id: int, request: Request, session: AsyncSession = Depend
     by_id = {d.id: d for d in disks}
     color, reason = bus_status(bus, disks, swap_days)
     assigned = [d for d in disks if d.assigned_bus_id == bus.id]
-    ready = [d for d in disks if d.status == DiskStatus.READY]
+    # Резерв для установки: сначала закреплённые за этим автобусом, потом остальные.
+    ready = sorted(
+        (d for d in disks if d.status == DiskStatus.READY),
+        key=lambda d: (0 if d.assigned_bus_id == bus.id else 1, (d.label or "")),
+    )
     history = await _swaplog(session, bus_id=bus_id)
     return templates.TemplateResponse("bus.html", {
         "request": request, "bus": bus, "color": color, "reason": reason,
