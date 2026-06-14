@@ -242,7 +242,7 @@ class AssetCreate(BaseModel):
     model: str | None = None
     serial: str | None = None
     vendor: str | None = None
-    location: str | None = None
+    assigned_bus_id: int | None = None     # закрепить за автобусом
     status: str = "in_stock"
     warranty_until: dt.date | None = None
     note: str | None = None
@@ -253,14 +253,14 @@ class AssetUpdate(BaseModel):
     model: str | None = None
     serial: str | None = None
     vendor: str | None = None
-    location: str | None = None
+    assigned_bus_id: int | None = None
     warranty_until: dt.date | None = None
     note: str | None = None
 
 
 class AssetAction(BaseModel):
     reason: str | None = None
-    location: str | None = None            # для установки (deploy)
+    bus_id: int | None = None              # для установки (deploy) — в какой автобус
 
 
 class AssetReplace(BaseModel):

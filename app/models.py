@@ -402,7 +402,8 @@ class Asset(Base):
     vendor: Mapped[str | None] = mapped_column(String(128), default=None)
     status: Mapped[str] = mapped_column(String(16), default=AssetStatus.IN_STOCK)
     status_since: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    location: Mapped[str | None] = mapped_column(String(255), default=None)  # где/на каком объекте
+    assigned_bus_id: Mapped[int | None] = mapped_column(Integer, default=None)  # закреплён за автобусом
+    location: Mapped[str | None] = mapped_column(String(255), default=None)  # доп. примечание о месте (опц.)
     device_id: Mapped[int | None] = mapped_column(Integer, default=None)     # связь с мониторингом (NVR), опц.
     batch_id: Mapped[int | None] = mapped_column(Integer, default=None)
     warranty_until: Mapped[dt.date | None] = mapped_column(Date, default=None)

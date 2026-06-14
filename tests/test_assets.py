@@ -88,32 +88,39 @@ async def test_batch_nvr_creates_assets(db):
 
 
 async def test_asset_lifecycle(db):
-    from app.models import AssetStatus
-    async with _client() as c:
-        a = (await c.post("/api/assets", json={"kind": "nvr", "label": "NVR-1", "model": "DS-7616"})).json()["id"]
-        assert await _asset_status(a) == AssetStatus.IN_STOCK
-        assert (await c.post(f"/api/assets/{a}/deploy", json={"location": "Суворова 8"})).status_code == 200
-        assert await _asset_status(a) == AssetStatus.DEPLOYED
-        assert (await c.post(f"/api/assets/{a}/faulty", json={"reason": "не грузится"})).status_code == 200
-        assert await _asset_status(a) == AssetStatus.FAULTY
-        assert (await c.post(f"/api/assets/{a}/write-off", json={"reason": "ремонт нерентабелен"})).status_code == 200
-        assert await _asset_status(a) == AssetStatus.WRITTEN_OFF
-        assert (await c.post(f"/api/assets/{a}/restore")).status_code == 200
-        assert await _asset_status(a) == AssetStatus.IN_STOCK
-
-
-async def test_asset_replace(db):
     from app.models import Asset, AssetStatus
     async with _client() as c:
-        old = (await c.post("/api/assets", json={"kind": "nvr", "label": "OLD", "status": "deployed", "location": "Объект A"})).json()["id"]
-        new = (await c.post("/api/assets", json={"kind": "nvr", "label": "NEW"})).json()["id"]  # на складе
-        r = await c.post(f"/api/assets/{old}/replace", json={"new_id": new, "reason": "сгорел БП"})
-        assert r.status_code == 200
+        bus = (await c.post("/api/buses", json={"bus_number": "AST"})).json()["id"]
+        a = (await c.post("/api/assets", json={"kind": "nvr", "label": "NVR-1", "model": "DS-7616"})).json()["id"]
+        assert await _asset_status(a) == AssetStatus.IN_STOCK
+        assert (await c.post(f"/api/assets/{a}/deploy", json={"bus_id": bus})).status_code == 200
+        async with SessionLocal() as s:
+            got = (await s.execute(select(Asset).where(Asset.id == a))).scalar_one()
+            assert got.status == AssetStatus.DEPLOYED and got.assigned_bus_id == bus
+        # без автобуса установка нельзя
+        b2 = (await c.post("/api/assets", json={"kind": "nvr", "label": "NVR-2"})).json()["id"]
+        assert (await c.post(f"/api/assets/{b2}/deploy", json={})).status_code == 400
+        assert (await c.post(f"/api/assets/{a}/faulty", json={"reason": "не грузится"})).status_code == 200
+        assert await _asset_status(a) == AssetStatus.FAULTY
+        assert (await c.post(f"/api/assets/{a}/write-off", json={"reason": "ремонт"})).status_code == 200
+        assert await _asset_status(a) == AssetStatus.WRITTEN_OFF
+        assert (await c.post(f"/api/assets/{a}/restore")).status_code == 200
+        async with SessionLocal() as s:
+            got = (await s.execute(select(Asset).where(Asset.id == a))).scalar_one()
+            assert got.status == AssetStatus.IN_STOCK and got.assigned_bus_id is None
+
+
+async def test_asset_replace_inherits_bus(db):
+    from app.models import Asset, AssetStatus
+    async with _client() as c:
+        bus = (await c.post("/api/buses", json={"bus_number": "RPL"})).json()["id"]
+        old = (await c.post("/api/assets", json={"kind": "nvr", "label": "OLD", "status": "deployed", "assigned_bus_id": bus})).json()["id"]
+        new = (await c.post("/api/assets", json={"kind": "nvr", "label": "NEW"})).json()["id"]
+        assert (await c.post(f"/api/assets/{old}/replace", json={"new_id": new, "reason": "сгорел БП"})).status_code == 200
+        page = (await c.get(f"/buses/{bus}")).text
+        assert "Оборудование автобуса" in page and "NEW" in page
     async with SessionLocal() as s:
         o = (await s.execute(select(Asset).where(Asset.id == old))).scalar_one()
         n = (await s.execute(select(Asset).where(Asset.id == new))).scalar_one()
-        assert o.status == AssetStatus.FAULTY
-        assert n.status == AssetStatus.DEPLOYED and n.location == "Объект A"  # встал на место старого
-        # страница склада рендерится с активами
-        async with _client() as c:
-            assert "Регистраторы и камеры" in (await c.get("/assets")).text
+        assert o.status == AssetStatus.FAULTY and o.assigned_bus_id is None
+        assert n.status == AssetStatus.DEPLOYED and n.assigned_bus_id == bus

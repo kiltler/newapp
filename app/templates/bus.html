@@ -57,6 +57,23 @@
     </tbody>
   </table>
 
+  <h2>Оборудование автобуса <a class="mini" href="/assets" style="text-decoration:none">📦 склад</a></h2>
+  <table class="grid">
+    {% set asm = {'in_stock':'ok','deployed':'ok','faulty':'err','written_off':''} %}
+    <thead><tr><th>Тип</th><th>Метка</th><th>Модель</th><th>Серийник</th><th>Статус</th></tr></thead>
+    <tbody>
+    {% for a in equipment %}
+      <tr>
+        <td>{{ kinds.get(a.kind, a.kind) }}</td>
+        <td><b>{{ a.label }}</b></td>
+        <td>{{ a.model or '—' }}{% if a.vendor %} <span class="muted">/ {{ a.vendor }}</span>{% endif %}</td>
+        <td class="muted">{{ a.serial or '—' }}</td>
+        <td><span class="badge {{ asm[a.status] }}">{{ asset_statuses[a.status] }}</span></td>
+      </tr>
+    {% else %}<tr><td colspan="5" class="muted">Регистратор/камеры не закреплены. Закрепить — на странице «📦 Склад».</td></tr>{% endfor %}
+    </tbody>
+  </table>
+
   <h2>История замен <a class="mini" href="/buses/swaplog?bus_id={{ bus.id }}" style="text-decoration:none">📜 полный журнал</a></h2>
   <table class="grid">
     <thead><tr><th>Дата</th><th>Снят</th><th>Установлен</th><th>Кто</th><th>Заметка</th></tr></thead>

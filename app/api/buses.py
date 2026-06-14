@@ -475,10 +475,13 @@ async def create_asset_batch(data: schemas.BatchCreate, request: Request,
             ))
             created += 1
     elif data.kind in ("nvr", "camera"):
+        # если сразу указан автобус — ставим в работу, иначе на склад
+        st = AssetStatus.DEPLOYED if data.assigned_bus_id else AssetStatus.IN_STOCK
         for i in range(1, qty + 1):
             session.add(Asset(
                 kind=data.kind, label=f"{prefix}{i}", model=batch.model, vendor=batch.vendor,
-                status=AssetStatus.IN_STOCK, batch_id=batch.id, warranty_until=data.warranty_until,
+                status=st, assigned_bus_id=data.assigned_bus_id,
+                batch_id=batch.id, warranty_until=data.warranty_until,
                 note=f"партия: {batch.model}",
             ))
             created += 1
@@ -498,7 +501,7 @@ async def create_asset(data: schemas.AssetCreate, session: AsyncSession = Depend
     a = Asset(
         kind=data.kind, label=data.label.strip(), model=(data.model or None),
         serial=(data.serial or None), vendor=(data.vendor or None),
-        status=data.status or AssetStatus.IN_STOCK, location=(data.location or None),
+        status=data.status or AssetStatus.IN_STOCK, assigned_bus_id=data.assigned_bus_id,
         warranty_until=data.warranty_until, note=(data.note or None),
     )
     session.add(a)
@@ -525,12 +528,14 @@ async def delete_asset(asset_id: int, session: AsyncSession = Depends(get_sessio
 
 @router.post("/api/assets/{asset_id}/deploy")
 async def deploy_asset(asset_id: int, data: schemas.AssetAction, session: AsyncSession = Depends(get_session)):
-    """Установить актив на объект (in_stock → deployed, фиксируем место)."""
+    """Установить актив в автобус (in_stock → deployed, закрепляем за автобусом)."""
     a = await _asset(session, asset_id)
+    if not data.bus_id:
+        raise HTTPException(400, "Укажите автобус для установки")
+    await _bus(session, data.bus_id)  # проверка, что автобус существует
     a.status = AssetStatus.DEPLOYED
     a.status_since = utcnow()
-    if data.location:
-        a.location = data.location.strip()
+    a.assigned_bus_id = data.bus_id
     await session.commit()
     return {"ok": True}
 
@@ -551,7 +556,7 @@ async def asset_restore(asset_id: int, session: AsyncSession = Depends(get_sessi
     a = await _asset(session, asset_id)
     a.status = AssetStatus.IN_STOCK
     a.status_since = utcnow()
-    a.location = None
+    a.assigned_bus_id = None
     await session.commit()
     return {"ok": True}
 
@@ -578,13 +583,14 @@ async def replace_asset(asset_id: int, data: schemas.AssetReplace, session: Asyn
         raise HTTPException(400, f"Нельзя поставить актив со статусом «{ASSET_STATUSES.get(new.status, new.status)}»")
     now = utcnow()
     reason = (data.reason or "вышел из строя").strip()
-    place = old.location
+    bus_id = old.assigned_bus_id
     old.status = AssetStatus.FAULTY
     old.status_since = now
+    old.assigned_bus_id = None
     old.note = f"неисправен: {reason}"
     new.status = AssetStatus.DEPLOYED
     new.status_since = now
-    new.location = place
+    new.assigned_bus_id = bus_id           # встаёт на тот же автобус
     new.note = f"замена {old.label} ({reason})"
     await session.commit()
     return {"ok": True, "installed": new.label, "removed": old.label}
@@ -911,11 +917,19 @@ async def bus_page(bus_id: int, request: Request, session: AsyncSession = Depend
         key=lambda d: (0 if d.assigned_bus_id == bus.id else 1, (d.label or "")),
     )
     history = await _swaplog(session, bus_id=bus_id)
+    # Оборудование автобуса: закреплённые регистраторы/камеры (не списанные)
+    equipment = [
+        a for a in (await session.execute(
+            select(Asset).where(Asset.assigned_bus_id == bus.id))).scalars()
+        if a.status != AssetStatus.WRITTEN_OFF
+    ]
+    equipment.sort(key=lambda a: (a.kind, a.label))
     return templates.TemplateResponse("bus.html", {
         "request": request, "bus": bus, "color": color, "reason": reason,
         "installed": by_id.get(bus.installed_disk_id) if bus.installed_disk_id else None,
         "assigned": assigned, "ready_disks": ready, "history": history,
-        "disks_by_id": by_id,
+        "disks_by_id": by_id, "equipment": equipment,
+        "kinds": ASSET_KINDS, "asset_statuses": ASSET_STATUSES,
     })
 
 
@@ -1034,13 +1048,12 @@ async def assets_page(request: Request, session: AsyncSession = Depends(get_sess
         "nvr": sum(1 for a in assets if a.kind == "nvr" and a.status != AssetStatus.WRITTEN_OFF),
         "camera": sum(1 for a in assets if a.kind == "camera" and a.status != AssetStatus.WRITTEN_OFF),
     }
-    bus_options = sorted(
-        ((b.id, b.bus_number) for b in (await session.execute(select(Bus))).scalars()),
-        key=lambda kv: _nat(kv[1]),
-    )
+    bus_list = list((await session.execute(select(Bus))).scalars())
+    buses = {b.id: b.bus_number for b in bus_list}
+    bus_options = sorted(((b.id, b.bus_number) for b in bus_list), key=lambda kv: _nat(kv[1]))
     return templates.TemplateResponse("assets.html", {
         "request": request, "batches": batches, "stock_rows": stock_rows,
-        "asset_stock_rows": asset_stock_rows, "assets": assets,
+        "asset_stock_rows": asset_stock_rows, "assets": assets, "buses": buses,
         "warranty": warranty, "summary": summary, "low_stock": _LOW_STOCK,
         "kinds": ASSET_KINDS, "asset_statuses": ASSET_STATUSES, "bus_options": bus_options,
     })

@@ -62,6 +62,7 @@ _NEW_COLUMNS = [
     ("devices", "auth_failures", "INTEGER DEFAULT 0"),
     ("disks", "batch_id", "INTEGER"),
     ("disks", "warranty_until", "DATE"),
+    ("assets", "assigned_bus_id", "INTEGER"),
 ]
 
 
