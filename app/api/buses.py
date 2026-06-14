@@ -865,10 +865,14 @@ async def assets_page(request: Request, session: AsyncSession = Depends(get_sess
         select(AssetBatch).order_by(AssetBatch.received_at.desc()))).scalars().all()
     today = dt.date.today()
 
-    # Остаток на складе = готовые диски (резерв), сгруппировано по типу/объёму
+    # Свободный склад = готовые диски, НЕ закреплённые ни за каким автобусом.
+    # Закреплённые «(Резерв)» за автобусами — это уже рабочий парк, не склад.
+    def _is_free(d):
+        return d.status == DiskStatus.READY and d.assigned_bus_id is None
+
     stock: dict[str, int] = {}
     for d in disks:
-        if d.status == DiskStatus.READY:
+        if _is_free(d):
             key = f"{d.type} · {d.capacity_gb} ГБ" if d.capacity_gb else d.type
             stock[key] = stock.get(key, 0) + 1
     stock_rows = sorted(
@@ -887,10 +891,13 @@ async def assets_page(request: Request, session: AsyncSession = Depends(get_sess
     warranty.sort(key=lambda x: x["days"])
 
     summary = {
-        "ready": sum(1 for d in disks if d.status == DiskStatus.READY),
+        # свободный склад: готовы и не закреплены
+        "free": sum(1 for d in disks if _is_free(d)),
+        # закреплены за автобусами (в работе): любой не списанный с привязкой к автобусу
+        "assigned": sum(1 for d in disks
+                        if d.assigned_bus_id is not None and d.status != DiskStatus.WRITTEN_OFF),
         "faulty": sum(1 for d in disks if d.status == DiskStatus.FAULTY),
         "written_off": sum(1 for d in disks if d.status == DiskStatus.WRITTEN_OFF),
-        "active": sum(1 for d in disks if d.status != DiskStatus.WRITTEN_OFF),
     }
     bus_options = sorted(
         ((b.id, b.bus_number) for b in (await session.execute(select(Bus))).scalars()),

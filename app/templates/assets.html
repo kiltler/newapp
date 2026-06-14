@@ -13,13 +13,13 @@
   </div>
 
   <section class="bus-summary">
-    <div class="bus-tile"><span class="num">{{ summary.ready }}</span><span>на складе (резерв)</span></div>
+    <div class="bus-tile"><span class="num">{{ summary.free }}</span><span>свободно на складе</span></div>
+    <div class="bus-tile"><span class="num">{{ summary.assigned }}</span><span>закреплены за автобусами</span></div>
     <div class="bus-tile {{ 'warn' if summary.faulty else '' }}"><span class="num">{{ summary.faulty }}</span><span>неисправны</span></div>
     <div class="bus-tile"><span class="num">{{ summary.written_off }}</span><span>списано</span></div>
-    <div class="bus-tile"><span class="num">{{ summary.active }}</span><span>всего в работе</span></div>
   </section>
 
-  <h2>Остаток на складе (готовые диски)</h2>
+  <h2>Свободный склад <span class="muted" style="font-size:14px">(готовы и не закреплены за автобусом)</span></h2>
   <table class="grid">
     <thead><tr><th>Модель / объём</th><th>На складе</th></tr></thead>
     <tbody>
@@ -48,7 +48,7 @@
 
   <h2>Поступления (партии)</h2>
   <table class="grid">
-    <thead><tr><th>Дата</th><th>Тип</th><th>Модель</th><th>Кол-во</th><th>Поставщик</th><th>Гарантия до</th><th>Заметка</th></tr></thead>
+    <thead><tr><th>Дата</th><th>Тип</th><th>Модель</th><th>Кол-во</th><th>Гарантия до</th><th>Заметка</th></tr></thead>
     <tbody>
     {% for b in batches %}
       <tr>
@@ -56,11 +56,10 @@
         <td>{{ kinds.get(b.kind, b.kind) }}</td>
         <td>{{ b.model }}{% if b.vendor %} <span class="muted">/ {{ b.vendor }}</span>{% endif %}</td>
         <td><b>{{ b.qty }}</b></td>
-        <td>{{ b.supplier or '—' }}</td>
         <td>{{ b.warranty_until.strftime('%d.%m.%Y') if b.warranty_until else '—' }}</td>
         <td class="muted">{{ b.note or '' }}</td>
       </tr>
-    {% else %}<tr><td colspan="7" class="muted">Поступлений ещё не было.</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="6" class="muted">Поступлений ещё не было.</td></tr>{% endfor %}
     </tbody>
   </table>
 </div>
@@ -81,10 +80,9 @@
       </div>
       <div class="row">
         <label>Количество<input name="qty" type="number" value="10" min="1"></label>
-        <label>Поставщик<input name="supplier" placeholder="ООО …"></label>
+        <label>Гарантия до<input name="warranty_until" type="date"></label>
       </div>
       <div class="row">
-        <label>Гарантия до<input name="warranty_until" type="date"></label>
         <label>Цена за шт.<input name="unit_cost" type="number" step="any" placeholder="необязательно"></label>
       </div>
       <div class="row disk-only">
@@ -113,7 +111,7 @@ async function submitBatch(){
   const model = g("model");
   if(!model){ alert("Укажите модель"); return; }
   const body = {
-    kind: g("kind"), model, vendor: g("vendor")||null, supplier: g("supplier")||null,
+    kind: g("kind"), model, vendor: g("vendor")||null,
     qty: parseInt(g("qty")||"0",10), note: g("note")||null,
     warranty_until: g("warranty_until")||null,
     unit_cost: g("unit_cost") ? parseFloat(g("unit_cost")) : null,
