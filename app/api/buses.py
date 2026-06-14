@@ -1031,13 +1031,7 @@ async def assets_page(request: Request, session: AsyncSession = Depends(get_sess
             if days <= 30:
                 warranty.append({"name": d.label, "sub": f"диск, {d.type}",
                                  "href": f"/disks/{d.id}/passport", "until": d.warranty_until, "days": days})
-    for a in assets:
-        if a.status != AssetStatus.WRITTEN_OFF and a.warranty_until:
-            days = (a.warranty_until - today).days
-            if days <= 30:
-                warranty.append({"name": a.label, "sub": ASSET_KINDS.get(a.kind, a.kind),
-                                 "href": None, "until": a.warranty_until, "days": days})
-    warranty.sort(key=lambda x: x["days"])
+    warranty.sort(key=lambda x: x["days"])  # гарантия только для дисков
 
     summary = {
         "free": sum(1 for d in disks if _is_free(d)),

@@ -42,7 +42,7 @@
   {% endif %}
   <table class="grid">
     {% set asm = {'in_stock':'ok','deployed':'ok','faulty':'err','written_off':''} %}
-    <thead><tr><th>Тип</th><th>Метка</th><th>Модель</th><th>Серийник</th><th>Статус</th><th>Автобус</th><th>Гарантия</th><th>Действия</th></tr></thead>
+    <thead><tr><th>Тип</th><th>Метка</th><th>Модель</th><th>Серийник</th><th>Статус</th><th>Автобус</th><th>Действия</th></tr></thead>
     <tbody>
     {% for a in assets %}
       <tr>
@@ -52,7 +52,6 @@
         <td class="muted">{{ a.serial or '—' }}</td>
         <td><span class="badge {{ asm[a.status] }}">{{ asset_statuses[a.status] }}</span></td>
         <td>{% if a.assigned_bus_id %}<a href="/buses/{{ a.assigned_bus_id }}">{{ buses.get(a.assigned_bus_id) or ('#' ~ a.assigned_bus_id) }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
-        <td>{{ a.warranty_until.strftime('%d.%m.%Y') if a.warranty_until else '—' }}</td>
         <td>
           {% if a.status == 'in_stock' %}<button class="mini" onclick='deployAsset({{ a.id }}, {{ a.label|tojson }})'>🚀 установить</button>{% endif %}
           {% if a.status == 'deployed' %}<button class="mini danger" onclick='assetFaulty({{ a.id }})'>неисправен</button>{% endif %}
@@ -62,7 +61,7 @@
           <button class="mini danger" onclick='delAsset({{ a.id }}, {{ a.label|tojson }})'>🗑</button>
         </td>
       </tr>
-    {% else %}<tr><td colspan="8" class="muted">Регистраторов/камер пока нет. «+ Актив» или «Поступление партии».</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="7" class="muted">Регистраторов/камер пока нет. «+ Актив» или «Поступление партии».</td></tr>{% endfor %}
     </tbody>
   </table>
 
@@ -114,11 +113,11 @@
       </div>
       <div class="row">
         <label>Количество<input name="qty" type="number" value="10" min="1"></label>
-        <label>Гарантия до<input name="warranty_until" type="date"></label>
+        <label class="disk-only">Гарантия до<input name="warranty_until" type="date"></label>
       </div>
       <div class="row">
-        <label>Цена за шт.<input name="unit_cost" type="number" step="any" placeholder="необязательно"></label>
-        <label>Префикс меток<input name="label_prefix" placeholder="пусто — авто (П…-1, П…-2)"></label>
+        <label>Цена за шт.<input name="unit_cost" type="number" step="any"></label>
+        <label>Префикс меток<input name="label_prefix"></label>
       </div>
       <div class="row disk-only">
         <label>Тип диска<select name="disk_type"><option>SSD</option><option>HDD</option></select></label>
@@ -141,20 +140,17 @@
     <form id="asset-form" onsubmit="return false">
       <div class="row">
         <label>Тип<select name="kind"><option value="nvr">Регистратор</option><option value="camera">Камера</option></select></label>
-        <label>Метка/имя<input name="label" required placeholder="NVR-Суворова-1"></label>
+        <label>Метка/имя<input name="label" required></label>
       </div>
       <div class="row">
-        <label>Модель<input name="model" placeholder="DS-7616NI"></label>
+        <label>Модель<input name="model"></label>
         <label>Серийник<input name="serial"></label>
       </div>
       <div class="row">
-        <label>Производитель<input name="vendor" placeholder="Hikvision"></label>
-        <label>Гарантия до<input name="warranty_until" type="date"></label>
-      </div>
-      <div class="row">
+        <label>Производитель<input name="vendor"></label>
         <label>Статус<select name="status"><option value="in_stock">на складе</option><option value="deployed">установлен в автобус</option></select></label>
-        <label>Автобус<select name="assigned_bus_id"><option value="">— не закреплён —</option>{% for bid, bnum in bus_options %}<option value="{{ bid }}">{{ bnum }}</option>{% endfor %}</select></label>
       </div>
+      <label>Автобус<select name="assigned_bus_id"><option value="">— не закреплён —</option>{% for bid, bnum in bus_options %}<option value="{{ bid }}">{{ bnum }}</option>{% endfor %}</select></label>
       <label>Заметка<input name="note"></label>
       <div class="actions">
         <button type="button" onclick="submitAsset()">Добавить</button>
@@ -191,8 +187,7 @@ async function submitAsset(){
   const bus = g("assigned_bus_id");
   const body = { kind:g("kind"), label:g("label"), model:g("model")||null, serial:g("serial")||null,
     vendor:g("vendor")||null, status:g("status")||"in_stock",
-    assigned_bus_id: bus?parseInt(bus,10):null,
-    warranty_until:g("warranty_until")||null, note:g("note")||null };
+    assigned_bus_id: bus?parseInt(bus,10):null, note:g("note")||null };
   const r = await fetch("/api/assets",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
   r.ok?location.reload():alert("Ошибка: "+(await r.text()));
 }
