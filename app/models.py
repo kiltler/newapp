@@ -109,6 +109,7 @@ class Device(Base):
     # Рантайм-состояние
     reachable: Mapped[bool] = mapped_column(Boolean, default=True)
     consecutive_failures: Mapped[int] = mapped_column(Integer, default=0)
+    auth_failures: Mapped[int] = mapped_column(Integer, default=0)
     last_seen: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     last_error: Mapped[str | None] = mapped_column(Text, default=None)
     time_drift_seconds: Mapped[int | None] = mapped_column(Integer, default=None)

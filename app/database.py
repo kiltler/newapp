@@ -59,6 +59,7 @@ _NEW_COLUMNS = [
     ("disks", "last_audit_at", "TIMESTAMP"),
     ("buses", "collect_weekday", "INTEGER"),
     ("buses", "location", "VARCHAR(128)"),
+    ("devices", "auth_failures", "INTEGER DEFAULT 0"),
 ]
 
 

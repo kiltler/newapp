@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     archive_check_minute: int = 0
     max_concurrent_polls: int = 10
     nvr_unreachable_threshold: int = 3
+    nvr_auth_error_threshold: int = 3       # после скольких подряд 401 → алерт авторизации
     camera_offline_alert_minutes: int = 10
     time_drift_alert_minutes: int = 5
     archive_gap_alert_minutes: int = 60

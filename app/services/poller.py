@@ -77,13 +77,25 @@ async def _poll_one(session: AsyncSession, device: Device) -> None:
         await _handle_unreachable(session, device, str(exc))
         return
     except NVRAuthError as exc:
+        # Разовый 401 (нестабильный канал/занятый NVR) не алармим — только при
+        # стойкой ошибке авторизации N циклов подряд.
+        device.auth_failures += 1
         device.last_error = f"auth: {exc}"
-        await alerts.raise_alert(
-            session, scope_key=f"device:{device.id}:auth",
-            alert_type="nvr_auth_error", severity=Severity.CRITICAL,
-            device_id=device.id,
-            message=f"NVR «{device.name}» ({device.host}): ошибка авторизации",
-        )
+        if device.auth_failures >= settings.nvr_auth_error_threshold:
+            await alerts.raise_alert(
+                session, scope_key=f"device:{device.id}:auth",
+                alert_type="nvr_auth_error", severity=Severity.CRITICAL,
+                device_id=device.id,
+                message=(
+                    f"NVR «{device.name}» ({device.host}): ошибка авторизации "
+                    f"({device.auth_failures} циклов подряд)"
+                ),
+            )
+        else:
+            log.info(
+                "NVR %s ошибка авторизации (%d/%d): %s",
+                device.id, device.auth_failures, settings.nvr_auth_error_threshold, exc,
+            )
         return
     except NVRError as exc:
         log.warning("deviceInfo %s: %s", device.id, exc)
@@ -183,7 +195,9 @@ async def _handle_unreachable(session: AsyncSession, device: Device, error: str)
 
 async def _handle_reachable(session: AsyncSession, device: Device) -> None:
     was_down = device.consecutive_failures >= settings.nvr_unreachable_threshold
+    was_auth_failing = device.auth_failures >= settings.nvr_auth_error_threshold
     device.consecutive_failures = 0
+    device.auth_failures = 0
     device.reachable = True
     device.last_seen = utcnow()
     device.last_error = None
@@ -193,10 +207,11 @@ async def _handle_reachable(session: AsyncSession, device: Device) -> None:
             device_id=device.id,
             message=f"NVR «{device.name}» ({device.host}) снова доступен",
         )
-    await alerts.resolve_alert(
-        session, scope_key=f"device:{device.id}:auth", device_id=device.id,
-        message=f"NVR «{device.name}»: авторизация восстановлена", notify=False,
-    )
+    if was_auth_failing:
+        await alerts.resolve_alert(
+            session, scope_key=f"device:{device.id}:auth", device_id=device.id,
+            message=f"NVR «{device.name}»: авторизация восстановлена", notify=False,
+        )
 
 
 # ── Каналы ─────────────────────────────────────────────────────────────────────
