@@ -9,7 +9,7 @@
     'delete_device':'Удаление устройства','bulk_poll':'Массовый опрос','bulk_sync_time':'Массовая синхр.'} %}
   {% for r in rows %}
     <tr>
-      <td class="muted">{{ r.created_at.strftime('%d.%m %H:%M:%S') }}</td>
+      <td class="muted">{{ r.created_at | localtime('%d.%m %H:%M:%S') }}</td>
       <td>{{ r.user }}</td>
       <td>{{ names.get(r.action, r.action) }}</td>
       <td>{{ r.target or '—' }}</td>

@@ -36,6 +36,9 @@ from app.services import appsettings
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+from app.templatefilters import register as _register_filters  # noqa: E402
+
+_register_filters(templates)
 
 router = APIRouter(tags=["buses"])
 

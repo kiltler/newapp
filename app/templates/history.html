@@ -78,7 +78,7 @@
   <tbody>
   {% for e in events %}
     <tr>
-      <td class="muted">{{ e.created_at.strftime('%d.%m %H:%M') }}</td>
+      <td class="muted">{{ e.created_at | localtime('%d.%m %H:%M') }}</td>
       <td><span class="badge {{ {'info':'ok','warning':'warn','critical':'err'}[e.severity] }}">{{ e.severity }}</span></td>
       <td>{{ e.message }}</td>
     </tr>

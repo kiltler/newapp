@@ -23,7 +23,7 @@
 
   <h2>Диск в регистраторе</h2>
   {% if installed %}
-    <div class="disk-current">💿 <b>{{ installed.label }}</b> ({{ installed.type }}{% if installed.capacity_gb %}, {{ installed.capacity_gb }} ГБ{% endif %}) · стоит с {{ bus.installed_since.strftime('%d.%m.%Y') if bus.installed_since else '—' }}</div>
+    <div class="disk-current">💿 <b>{{ installed.label }}</b> ({{ installed.type }}{% if installed.capacity_gb %}, {{ installed.capacity_gb }} ГБ{% endif %}) · стоит с {{ bus.installed_since | localtime('%d.%m.%Y') }}</div>
   {% else %}
     <div class="badge red">Регистратор без диска</div>
   {% endif %}
@@ -62,7 +62,7 @@
     <tbody>
     {% for h in history %}
       <tr>
-        <td class="muted">{{ h.date.strftime('%d.%m.%Y %H:%M') }}</td>
+        <td class="muted">{{ h.date | localtime('%d.%m.%Y %H:%M') }}</td>
         <td>{{ disks_by_id[h.removed_disk_id].label if h.removed_disk_id and h.removed_disk_id in disks_by_id else '—' }}</td>
         <td>{{ disks_by_id[h.installed_disk_id].label if h.installed_disk_id and h.installed_disk_id in disks_by_id else '—' }}</td>
         <td class="muted">{{ h.user or '—' }}</td>

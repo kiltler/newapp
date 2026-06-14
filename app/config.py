@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     # БД
     database_url: str = "sqlite+aiosqlite:///./data/nvrmon.db"
 
+    # Часовой пояс для показа времени в панели (IANA, напр. Asia/Vladivostok)
+    timezone: str = "UTC"
+
     # Шифрование
     secret_key: str = ""
 

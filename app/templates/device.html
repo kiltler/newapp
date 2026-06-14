@@ -59,7 +59,7 @@
       </td>
       <td>{% if c.quality %}<span class="badge {{ qm.get(c.quality,'muted') }}">{{ ql.get(c.quality, c.quality) }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
       <td class="muted">{% if c.archive_depth_days is not none %}{{ c.archive_depth_days }} дн.{% else %}—{% endif %}</td>
-      <td class="muted">{{ c.last_status_change.strftime('%d.%m %H:%M') if c.last_status_change else '—' }}</td>
+      <td class="muted">{{ c.last_status_change | localtime('%d.%m %H:%M') }}</td>
       <td><button class="mini" onclick="showSnap({{ device.id }},{{ c.channel_id }},this)">📷 кадр</button></td>
       <td>
         <button class="mini" onclick="toggleChannel({{ device.id }},{{ c.channel_id }},this)">
@@ -122,7 +122,7 @@
   <tbody>
   {% for e in events %}
     <tr>
-      <td class="muted">{{ e.created_at.strftime('%d.%m %H:%M') }}</td>
+      <td class="muted">{{ e.created_at | localtime('%d.%m %H:%M') }}</td>
       <td>{{ e.type }}</td>
       <td><span class="badge {{ {'info':'ok','warning':'warn','critical':'err'}[e.severity] }}">{{ e.severity }}</span></td>
       <td>{{ e.message }}</td>

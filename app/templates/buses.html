@@ -11,7 +11,7 @@
     </div>
     <div class="bcard-disk">
       {% if r.disk %}💿 <b>{{ r.disk.label }}</b> <span class="muted">({{ r.disk.type }})</span>
-        {% if r.bus.installed_since %}<span class="muted"> · с {{ r.bus.installed_since.strftime('%d.%m') }}</span>{% endif %}
+        {% if r.bus.installed_since %}<span class="muted"> · с {{ r.bus.installed_since | localtime('%d.%m') }}</span>{% endif %}
       {% else %}<span class="badge err">нет диска</span>{% endif %}
     </div>
     <div class="bcard-reason">{{ r.reason }}</div>

@@ -19,7 +19,7 @@
     <tbody>
     {% for r in rows %}
       <tr>
-        <td class="muted">{{ r.date.strftime('%d.%m.%Y %H:%M') }}</td>
+        <td class="muted">{{ r.date | localtime('%d.%m.%Y %H:%M') }}</td>
         <td>{% set b = buses.get(r.bus_id) %}{% if b %}<a href="/buses/{{ b.id }}">{{ b.bus_number }}</a>{% else %}#{{ r.bus_id }}{% endif %}</td>
         <td>{{ disks[r.removed_disk_id].label if r.removed_disk_id and r.removed_disk_id in disks else '—' }}</td>
         <td>{{ disks[r.installed_disk_id].label if r.installed_disk_id and r.installed_disk_id in disks else '—' }}</td>
