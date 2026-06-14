@@ -298,7 +298,8 @@ class DiskStatus:
     REMOVED_REVIEW = "removed_review"  # снят, ждёт просмотра (в очереди)
     REVIEWED = "reviewed"            # просмотрен, но ещё лежит у смотрящего
     READY = "ready"                  # вернули на полку — готов к установке (резерв)
-    FAULTY = "faulty"                # неисправен/списан
+    FAULTY = "faulty"                # неисправен (ещё не списан)
+    WRITTEN_OFF = "written_off"      # списан (выведен из эксплуатации)
 
 
 class DiskType:
@@ -342,7 +343,31 @@ class Disk(Base):
     location: Mapped[str] = mapped_column(String(16), default="shelf")  # где физически
     last_audit_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     note: Mapped[str | None] = mapped_column(Text, default=None)
+    batch_id: Mapped[int | None] = mapped_column(Integer, default=None)        # из какой партии (asset_batches.id)
+    warranty_until: Mapped[dt.date | None] = mapped_column(Date, default=None)  # гарантия до
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AssetBatch(Base):
+    """Поступление партии активов (диски/NVR/камеры). Единый учёт закупок."""
+
+    __tablename__ = "asset_batches"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), default="disk")  # disk | nvr | camera
+    model: Mapped[str] = mapped_column(String(128))               # модель (SSD 1ТБ, DS-7616…)
+    vendor: Mapped[str | None] = mapped_column(String(128), default=None)
+    supplier: Mapped[str | None] = mapped_column(String(128), default=None)
+    received_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    qty: Mapped[int] = mapped_column(Integer, default=0)
+    unit_cost: Mapped[float | None] = mapped_column(Float, default=None)
+    warranty_until: Mapped[dt.date | None] = mapped_column(Date, default=None)
+    note: Mapped[str | None] = mapped_column(Text, default=None)
+    user: Mapped[str | None] = mapped_column(String(64), default=None)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+ASSET_KINDS = {"disk": "Диски", "nvr": "Регистраторы", "camera": "Камеры"}
 
 
 class SwapLog(Base):

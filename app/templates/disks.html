@@ -21,7 +21,7 @@
     <input name="q" value="{{ q }}" placeholder="Поиск диска по метке / заметке / автобусу…">
     <select name="status" onchange="this.form.submit()">
       <option value="">Все статусы</option>
-      {% set sl = {'installed':'установлен','ready':'готов (резерв)','removed_review':'на просмотре','reviewed':'просмотрен (у смотрящего)','faulty':'неисправен'} %}
+      {% set sl = {'installed':'установлен','ready':'готов (резерв)','removed_review':'на просмотре','reviewed':'просмотрен (у смотрящего)','faulty':'неисправен','written_off':'списан'} %}
       {% for k,v in sl.items() %}<option value="{{ k }}" {{ 'selected' if status==k else '' }}>{{ v }}</option>{% endfor %}
     </select>
     <button class="bus-btn">Найти</button>
@@ -30,7 +30,7 @@
   <table class="grid">
     <thead><tr><th>Метка</th><th>Тип</th><th>Объём</th><th>Статус</th><th>Где</th><th>Автобус</th><th>Заметка</th><th>Действия</th></tr></thead>
     <tbody>
-    {% set sm = {'installed':'ok','ready':'ok','removed_review':'warn','reviewed':'warn','faulty':'err'} %}
+    {% set sm = {'installed':'ok','ready':'ok','removed_review':'warn','reviewed':'warn','faulty':'err','written_off':''} %}
     {% for d in disks %}
       <tr>
         <td><a href="/disks/{{ d.id }}/passport"><b>{{ d.label }}</b></a></td><td>{{ d.type }}</td>
@@ -64,8 +64,9 @@
           <a class="mini" href="/disks/{{ d.id }}/passport" style="text-decoration:none">🪪 паспорт</a>
           {% if d.status == 'removed_review' %}<button class="mini" onclick="reviewed({{ d.id }})">✓ просмотрен</button>{% endif %}
           {% if d.status in ('removed_review', 'reviewed') %}<button class="mini" onclick="toShelf({{ d.id }})">↩ на полку</button>{% endif %}
-          {% if d.status == 'faulty' %}<button class="mini" onclick="restore({{ d.id }})">↩ в строй</button>
+          {% if d.status in ('faulty', 'written_off') %}<button class="mini" onclick="restore({{ d.id }})">↩ в строй</button>
           {% else %}<button class="mini danger" onclick="faulty({{ d.id }})">неисправен</button>{% endif %}
+          {% if d.status not in ('installed', 'written_off') %}<button class="mini danger" onclick='writeOff({{ d.id }}, {{ d.label | tojson }})'>📉 списать</button>{% endif %}
           <button class="mini danger" onclick='delDisk({{ d.id }}, {{ d.label | tojson }}, {{ (d.status == "installed") | tojson }})'>🗑 удалить</button>
         </td>
       </tr>
@@ -98,6 +99,12 @@ async function delDisk(id, label, installed){
   r.ok?location.reload():alert(await r.text());
 }
 async function restore(id){ if(!confirm("Вернуть диск в строй (в резерв)?"))return; const r=await fetch(`/api/disks/${id}/restore`,{method:"POST"}); r.ok?location.reload():alert(await r.text()); }
+async function writeOff(id, label){
+  const reason = prompt(`Списать диск «${label}»? Укажите причину (необязательно):`, "вышел из строя");
+  if(reason===null) return;
+  const r=await fetch(`/api/disks/${id}/write-off`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reason:reason||null})});
+  r.ok?location.reload():alert(await r.text());
+}
 async function setLoc(id, loc){ const r=await fetch(`/api/disks/${id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({location:loc})}); r.ok?window.location.reload():alert(await r.text()); }
 async function assignBus(sel){
   const id = sel.dataset.disk, cur = sel.dataset.cur, val = sel.value;

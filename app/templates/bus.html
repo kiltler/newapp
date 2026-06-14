@@ -30,15 +30,16 @@
 
   <div class="bus-actions">
     <button class="bus-btn big" onclick="openSwap()">🔄 Заменить диск</button>
-    {% if installed %}<button class="bus-btn" onclick="removeDisk()">Снять без замены</button>{% endif %}
+    {% if installed %}<button class="bus-btn" onclick="removeDisk()">Снять без замены</button>
+    <button class="bus-btn danger" onclick="replaceFaulty()">⚠️ Замена по неисправности</button>{% endif %}
   </div>
 
   <h2>Закреплённые диски</h2>
   <table class="grid">
     <thead><tr><th>Диск</th><th>Тип</th><th>Статус</th><th>Заметка</th><th>Действия</th></tr></thead>
     <tbody>
-    {% set sm = {'installed':'ok','ready':'ok','removed_review':'warn','reviewed':'warn','faulty':'err'} %}
-    {% set sl = {'installed':'установлен','ready':'готов (резерв)','removed_review':'на просмотре','reviewed':'просмотрен (у смотрящего)','faulty':'неисправен'} %}
+    {% set sm = {'installed':'ok','ready':'ok','removed_review':'warn','reviewed':'warn','faulty':'err','written_off':''} %}
+    {% set sl = {'installed':'установлен','ready':'готов (резерв)','removed_review':'на просмотре','reviewed':'просмотрен (у смотрящего)','faulty':'неисправен','written_off':'списан'} %}
     {% for d in assigned %}
       <tr>
         <td><b>{{ d.label }}</b></td><td>{{ d.type }}</td>
@@ -119,6 +120,17 @@ async function removeDisk(){
   const note = prompt("Заметка (необязательно):","") || null;
   const r = await postSwap({ installed_disk_id:null, note });
   if (r.ok) location.reload(); else alert("Ошибка: " + (await r.text()));
+}
+async function replaceFaulty(){
+  const reason = prompt("Замена по неисправности. Что со старым диском?", "вышел из строя");
+  if (reason===null) return;
+  // выбранный в списке диск — замена; пусто → готовый резерв автобуса
+  const sel = document.getElementById("swap-disk");
+  const id = sel && sel.value ? parseInt(sel.value,10) : null;
+  const r = await fetch(`/api/buses/${BUS_ID}/replace-faulty`, {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ reason: reason||null, new_disk_id: id })});
+  if (r.ok){ const d = await r.json(); alert(`Снят (неисправен): ${d.removed}\nУстановлен: ${d.installed}`); location.reload(); }
+  else alert("Ошибка: " + (await r.text()));
 }
 async function reviewed(id){ const r = await fetch(`/api/disks/${id}/reviewed`,{method:"POST"}); r.ok?location.reload():alert(await r.text()); }
 async function toShelf(id){ const r = await fetch(`/api/disks/${id}/to-shelf`,{method:"POST"}); r.ok?location.reload():alert(await r.text()); }

@@ -209,6 +209,32 @@ class NotCollectedRequest(BaseModel):
     reason: str
 
 
+class BatchCreate(BaseModel):
+    """Поступление партии. Для дисков сразу создаёт qty единиц на складе."""
+    kind: str = "disk"
+    model: str
+    vendor: str | None = None
+    supplier: str | None = None
+    qty: int = 1
+    unit_cost: float | None = None
+    warranty_until: dt.date | None = None
+    note: str | None = None
+    # параметры дисков (kind=disk):
+    disk_type: str = "SSD"
+    capacity_gb: int | None = None
+    label_prefix: str | None = None       # префикс меток; пусто → авто по дате
+    assigned_bus_id: int | None = None     # сразу закрепить за автобусом (опц.)
+
+
+class WriteOffRequest(BaseModel):
+    reason: str | None = None
+
+
+class ReplaceFaultyRequest(BaseModel):
+    reason: str | None = None
+    new_disk_id: int | None = None         # чем заменить; пусто → готовый резерв автобуса
+
+
 class ReviewRequest(BaseModel):
     tags: list[str] = []
     note: str | None = None

@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}Склад / Активы{% endblock %}
+{% block content %}
+<div class="bus-scope">
+  <a href="/buses" class="muted">← к автобусам</a>
+  <div class="bus-banner">
+    <div><span class="bus-ico">📦</span> <b>Склад / Активы</b>
+      <span class="badge-offline">Учёт закупок и остатков</span></div>
+    <div>
+      <a class="bus-btn" href="/disks">Реестр дисков</a>
+      <button class="bus-btn" style="background:#2ecc71;color:#06210f" onclick="document.getElementById('batch-modal').classList.remove('hidden')">📥 Поступление партии</button>
+    </div>
+  </div>
+
+  <section class="bus-summary">
+    <div class="bus-tile"><span class="num">{{ summary.ready }}</span><span>на складе (резерв)</span></div>
+    <div class="bus-tile {{ 'warn' if summary.faulty else '' }}"><span class="num">{{ summary.faulty }}</span><span>неисправны</span></div>
+    <div class="bus-tile"><span class="num">{{ summary.written_off }}</span><span>списано</span></div>
+    <div class="bus-tile"><span class="num">{{ summary.active }}</span><span>всего в работе</span></div>
+  </section>
+
+  <h2>Остаток на складе (готовые диски)</h2>
+  <table class="grid">
+    <thead><tr><th>Модель / объём</th><th>На складе</th></tr></thead>
+    <tbody>
+    {% for r in stock_rows %}
+      <tr>
+        <td>{{ r.model }}</td>
+        <td><b>{{ r.qty }}</b>{% if r.low %} <span class="badge warn">мало (&lt; {{ low_stock }})</span>{% endif %}</td>
+      </tr>
+    {% else %}<tr><td colspan="2" class="muted">На складе нет готовых дисков.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Гарантия (истекает ≤ 30 дней / истекла)</h2>
+  <table class="grid">
+    <thead><tr><th>Диск</th><th>Гарантия до</th><th>Осталось</th></tr></thead>
+    <tbody>
+    {% for w in warranty %}
+      <tr>
+        <td><a href="/disks/{{ w.disk.id }}/passport">{{ w.disk.label }}</a> <span class="muted">({{ w.disk.type }}{% if w.disk.capacity_gb %}, {{ w.disk.capacity_gb }} ГБ{% endif %})</span></td>
+        <td>{{ w.until.strftime('%d.%m.%Y') }}</td>
+        <td>{% if w.days < 0 %}<span class="badge err">истекла {{ -w.days }} дн. назад</span>{% else %}<span class="badge warn">{{ w.days }} дн.</span>{% endif %}</td>
+      </tr>
+    {% else %}<tr><td colspan="3" class="muted">Нет дисков с истекающей гарантией 👍</td></tr>{% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Поступления (партии)</h2>
+  <table class="grid">
+    <thead><tr><th>Дата</th><th>Тип</th><th>Модель</th><th>Кол-во</th><th>Поставщик</th><th>Гарантия до</th><th>Заметка</th></tr></thead>
+    <tbody>
+    {% for b in batches %}
+      <tr>
+        <td class="muted">{{ b.received_at | localtime('%d.%m.%Y') }}</td>
+        <td>{{ kinds.get(b.kind, b.kind) }}</td>
+        <td>{{ b.model }}{% if b.vendor %} <span class="muted">/ {{ b.vendor }}</span>{% endif %}</td>
+        <td><b>{{ b.qty }}</b></td>
+        <td>{{ b.supplier or '—' }}</td>
+        <td>{{ b.warranty_until.strftime('%d.%m.%Y') if b.warranty_until else '—' }}</td>
+        <td class="muted">{{ b.note or '' }}</td>
+      </tr>
+    {% else %}<tr><td colspan="7" class="muted">Поступлений ещё не было.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Поступление партии -->
+<div id="batch-modal" class="modal hidden">
+  <div class="modal-card bus-scope">
+    <h3>📥 Поступление партии</h3>
+    <form id="batch-form" onsubmit="return false">
+      <label>Тип
+        <select name="kind">
+          {% for k, v in kinds.items() %}<option value="{{ k }}" {{ 'selected' if k=='disk' else '' }}>{{ v }}</option>{% endfor %}
+        </select>
+      </label>
+      <div class="row">
+        <label>Модель<input name="model" required placeholder="напр. Kingston A400 1ТБ"></label>
+        <label>Производитель<input name="vendor" placeholder="Kingston"></label>
+      </div>
+      <div class="row">
+        <label>Количество<input name="qty" type="number" value="10" min="1"></label>
+        <label>Поставщик<input name="supplier" placeholder="ООО …"></label>
+      </div>
+      <div class="row">
+        <label>Гарантия до<input name="warranty_until" type="date"></label>
+        <label>Цена за шт.<input name="unit_cost" type="number" step="any" placeholder="необязательно"></label>
+      </div>
+      <div class="row disk-only">
+        <label>Тип диска
+          <select name="disk_type"><option>SSD</option><option>HDD</option></select>
+        </label>
+        <label>Объём, ГБ<input name="capacity_gb" type="number" placeholder="1000"></label>
+      </div>
+      <div class="row disk-only">
+        <label>Префикс меток<input name="label_prefix" placeholder="пусто — авто (П…-1, П…-2)"></label>
+      </div>
+      <label>Заметка<input name="note" placeholder="накладная №…"></label>
+      <p class="muted disk-only">Для дисков сразу создастся указанное количество единиц на складе (готовы, на полке).</p>
+      <div class="actions">
+        <button type="button" onclick="submitBatch()">Оприходовать</button>
+        <button type="button" class="secondary" onclick="document.getElementById('batch-modal').classList.add('hidden')">Отмена</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+async function submitBatch(){
+  const f = document.getElementById("batch-form");
+  const g = (n) => f.elements[n].value.trim();
+  const model = g("model");
+  if(!model){ alert("Укажите модель"); return; }
+  const body = {
+    kind: g("kind"), model, vendor: g("vendor")||null, supplier: g("supplier")||null,
+    qty: parseInt(g("qty")||"0",10), note: g("note")||null,
+    warranty_until: g("warranty_until")||null,
+    unit_cost: g("unit_cost") ? parseFloat(g("unit_cost")) : null,
+    disk_type: g("disk_type")||"SSD",
+    capacity_gb: g("capacity_gb") ? parseInt(g("capacity_gb"),10) : null,
+    label_prefix: g("label_prefix")||null,
+  };
+  const r = await fetch("/api/asset-batches", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+  if(r.ok){ const d = await r.json(); alert("Оприходовано. Создано единиц: " + d.created); location.reload(); }
+  else alert("Ошибка: " + (await r.text()));
+}
+// показывать поля диска только для kind=disk
+(function(){
+  const sel = document.querySelector("#batch-form select[name=kind]");
+  const toggle = () => document.querySelectorAll(".disk-only").forEach(e => e.style.display = (sel.value==="disk"?"":"none"));
+  sel.addEventListener("change", toggle); toggle();
+})();
+</script>
+{% endblock %}

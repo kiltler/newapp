@@ -20,10 +20,12 @@ from app import schemas
 from app.config import settings
 from app.database import get_session
 from app.models import (
+    ASSET_KINDS,
     COLLECTION_ISSUES,
     DISK_LOCATIONS,
     OBSERVATION_TAGS,
     WEEKDAYS,
+    AssetBatch,
     Bus,
     Disk,
     DiskLocation,
@@ -326,7 +328,7 @@ async def swap_disk(bus_id: int, data: schemas.SwapRequest, request: Request,
     new = None
     if data.installed_disk_id:
         new = await _disk(session, data.installed_disk_id)
-        if new.status in (DiskStatus.INSTALLED, DiskStatus.FAULTY):
+        if new.status in (DiskStatus.INSTALLED, DiskStatus.FAULTY, DiskStatus.WRITTEN_OFF):
             raise HTTPException(400, f"Нельзя установить диск со статусом «{new.status}»")
         if new.assigned_bus_id not in (None, bus.id) and not data.force:
             raise HTTPException(409, "Диск закреплён за другим автобусом — подтвердите установку")
@@ -373,13 +375,104 @@ async def bus_not_collected(bus_id: int, data: schemas.NotCollectedRequest, requ
 async def disk_restore(disk_id: int, session: AsyncSession = Depends(get_session)):
     """Вернуть неисправный диск в строй (faulty → ready, резерв)."""
     disk = await _disk(session, disk_id)
-    if disk.status != DiskStatus.FAULTY:
-        raise HTTPException(400, "Вернуть в строй можно только неисправный диск")
+    if disk.status not in (DiskStatus.FAULTY, DiskStatus.WRITTEN_OFF):
+        raise HTTPException(400, "Вернуть в строй можно только неисправный/списанный диск")
     disk.status = DiskStatus.READY
     disk.status_since = utcnow()
     disk.location = DiskLocation.SHELF
     await session.commit()
     return {"ok": True}
+
+
+@router.post("/api/disks/{disk_id}/write-off")
+async def disk_write_off(disk_id: int, data: schemas.WriteOffRequest,
+                         session: AsyncSession = Depends(get_session)):
+    """Списать диск (вывести из эксплуатации). Установленный — нельзя, сначала снять."""
+    disk = await _disk(session, disk_id)
+    if disk.status == DiskStatus.INSTALLED:
+        raise HTTPException(400, "Нельзя списать установленный диск — сначала снимите/замените его")
+    bus = (await session.execute(
+        select(Bus).where(Bus.installed_disk_id == disk.id))).scalar_one_or_none()
+    if bus is not None:
+        bus.installed_disk_id = None
+        bus.installed_since = None
+    disk.status = DiskStatus.WRITTEN_OFF
+    disk.status_since = utcnow()
+    if data.reason:
+        disk.note = f"списан: {data.reason}"
+    await session.commit()
+    return {"ok": True}
+
+
+@router.post("/api/buses/{bus_id}/replace-faulty")
+async def replace_faulty(bus_id: int, data: schemas.ReplaceFaultyRequest, request: Request,
+                         session: AsyncSession = Depends(get_session)):
+    """Замена по неисправности: снять текущий диск как НЕИСПРАВНЫЙ (не на просмотр)
+    и сразу поставить замену (готовый резерв автобуса или указанный диск)."""
+    bus = await _bus(session, bus_id)
+    if not bus.installed_disk_id:
+        raise HTTPException(400, "В автобусе нет установленного диска")
+    old = await _disk(session, bus.installed_disk_id)
+    if data.new_disk_id:
+        new = await _disk(session, data.new_disk_id)
+    else:
+        disks = await _disks(session)
+        new = next((d for d in disks if d.assigned_bus_id == bus.id and d.status == DiskStatus.READY), None)
+        if new is None:
+            raise HTTPException(400, "Нет готового резерва для этого автобуса — укажите диск явно")
+    if new.status in (DiskStatus.INSTALLED, DiskStatus.FAULTY, DiskStatus.WRITTEN_OFF):
+        raise HTTPException(400, f"Нельзя поставить диск со статусом «{new.status}»")
+
+    now = utcnow()
+    reason = (data.reason or "вышел из строя").strip()
+    # старый диск → неисправен (а не на просмотр — он сломан)
+    old.status = DiskStatus.FAULTY
+    old.status_since = now
+    if old.location == DiskLocation.IN_BUS:
+        old.location = DiskLocation.SHELF
+    old.note = f"неисправен: {reason}"
+    # новый → установлен
+    new.status = DiskStatus.INSTALLED
+    new.status_since = now
+    new.assigned_bus_id = bus.id
+    new.location = DiskLocation.IN_BUS
+    bus.installed_disk_id = new.id
+    bus.installed_since = now
+    session.add(SwapLog(
+        date=now, bus_id=bus.id, removed_disk_id=old.id, installed_disk_id=new.id,
+        note=f"замена по неисправности: {reason}", user=request.session.get("user"),
+    ))
+    await session.commit()
+    return {"ok": True, "installed": new.label, "removed": old.label}
+
+
+@router.post("/api/asset-batches")
+async def create_asset_batch(data: schemas.BatchCreate, request: Request,
+                             session: AsyncSession = Depends(get_session)):
+    """Поступление партии. Для дисков сразу создаёт qty единиц на складе (ready)."""
+    qty = max(int(data.qty or 0), 0)
+    batch = AssetBatch(
+        kind=data.kind, model=data.model.strip(), vendor=(data.vendor or None),
+        supplier=(data.supplier or None), qty=qty, unit_cost=data.unit_cost,
+        warranty_until=data.warranty_until, note=(data.note or None),
+        user=request.session.get("user"),
+    )
+    session.add(batch)
+    await session.flush()  # получить batch.id
+    created = 0
+    if data.kind == "disk":
+        prefix = (data.label_prefix or f"П{batch.id}-").strip()
+        for i in range(1, qty + 1):
+            session.add(Disk(
+                label=f"{prefix}{i}", type=(data.disk_type or DiskType.SSD),
+                capacity_gb=data.capacity_gb, status=DiskStatus.READY,
+                location=DiskLocation.SHELF, assigned_bus_id=data.assigned_bus_id,
+                batch_id=batch.id, warranty_until=data.warranty_until,
+                note=f"партия: {batch.model}",
+            ))
+            created += 1
+    await session.commit()
+    return {"id": batch.id, "created": created}
 
 
 @router.post("/api/disks/audit")
@@ -758,6 +851,55 @@ async def disks_page(request: Request, status: str = "", q: str = "",
         "request": request, "disks": disks, "buses": buses, "status": status,
         "q": q, "dup_labels": dup_labels, "locations": DISK_LOCATIONS,
         "bus_options": bus_options,
+    })
+
+
+_LOW_STOCK = 2  # порог «низкого остатка» на складе по модели
+
+
+@router.get("/assets", response_class=HTMLResponse)
+async def assets_page(request: Request, session: AsyncSession = Depends(get_session)):
+    """Склад/Активы: остаток по моделям, гарантия, поступления партиями."""
+    disks = await _disks(session)
+    batches = (await session.execute(
+        select(AssetBatch).order_by(AssetBatch.received_at.desc()))).scalars().all()
+    today = dt.date.today()
+
+    # Остаток на складе = готовые диски (резерв), сгруппировано по типу/объёму
+    stock: dict[str, int] = {}
+    for d in disks:
+        if d.status == DiskStatus.READY:
+            key = f"{d.type} · {d.capacity_gb} ГБ" if d.capacity_gb else d.type
+            stock[key] = stock.get(key, 0) + 1
+    stock_rows = sorted(
+        ({"model": k, "qty": v, "low": v < _LOW_STOCK} for k, v in stock.items()),
+        key=lambda r: r["qty"],
+    )
+
+    # Гарантия: истекает в ближайшие 30 дней или уже истекла (не списанные)
+    warranty = []
+    for d in disks:
+        if d.status == DiskStatus.WRITTEN_OFF or not d.warranty_until:
+            continue
+        days = (d.warranty_until - today).days
+        if days <= 30:
+            warranty.append({"disk": d, "until": d.warranty_until, "days": days})
+    warranty.sort(key=lambda x: x["days"])
+
+    summary = {
+        "ready": sum(1 for d in disks if d.status == DiskStatus.READY),
+        "faulty": sum(1 for d in disks if d.status == DiskStatus.FAULTY),
+        "written_off": sum(1 for d in disks if d.status == DiskStatus.WRITTEN_OFF),
+        "active": sum(1 for d in disks if d.status != DiskStatus.WRITTEN_OFF),
+    }
+    bus_options = sorted(
+        ((b.id, b.bus_number) for b in (await session.execute(select(Bus))).scalars()),
+        key=lambda kv: _nat(kv[1]),
+    )
+    return templates.TemplateResponse("assets.html", {
+        "request": request, "batches": batches, "stock_rows": stock_rows,
+        "warranty": warranty, "summary": summary, "low_stock": _LOW_STOCK,
+        "kinds": ASSET_KINDS, "bus_options": bus_options,
     })
 
 

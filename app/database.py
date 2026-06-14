@@ -60,6 +60,8 @@ _NEW_COLUMNS = [
     ("buses", "collect_weekday", "INTEGER"),
     ("buses", "location", "VARCHAR(128)"),
     ("devices", "auth_failures", "INTEGER DEFAULT 0"),
+    ("disks", "batch_id", "INTEGER"),
+    ("disks", "warranty_until", "DATE"),
 ]
 
 
