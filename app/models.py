@@ -370,6 +370,46 @@ class AssetBatch(Base):
 ASSET_KINDS = {"disk": "Диски", "nvr": "Регистраторы", "camera": "Камеры"}
 
 
+class AssetStatus:
+    IN_STOCK = "in_stock"        # на складе (свободен)
+    DEPLOYED = "deployed"        # установлен/в работе
+    FAULTY = "faulty"            # неисправен
+    WRITTEN_OFF = "written_off"  # списан
+
+
+ASSET_STATUSES = {
+    AssetStatus.IN_STOCK: "на складе",
+    AssetStatus.DEPLOYED: "установлен",
+    AssetStatus.FAULTY: "неисправен",
+    AssetStatus.WRITTEN_OFF: "списан",
+}
+
+
+class Asset(Base):
+    """Единица учёта NVR/камеры (склад → установка → неисправность → списание).
+
+    Диски учитываются отдельной моделью Disk (они завязаны на ротацию автобусов);
+    здесь — регистраторы и камеры как физические единицы с серийником/гарантией.
+    """
+
+    __tablename__ = "assets"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), default="nvr")  # nvr | camera
+    label: Mapped[str] = mapped_column(String(64))                # инв. имя/метка
+    model: Mapped[str | None] = mapped_column(String(128), default=None)
+    serial: Mapped[str | None] = mapped_column(String(128), default=None)
+    vendor: Mapped[str | None] = mapped_column(String(128), default=None)
+    status: Mapped[str] = mapped_column(String(16), default=AssetStatus.IN_STOCK)
+    status_since: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    location: Mapped[str | None] = mapped_column(String(255), default=None)  # где/на каком объекте
+    device_id: Mapped[int | None] = mapped_column(Integer, default=None)     # связь с мониторингом (NVR), опц.
+    batch_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    warranty_until: Mapped[dt.date | None] = mapped_column(Date, default=None)
+    note: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class SwapLog(Base):
     """Журнал замен дисков по автобусам."""
 

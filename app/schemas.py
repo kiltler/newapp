@@ -235,6 +235,39 @@ class ReplaceFaultyRequest(BaseModel):
     new_disk_id: int | None = None         # чем заменить; пусто → готовый резерв автобуса
 
 
+# ── Активы (NVR/камеры) ───────────────────────────────────────────────────────
+class AssetCreate(BaseModel):
+    kind: str = "nvr"                      # nvr | camera
+    label: str
+    model: str | None = None
+    serial: str | None = None
+    vendor: str | None = None
+    location: str | None = None
+    status: str = "in_stock"
+    warranty_until: dt.date | None = None
+    note: str | None = None
+
+
+class AssetUpdate(BaseModel):
+    label: str | None = None
+    model: str | None = None
+    serial: str | None = None
+    vendor: str | None = None
+    location: str | None = None
+    warranty_until: dt.date | None = None
+    note: str | None = None
+
+
+class AssetAction(BaseModel):
+    reason: str | None = None
+    location: str | None = None            # для установки (deploy)
+
+
+class AssetReplace(BaseModel):
+    new_id: int                            # чем заменить (другой актив со склада)
+    reason: str | None = None
+
+
 class ReviewRequest(BaseModel):
     tags: list[str] = []
     note: str | None = None

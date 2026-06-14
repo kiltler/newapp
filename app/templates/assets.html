@@ -8,41 +8,75 @@
       <span class="badge-offline">Учёт закупок и остатков</span></div>
     <div>
       <a class="bus-btn" href="/disks">Реестр дисков</a>
-      <button class="bus-btn" style="background:#2ecc71;color:#06210f" onclick="document.getElementById('batch-modal').classList.remove('hidden')">📥 Поступление партии</button>
+      <button class="bus-btn" onclick="openModal('asset-modal')">+ Актив (NVR/камера)</button>
+      <button class="bus-btn" style="background:#2ecc71;color:#06210f" onclick="openModal('batch-modal')">📥 Поступление партии</button>
     </div>
   </div>
 
+  <h2>Диски</h2>
   <section class="bus-summary">
     <div class="bus-tile"><span class="num">{{ summary.free }}</span><span>свободно на складе</span></div>
     <div class="bus-tile"><span class="num">{{ summary.assigned }}</span><span>закреплены за автобусами</span></div>
     <div class="bus-tile {{ 'warn' if summary.faulty else '' }}"><span class="num">{{ summary.faulty }}</span><span>неисправны</span></div>
     <div class="bus-tile"><span class="num">{{ summary.written_off }}</span><span>списано</span></div>
   </section>
-
-  <h2>Свободный склад <span class="muted" style="font-size:14px">(готовы и не закреплены за автобусом)</span></h2>
   <table class="grid">
-    <thead><tr><th>Модель / объём</th><th>На складе</th></tr></thead>
+    <thead><tr><th>Свободный склад (диски) — модель / объём</th><th>На складе</th></tr></thead>
     <tbody>
     {% for r in stock_rows %}
+      <tr><td>{{ r.model }}</td><td><b>{{ r.qty }}</b>{% if r.low %} <span class="badge warn">мало (&lt; {{ low_stock }})</span>{% endif %}</td></tr>
+    {% else %}<tr><td colspan="2" class="muted">На складе нет свободных дисков.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Регистраторы и камеры <span class="muted" style="font-size:14px">(NVR: {{ summary.nvr }} · камеры: {{ summary.camera }})</span></h2>
+  {% if asset_stock_rows %}
+  <table class="grid">
+    <thead><tr><th>На складе (свободно) — модель</th><th>Кол-во</th></tr></thead>
+    <tbody>
+    {% for r in asset_stock_rows %}
+      <tr><td>{{ r.model }}</td><td><b>{{ r.qty }}</b>{% if r.low %} <span class="badge warn">мало (&lt; {{ low_stock }})</span>{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  <table class="grid">
+    {% set asm = {'in_stock':'ok','deployed':'ok','faulty':'err','written_off':''} %}
+    <thead><tr><th>Тип</th><th>Метка</th><th>Модель</th><th>Серийник</th><th>Статус</th><th>Где / объект</th><th>Гарантия</th><th>Действия</th></tr></thead>
+    <tbody>
+    {% for a in assets %}
       <tr>
-        <td>{{ r.model }}</td>
-        <td><b>{{ r.qty }}</b>{% if r.low %} <span class="badge warn">мало (&lt; {{ low_stock }})</span>{% endif %}</td>
+        <td>{{ kinds.get(a.kind, a.kind) }}</td>
+        <td><b>{{ a.label }}</b></td>
+        <td>{{ a.model or '—' }}{% if a.vendor %} <span class="muted">/ {{ a.vendor }}</span>{% endif %}</td>
+        <td class="muted">{{ a.serial or '—' }}</td>
+        <td><span class="badge {{ asm[a.status] }}">{{ asset_statuses[a.status] }}</span></td>
+        <td>{{ a.location or '—' }}</td>
+        <td>{{ a.warranty_until.strftime('%d.%m.%Y') if a.warranty_until else '—' }}</td>
+        <td>
+          {% if a.status == 'in_stock' %}<button class="mini" onclick='deployAsset({{ a.id }}, {{ a.label|tojson }})'>🚀 установить</button>{% endif %}
+          {% if a.status == 'deployed' %}<button class="mini danger" onclick='assetFaulty({{ a.id }})'>неисправен</button>{% endif %}
+          {% if a.status in ('deployed', 'faulty') %}<button class="mini" onclick='replaceAsset({{ a.id }}, {{ a.kind|tojson }}, {{ a.label|tojson }})'>🔁 заменить</button>{% endif %}
+          {% if a.status in ('faulty', 'written_off') %}<button class="mini" onclick='assetRestore({{ a.id }})'>↩ на склад</button>{% endif %}
+          {% if a.status != 'written_off' %}<button class="mini danger" onclick='assetWriteOff({{ a.id }}, {{ a.label|tojson }})'>📉 списать</button>{% endif %}
+          <button class="mini danger" onclick='delAsset({{ a.id }}, {{ a.label|tojson }})'>🗑</button>
+        </td>
       </tr>
-    {% else %}<tr><td colspan="2" class="muted">На складе нет готовых дисков.</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="8" class="muted">Регистраторов/камер пока нет. «+ Актив» или «Поступление партии».</td></tr>{% endfor %}
     </tbody>
   </table>
 
   <h2>Гарантия (истекает ≤ 30 дней / истекла)</h2>
   <table class="grid">
-    <thead><tr><th>Диск</th><th>Гарантия до</th><th>Осталось</th></tr></thead>
+    <thead><tr><th>Единица</th><th>Гарантия до</th><th>Осталось</th></tr></thead>
     <tbody>
     {% for w in warranty %}
       <tr>
-        <td><a href="/disks/{{ w.disk.id }}/passport">{{ w.disk.label }}</a> <span class="muted">({{ w.disk.type }}{% if w.disk.capacity_gb %}, {{ w.disk.capacity_gb }} ГБ{% endif %})</span></td>
+        <td>{% if w.href %}<a href="{{ w.href }}">{{ w.name }}</a>{% else %}{{ w.name }}{% endif %} <span class="muted">({{ w.sub }})</span></td>
         <td>{{ w.until.strftime('%d.%m.%Y') }}</td>
         <td>{% if w.days < 0 %}<span class="badge err">истекла {{ -w.days }} дн. назад</span>{% else %}<span class="badge warn">{{ w.days }} дн.</span>{% endif %}</td>
       </tr>
-    {% else %}<tr><td colspan="3" class="muted">Нет дисков с истекающей гарантией 👍</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="3" class="muted">Нет единиц с истекающей гарантией 👍</td></tr>{% endfor %}
     </tbody>
   </table>
 
@@ -75,8 +109,8 @@
         </select>
       </label>
       <div class="row">
-        <label>Модель<input name="model" required placeholder="напр. Kingston A400 1ТБ"></label>
-        <label>Производитель<input name="vendor" placeholder="Kingston"></label>
+        <label>Модель<input name="model" required placeholder="напр. Kingston A400 1ТБ / DS-7616"></label>
+        <label>Производитель<input name="vendor" placeholder="Kingston / Hikvision"></label>
       </div>
       <div class="row">
         <label>Количество<input name="qty" type="number" value="10" min="1"></label>
@@ -84,46 +118,105 @@
       </div>
       <div class="row">
         <label>Цена за шт.<input name="unit_cost" type="number" step="any" placeholder="необязательно"></label>
-      </div>
-      <div class="row disk-only">
-        <label>Тип диска
-          <select name="disk_type"><option>SSD</option><option>HDD</option></select>
-        </label>
-        <label>Объём, ГБ<input name="capacity_gb" type="number" placeholder="1000"></label>
-      </div>
-      <div class="row disk-only">
         <label>Префикс меток<input name="label_prefix" placeholder="пусто — авто (П…-1, П…-2)"></label>
       </div>
+      <div class="row disk-only">
+        <label>Тип диска<select name="disk_type"><option>SSD</option><option>HDD</option></select></label>
+        <label>Объём, ГБ<input name="capacity_gb" type="number" placeholder="1000"></label>
+      </div>
       <label>Заметка<input name="note" placeholder="накладная №…"></label>
-      <p class="muted disk-only">Для дисков сразу создастся указанное количество единиц на складе (готовы, на полке).</p>
+      <p class="muted">Создастся указанное количество единиц на складе.</p>
       <div class="actions">
         <button type="button" onclick="submitBatch()">Оприходовать</button>
-        <button type="button" class="secondary" onclick="document.getElementById('batch-modal').classList.add('hidden')">Отмена</button>
+        <button type="button" class="secondary" onclick="closeModal('batch-modal')">Отмена</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Добавить один актив -->
+<div id="asset-modal" class="modal hidden">
+  <div class="modal-card bus-scope">
+    <h3>+ Актив (NVR / камера)</h3>
+    <form id="asset-form" onsubmit="return false">
+      <div class="row">
+        <label>Тип<select name="kind"><option value="nvr">Регистратор</option><option value="camera">Камера</option></select></label>
+        <label>Метка/имя<input name="label" required placeholder="NVR-Суворова-1"></label>
+      </div>
+      <div class="row">
+        <label>Модель<input name="model" placeholder="DS-7616NI"></label>
+        <label>Серийник<input name="serial"></label>
+      </div>
+      <div class="row">
+        <label>Производитель<input name="vendor" placeholder="Hikvision"></label>
+        <label>Гарантия до<input name="warranty_until" type="date"></label>
+      </div>
+      <div class="row">
+        <label>Статус<select name="status"><option value="in_stock">на складе</option><option value="deployed">установлен</option></select></label>
+        <label>Где / объект<input name="location" placeholder="Суворова 8"></label>
+      </div>
+      <label>Заметка<input name="note"></label>
+      <div class="actions">
+        <button type="button" onclick="submitAsset()">Добавить</button>
+        <button type="button" class="secondary" onclick="closeModal('asset-modal')">Отмена</button>
       </div>
     </form>
   </div>
 </div>
 
 <script>
+// Свободные единицы для замены (по типу)
+window.SPARES = {
+  nvr: [{% for a in assets if a.kind=='nvr' and a.status=='in_stock' %}{id:{{a.id}},label:{{a.label|tojson}}},{% endfor %}],
+  camera: [{% for a in assets if a.kind=='camera' and a.status=='in_stock' %}{id:{{a.id}},label:{{a.label|tojson}}},{% endfor %}],
+};
+function openModal(id){ document.getElementById(id).classList.remove("hidden"); }
+function closeModal(id){ document.getElementById(id).classList.add("hidden"); }
+
 async function submitBatch(){
-  const f = document.getElementById("batch-form");
-  const g = (n) => f.elements[n].value.trim();
-  const model = g("model");
-  if(!model){ alert("Укажите модель"); return; }
-  const body = {
-    kind: g("kind"), model, vendor: g("vendor")||null,
-    qty: parseInt(g("qty")||"0",10), note: g("note")||null,
-    warranty_until: g("warranty_until")||null,
-    unit_cost: g("unit_cost") ? parseFloat(g("unit_cost")) : null,
-    disk_type: g("disk_type")||"SSD",
-    capacity_gb: g("capacity_gb") ? parseInt(g("capacity_gb"),10) : null,
-    label_prefix: g("label_prefix")||null,
-  };
-  const r = await fetch("/api/asset-batches", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
-  if(r.ok){ const d = await r.json(); alert("Оприходовано. Создано единиц: " + d.created); location.reload(); }
-  else alert("Ошибка: " + (await r.text()));
+  const f = document.getElementById("batch-form"), g = (n)=>f.elements[n].value.trim();
+  if(!g("model")){ alert("Укажите модель"); return; }
+  const body = { kind:g("kind"), model:g("model"), vendor:g("vendor")||null,
+    qty:parseInt(g("qty")||"0",10), note:g("note")||null, warranty_until:g("warranty_until")||null,
+    unit_cost:g("unit_cost")?parseFloat(g("unit_cost")):null, disk_type:g("disk_type")||"SSD",
+    capacity_gb:g("capacity_gb")?parseInt(g("capacity_gb"),10):null, label_prefix:g("label_prefix")||null };
+  const r = await fetch("/api/asset-batches",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(r.ok){ const d=await r.json(); alert("Оприходовано. Создано единиц: "+d.created); location.reload(); }
+  else alert("Ошибка: "+(await r.text()));
 }
-// показывать поля диска только для kind=disk
+async function submitAsset(){
+  const f = document.getElementById("asset-form"), g = (n)=>f.elements[n].value.trim();
+  if(!g("label")){ alert("Укажите метку"); return; }
+  const body = { kind:g("kind"), label:g("label"), model:g("model")||null, serial:g("serial")||null,
+    vendor:g("vendor")||null, status:g("status")||"in_stock", location:g("location")||null,
+    warranty_until:g("warranty_until")||null, note:g("note")||null };
+  const r = await fetch("/api/assets",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  r.ok?location.reload():alert("Ошибка: "+(await r.text()));
+}
+async function post(url, body){
+  const r = await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body||{})});
+  r.ok?location.reload():alert("Ошибка: "+(await r.text()));
+}
+async function deployAsset(id, label){
+  const loc = prompt(`Установить «${label}». Где / на каком объекте?`, ""); if(loc===null) return;
+  post(`/api/assets/${id}/deploy`, {location: loc||null});
+}
+async function assetFaulty(id){ const reason = prompt("Что с активом? (причина неисправности):"); if(reason===null) return; post(`/api/assets/${id}/faulty`, {reason: reason||null}); }
+async function assetRestore(id){ if(!confirm("Вернуть на склад?")) return; post(`/api/assets/${id}/restore`); }
+async function assetWriteOff(id, label){ const reason = prompt(`Списать «${label}»? Причина:`, "вышел из строя"); if(reason===null) return; post(`/api/assets/${id}/write-off`, {reason: reason||null}); }
+async function delAsset(id, label){ if(!confirm(`Удалить «${label}» из учёта? Необратимо.`)) return; const r=await fetch(`/api/assets/${id}`,{method:"DELETE"}); r.ok?location.reload():alert(await r.text()); }
+async function replaceAsset(id, kind, label){
+  const spares = (window.SPARES[kind]||[]);
+  if(!spares.length){ alert("Нет свободных единиц на складе для замены."); return; }
+  const list = spares.map(s => `${s.id} — ${s.label}`).join("\n");
+  const pick = prompt(`Замена «${label}» (старый → неисправен).\nЧем заменить со склада? Введите номер:\n\n${list}`);
+  if(pick===null) return;
+  const newId = parseInt(pick,10);
+  if(!spares.some(s => s.id===newId)){ alert("Нет такого номера в списке свободных."); return; }
+  const reason = prompt("Причина замены:", "вышел из строя"); if(reason===null) return;
+  post(`/api/assets/${id}/replace`, {new_id:newId, reason:reason||null});
+}
+// поля диска — только для kind=disk в форме партии
 (function(){
   const sel = document.querySelector("#batch-form select[name=kind]");
   const toggle = () => document.querySelectorAll(".disk-only").forEach(e => e.style.display = (sel.value==="disk"?"":"none"));

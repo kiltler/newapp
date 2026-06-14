@@ -46,7 +46,7 @@ app = FastAPI(title="NVR Monitor", version="0.1.0", lifespan=lifespan)
 # Открытые без авторизации пути (статика, страница входа, проверки, mock)
 _PUBLIC_PREFIXES = ("/static", "/login", "/logout", "/healthz", "/metrics", "/mock", "/docs", "/openapi.json", "/sw.js", "/offline", "/manifest.webmanifest")
 # Что разрешено роли «bus» (только модуль «Автобусы»)
-_BUS_PREFIXES = ("/buses", "/disks", "/assets", "/api/buses", "/api/disks", "/api/asset-batches")
+_BUS_PREFIXES = ("/buses", "/disks", "/assets", "/api/buses", "/api/disks", "/api/asset-batches", "/api/assets")
 
 
 @app.middleware("http")

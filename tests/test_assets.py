@@ -68,3 +68,52 @@ async def test_assets_page_renders(db):
         await c.post("/api/asset-batches", json={"kind": "disk", "model": "WD 2ТБ", "qty": 1, "capacity_gb": 2000})
         page = (await c.get("/assets")).text
         assert "Склад" in page and "Поступления" in page and "WD 2ТБ" in page
+
+
+async def _asset_status(aid):
+    from app.models import Asset
+    async with SessionLocal() as s:
+        return (await s.execute(select(Asset).where(Asset.id == aid))).scalar_one().status
+
+
+async def test_batch_nvr_creates_assets(db):
+    from app.models import Asset, AssetStatus
+    async with _client() as c:
+        r = await c.post("/api/asset-batches", json={"kind": "nvr", "model": "DS-7616", "qty": 3, "warranty_until": "2028-06-01"})
+        assert r.status_code == 200 and r.json()["created"] == 3
+    async with SessionLocal() as s:
+        items = (await s.execute(select(Asset).where(Asset.kind == "nvr"))).scalars().all()
+        assert len(items) == 3
+        assert all(a.status == AssetStatus.IN_STOCK and a.model == "DS-7616" for a in items)
+
+
+async def test_asset_lifecycle(db):
+    from app.models import AssetStatus
+    async with _client() as c:
+        a = (await c.post("/api/assets", json={"kind": "nvr", "label": "NVR-1", "model": "DS-7616"})).json()["id"]
+        assert await _asset_status(a) == AssetStatus.IN_STOCK
+        assert (await c.post(f"/api/assets/{a}/deploy", json={"location": "Суворова 8"})).status_code == 200
+        assert await _asset_status(a) == AssetStatus.DEPLOYED
+        assert (await c.post(f"/api/assets/{a}/faulty", json={"reason": "не грузится"})).status_code == 200
+        assert await _asset_status(a) == AssetStatus.FAULTY
+        assert (await c.post(f"/api/assets/{a}/write-off", json={"reason": "ремонт нерентабелен"})).status_code == 200
+        assert await _asset_status(a) == AssetStatus.WRITTEN_OFF
+        assert (await c.post(f"/api/assets/{a}/restore")).status_code == 200
+        assert await _asset_status(a) == AssetStatus.IN_STOCK
+
+
+async def test_asset_replace(db):
+    from app.models import Asset, AssetStatus
+    async with _client() as c:
+        old = (await c.post("/api/assets", json={"kind": "nvr", "label": "OLD", "status": "deployed", "location": "Объект A"})).json()["id"]
+        new = (await c.post("/api/assets", json={"kind": "nvr", "label": "NEW"})).json()["id"]  # на складе
+        r = await c.post(f"/api/assets/{old}/replace", json={"new_id": new, "reason": "сгорел БП"})
+        assert r.status_code == 200
+    async with SessionLocal() as s:
+        o = (await s.execute(select(Asset).where(Asset.id == old))).scalar_one()
+        n = (await s.execute(select(Asset).where(Asset.id == new))).scalar_one()
+        assert o.status == AssetStatus.FAULTY
+        assert n.status == AssetStatus.DEPLOYED and n.location == "Объект A"  # встал на место старого
+        # страница склада рендерится с активами
+        async with _client() as c:
+            assert "Регистраторы и камеры" in (await c.get("/assets")).text

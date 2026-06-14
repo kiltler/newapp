@@ -21,11 +21,14 @@ from app.config import settings
 from app.database import get_session
 from app.models import (
     ASSET_KINDS,
+    ASSET_STATUSES,
     COLLECTION_ISSUES,
     DISK_LOCATIONS,
     OBSERVATION_TAGS,
     WEEKDAYS,
+    Asset,
     AssetBatch,
+    AssetStatus,
     Bus,
     Disk,
     DiskLocation,
@@ -460,8 +463,8 @@ async def create_asset_batch(data: schemas.BatchCreate, request: Request,
     session.add(batch)
     await session.flush()  # получить batch.id
     created = 0
+    prefix = (data.label_prefix or f"П{batch.id}-").strip()
     if data.kind == "disk":
-        prefix = (data.label_prefix or f"П{batch.id}-").strip()
         for i in range(1, qty + 1):
             session.add(Disk(
                 label=f"{prefix}{i}", type=(data.disk_type or DiskType.SSD),
@@ -471,8 +474,120 @@ async def create_asset_batch(data: schemas.BatchCreate, request: Request,
                 note=f"партия: {batch.model}",
             ))
             created += 1
+    elif data.kind in ("nvr", "camera"):
+        for i in range(1, qty + 1):
+            session.add(Asset(
+                kind=data.kind, label=f"{prefix}{i}", model=batch.model, vendor=batch.vendor,
+                status=AssetStatus.IN_STOCK, batch_id=batch.id, warranty_until=data.warranty_until,
+                note=f"партия: {batch.model}",
+            ))
+            created += 1
     await session.commit()
     return {"id": batch.id, "created": created}
+
+
+async def _asset(session: AsyncSession, asset_id: int) -> Asset:
+    a = (await session.execute(select(Asset).where(Asset.id == asset_id))).scalar_one_or_none()
+    if a is None:
+        raise HTTPException(404, "Актив не найден")
+    return a
+
+
+@router.post("/api/assets")
+async def create_asset(data: schemas.AssetCreate, session: AsyncSession = Depends(get_session)):
+    a = Asset(
+        kind=data.kind, label=data.label.strip(), model=(data.model or None),
+        serial=(data.serial or None), vendor=(data.vendor or None),
+        status=data.status or AssetStatus.IN_STOCK, location=(data.location or None),
+        warranty_until=data.warranty_until, note=(data.note or None),
+    )
+    session.add(a)
+    await session.commit()
+    return {"id": a.id}
+
+
+@router.put("/api/assets/{asset_id}")
+async def update_asset(asset_id: int, data: schemas.AssetUpdate, session: AsyncSession = Depends(get_session)):
+    a = await _asset(session, asset_id)
+    for k, v in data.model_dump(exclude_unset=True).items():
+        setattr(a, k, v)
+    await session.commit()
+    return {"ok": True}
+
+
+@router.delete("/api/assets/{asset_id}")
+async def delete_asset(asset_id: int, session: AsyncSession = Depends(get_session)):
+    a = await _asset(session, asset_id)
+    await session.delete(a)
+    await session.commit()
+    return {"ok": True}
+
+
+@router.post("/api/assets/{asset_id}/deploy")
+async def deploy_asset(asset_id: int, data: schemas.AssetAction, session: AsyncSession = Depends(get_session)):
+    """Установить актив на объект (in_stock → deployed, фиксируем место)."""
+    a = await _asset(session, asset_id)
+    a.status = AssetStatus.DEPLOYED
+    a.status_since = utcnow()
+    if data.location:
+        a.location = data.location.strip()
+    await session.commit()
+    return {"ok": True}
+
+
+@router.post("/api/assets/{asset_id}/faulty")
+async def asset_faulty(asset_id: int, data: schemas.AssetAction, session: AsyncSession = Depends(get_session)):
+    a = await _asset(session, asset_id)
+    a.status = AssetStatus.FAULTY
+    a.status_since = utcnow()
+    if data.reason:
+        a.note = f"неисправен: {data.reason}"
+    await session.commit()
+    return {"ok": True}
+
+
+@router.post("/api/assets/{asset_id}/restore")
+async def asset_restore(asset_id: int, session: AsyncSession = Depends(get_session)):
+    a = await _asset(session, asset_id)
+    a.status = AssetStatus.IN_STOCK
+    a.status_since = utcnow()
+    a.location = None
+    await session.commit()
+    return {"ok": True}
+
+
+@router.post("/api/assets/{asset_id}/write-off")
+async def asset_write_off(asset_id: int, data: schemas.AssetAction, session: AsyncSession = Depends(get_session)):
+    a = await _asset(session, asset_id)
+    a.status = AssetStatus.WRITTEN_OFF
+    a.status_since = utcnow()
+    if data.reason:
+        a.note = f"списан: {data.reason}"
+    await session.commit()
+    return {"ok": True}
+
+
+@router.post("/api/assets/{asset_id}/replace")
+async def replace_asset(asset_id: int, data: schemas.AssetReplace, session: AsyncSession = Depends(get_session)):
+    """Замена по неисправности: старый → неисправен, новый (со склада) → на его место."""
+    old = await _asset(session, asset_id)
+    new = await _asset(session, data.new_id)
+    if new.kind != old.kind:
+        raise HTTPException(400, "Заменять можно активом того же типа")
+    if new.status in (AssetStatus.DEPLOYED, AssetStatus.WRITTEN_OFF):
+        raise HTTPException(400, f"Нельзя поставить актив со статусом «{ASSET_STATUSES.get(new.status, new.status)}»")
+    now = utcnow()
+    reason = (data.reason or "вышел из строя").strip()
+    place = old.location
+    old.status = AssetStatus.FAULTY
+    old.status_since = now
+    old.note = f"неисправен: {reason}"
+    new.status = AssetStatus.DEPLOYED
+    new.status_since = now
+    new.location = place
+    new.note = f"замена {old.label} ({reason})"
+    await session.commit()
+    return {"ok": True, "installed": new.label, "removed": old.label}
 
 
 @router.post("/api/disks/audit")
@@ -880,24 +995,44 @@ async def assets_page(request: Request, session: AsyncSession = Depends(get_sess
         key=lambda r: r["qty"],
     )
 
-    # Гарантия: истекает в ближайшие 30 дней или уже истекла (не списанные)
+    # NVR/камеры — единицы учёта (Asset)
+    assets = (await session.execute(select(Asset).order_by(Asset.kind, Asset.label))).scalars().all()
+    # Остаток по NVR/камерам (на складе, по моделям)
+    asset_stock: dict[str, int] = {}
+    for a in assets:
+        if a.status == AssetStatus.IN_STOCK:
+            label = ASSET_KINDS.get(a.kind, a.kind)
+            key = f"{label} · {a.model}" if a.model else label
+            asset_stock[key] = asset_stock.get(key, 0) + 1
+    asset_stock_rows = sorted(
+        ({"model": k, "qty": v, "low": v < _LOW_STOCK} for k, v in asset_stock.items()),
+        key=lambda r: r["qty"],
+    )
+
+    # Гарантия (диски + NVR/камеры): истекает ≤30 дней или истекла (не списанные)
     warranty = []
     for d in disks:
-        if d.status == DiskStatus.WRITTEN_OFF or not d.warranty_until:
-            continue
-        days = (d.warranty_until - today).days
-        if days <= 30:
-            warranty.append({"disk": d, "until": d.warranty_until, "days": days})
+        if d.status != DiskStatus.WRITTEN_OFF and d.warranty_until:
+            days = (d.warranty_until - today).days
+            if days <= 30:
+                warranty.append({"name": d.label, "sub": f"диск, {d.type}",
+                                 "href": f"/disks/{d.id}/passport", "until": d.warranty_until, "days": days})
+    for a in assets:
+        if a.status != AssetStatus.WRITTEN_OFF and a.warranty_until:
+            days = (a.warranty_until - today).days
+            if days <= 30:
+                warranty.append({"name": a.label, "sub": ASSET_KINDS.get(a.kind, a.kind),
+                                 "href": None, "until": a.warranty_until, "days": days})
     warranty.sort(key=lambda x: x["days"])
 
     summary = {
-        # свободный склад: готовы и не закреплены
         "free": sum(1 for d in disks if _is_free(d)),
-        # закреплены за автобусами (в работе): любой не списанный с привязкой к автобусу
         "assigned": sum(1 for d in disks
                         if d.assigned_bus_id is not None and d.status != DiskStatus.WRITTEN_OFF),
         "faulty": sum(1 for d in disks if d.status == DiskStatus.FAULTY),
         "written_off": sum(1 for d in disks if d.status == DiskStatus.WRITTEN_OFF),
+        "nvr": sum(1 for a in assets if a.kind == "nvr" and a.status != AssetStatus.WRITTEN_OFF),
+        "camera": sum(1 for a in assets if a.kind == "camera" and a.status != AssetStatus.WRITTEN_OFF),
     }
     bus_options = sorted(
         ((b.id, b.bus_number) for b in (await session.execute(select(Bus))).scalars()),
@@ -905,8 +1040,9 @@ async def assets_page(request: Request, session: AsyncSession = Depends(get_sess
     )
     return templates.TemplateResponse("assets.html", {
         "request": request, "batches": batches, "stock_rows": stock_rows,
+        "asset_stock_rows": asset_stock_rows, "assets": assets,
         "warranty": warranty, "summary": summary, "low_stock": _LOW_STOCK,
-        "kinds": ASSET_KINDS, "bus_options": bus_options,
+        "kinds": ASSET_KINDS, "asset_statuses": ASSET_STATUSES, "bus_options": bus_options,
     })
 
 
