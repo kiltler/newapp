@@ -56,6 +56,7 @@
             <option value="">— не закреплён —</option>
             {% for bid, bnum in bus_options %}<option value="{{ bid }}" {{ 'selected' if d.assigned_bus_id == bid else '' }}>{{ bnum }}</option>{% endfor %}
           </select>
+          {% if not d.assigned_bus_id and suggested.get(d.id) %}<button class="mini" title="Закрепить по метке" onclick="assignSuggested({{ d.id }}, {{ suggested[d.id][0] }})">↳ {{ suggested[d.id][1] }}?</button>{% endif %}
           {% endif %}
         </td>
         <td class="muted">{{ d.note or '' }}</td>
@@ -106,6 +107,10 @@ async function writeOff(id, label){
   r.ok?location.reload():alert(await r.text());
 }
 async function setLoc(id, loc){ const r=await fetch(`/api/disks/${id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({location:loc})}); r.ok?window.location.reload():alert(await r.text()); }
+async function assignSuggested(id, busId){
+  const r = await fetch(`/api/disks/${id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({assigned_bus_id:busId})});
+  r.ok?location.reload():alert(await r.text());
+}
 async function assignBus(sel){
   const id = sel.dataset.disk, cur = sel.dataset.cur, val = sel.value;
   if (val === cur) return;

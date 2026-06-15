@@ -397,3 +397,15 @@ async def test_bus_page_mixed_ready_disks(db):
         r = await c.get(f"/buses/{bus}")
         assert r.status_code == 200
         assert "R1" in r.text and "R2" in r.text
+
+
+async def test_disk_bus_suggestion(db):
+    """Незакреплённому диску предлагается автобус по метке (одним кликом, не насильно)."""
+    async with _client() as c:
+        await c.post("/api/buses", json={"bus_number": "AB396"})
+        await c.post("/api/disks", json={"label": "AB396 (Резерв)", "status": "ready"})  # не закреплён
+        page = (await c.get("/disks")).text
+        assert "↳ AB396?" in page and "assignSuggested" in page
+        # метка без совпадения — подсказки нет
+        await c.post("/api/disks", json={"label": "ZZZ-1", "status": "ready"})
+        assert "↳ ZZZ" not in (await c.get("/disks")).text

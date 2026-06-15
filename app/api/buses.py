@@ -976,10 +976,19 @@ async def disks_page(request: Request, status: str = "", q: str = "",
         ]
     disks = sorted(disks, key=lambda d: (d.status, d.label))
     bus_options = sorted(buses.items(), key=lambda kv: _nat(kv[1]))  # для закрепления
+    # Подсказка автобуса по метке диска: первый «токен» метки == номер автобуса.
+    # Только подсказка (одним кликом закрепить), не закрепляем насильно.
+    num_to_bus = {(bn or "").strip().upper(): (bid, bn) for bid, bn in buses.items()}
+    suggested: dict[int, tuple] = {}
+    for d in disks:
+        if d.assigned_bus_id is None and d.status != DiskStatus.INSTALLED and d.label:
+            tok = d.label.strip().split()[0].split("(")[0].strip().upper()
+            if tok and tok in num_to_bus:
+                suggested[d.id] = num_to_bus[tok]
     return templates.TemplateResponse("disks.html", {
         "request": request, "disks": disks, "buses": buses, "status": status,
         "q": q, "dup_labels": dup_labels, "locations": DISK_LOCATIONS,
-        "bus_options": bus_options,
+        "bus_options": bus_options, "suggested": suggested,
     })
 
 
