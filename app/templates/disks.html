@@ -24,6 +24,10 @@
       {% set sl = {'installed':'установлен','ready':'готов (резерв)','removed_review':'на просмотре','reviewed':'просмотрен (у смотрящего)','faulty':'неисправен','written_off':'списан'} %}
       {% for k,v in sl.items() %}<option value="{{ k }}" {{ 'selected' if status==k else '' }}>{{ v }}</option>{% endfor %}
     </select>
+    <select name="sort" onchange="this.form.submit()">
+      {% set so = {'status':'По статусу','label':'По метке','bus':'По автобусу','type':'По типу','capacity':'По объёму'} %}
+      {% for k,v in so.items() %}<option value="{{ k }}" {{ 'selected' if sort==k else '' }}>{{ v }}</option>{% endfor %}
+    </select>
     <button class="bus-btn">Найти</button>
   </form>
 

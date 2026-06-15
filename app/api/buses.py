@@ -953,7 +953,7 @@ async def collection_csv(session: AsyncSession = Depends(get_session)):
 
 
 @router.get("/disks", response_class=HTMLResponse)
-async def disks_page(request: Request, status: str = "", q: str = "",
+async def disks_page(request: Request, status: str = "", q: str = "", sort: str = "status",
                      session: AsyncSession = Depends(get_session)):
     all_disks = await _disks(session)
     buses = {b.id: b.bus_number for b in (await session.execute(select(Bus))).scalars()}
@@ -975,6 +975,14 @@ async def disks_page(request: Request, status: str = "", q: str = "",
             or ql in (buses.get(d.assigned_bus_id, "") or "").lower()
         ]
     disks = sorted(disks, key=lambda d: (d.status, d.label))
+    sort_keys = {
+        "status": lambda d: (d.status, (d.label or "").lower()),
+        "label": lambda d: _nat(d.label),
+        "type": lambda d: ((d.type or ""), (d.label or "").lower()),
+        "capacity": lambda d: (-(d.capacity_gb or 0), (d.label or "").lower()),
+        "bus": lambda d: (d.assigned_bus_id is None, _nat(buses.get(d.assigned_bus_id) or "")),
+    }
+    disks = sorted(disks, key=sort_keys.get(sort, sort_keys["status"]))
     bus_options = sorted(buses.items(), key=lambda kv: _nat(kv[1]))  # для закрепления
     # Подсказка автобуса по метке диска: первый «токен» метки == номер автобуса.
     # Только подсказка (одним кликом закрепить), не закрепляем насильно.
@@ -987,7 +995,7 @@ async def disks_page(request: Request, status: str = "", q: str = "",
                 suggested[d.id] = num_to_bus[tok]
     return templates.TemplateResponse("disks.html", {
         "request": request, "disks": disks, "buses": buses, "status": status,
-        "q": q, "dup_labels": dup_labels, "locations": DISK_LOCATIONS,
+        "q": q, "sort": sort, "dup_labels": dup_labels, "locations": DISK_LOCATIONS,
         "bus_options": bus_options, "suggested": suggested,
     })
 
