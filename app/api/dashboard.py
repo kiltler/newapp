@@ -47,6 +47,18 @@ async def index(request: Request, session: AsyncSession = Depends(get_session)):
     events = await crud.list_events(session, limit=20)
     archive = await archive_overview(session)
     arch_by_id = {a["device_id"]: a for a in archive["devices"]}
+
+    # события за 24 ч по часам — для спарклайна на дашборде
+    since24 = dt.datetime.utcnow() - dt.timedelta(hours=24)
+    recent = await crud.list_events(session, limit=2000)
+    buckets = [0] * 24
+    for e in recent:
+        t = e.created_at.replace(tzinfo=None)
+        if t >= since24 and not e.type.endswith("_resolved"):
+            h = int((t - since24).total_seconds() // 3600)
+            if 0 <= h < 24:
+                buckets[h] += 1
+
     return templates.TemplateResponse(
         "index.html",
         {
@@ -57,6 +69,8 @@ async def index(request: Request, session: AsyncSession = Depends(get_session)):
             "events": events,
             "archive": archive,
             "arch_by_id": arch_by_id,
+            "events_24h": buckets,
+            "events_24h_total": sum(buckets),
         },
     )
 
