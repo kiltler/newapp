@@ -61,6 +61,21 @@
     {% else %}<tr><td colspan="2" class="muted">Пометок пока нет.</td></tr>{% endfor %}
     </tbody>
   </table>
+  {% if tag_rows %}
+  {% set tns = namespace(mx=1) %}
+  {% for tag, n in tag_rows %}{% if n > tns.mx %}{% set tns.mx = n %}{% endif %}{% endfor %}
+  <div class="chart-card" style="margin-top:12px;">
+    <div class="barlist">
+      {% for tag, n in tag_rows %}
+        <div class="bar">
+          <span class="bar-label"><b>{{ tag }}</b></span>
+          <span class="bar-track"><i class="bar-fill" style="--p:{{ (n / tns.mx * 100) | round }}"></i></span>
+          <span class="bar-val">{{ n }}</span>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
 
   <h2>👤 Кто делал замены</h2>
   <table class="grid">
