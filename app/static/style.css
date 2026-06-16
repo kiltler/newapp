@@ -529,3 +529,15 @@ svg.spark .spark-area { fill: var(--accent-soft); }
 svg.spark .spark-dot { fill: var(--panel); stroke: var(--accent); stroke-width: 3; }
 .trend { font-size: 11.5px; font-weight: 700; display: inline-flex; align-items: center; gap: 3px; }
 .trend.up { color: var(--ok); } .trend.down { color: var(--err); }
+
+/* ── Дашборд: ровный ряд KPI-виджетов (кольца/gauge/спарклайн одной высоты) ── */
+.kpi-row { align-items: start; }
+.chart-card.kpi-viz { display: flex; flex-direction: column; min-height: 204px; }
+.chart-card.kpi-viz .viz-body { flex: 1; display: flex; align-items: center; justify-content: center; }
+.chart-card.kpi-viz .viz-body.viz-col { flex-direction: column; align-items: stretch; justify-content: center; gap: 4px; }
+.chart-card .chart-head { gap: 12px; }
+.chart-card .chart-head h3 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chart-card .chart-head .sub { flex: 0 0 auto; white-space: nowrap; }
+.ring-legend .lg { white-space: nowrap; }
+.spark-axis { display: flex; justify-content: space-between; margin-top: 8px; font-size: 10.5px; color: var(--muted); }
+@media (max-width: 760px) { .chart-card.kpi-viz { min-height: 0; } .ring-flex { gap: 16px; } }

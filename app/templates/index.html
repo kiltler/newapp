@@ -14,34 +14,57 @@
   {% set ns.ch_total = ns.ch_total + (d.channels | length) %}
   {% set ns.ch_online = ns.ch_online + (d.channels | selectattr('status','equalto','online') | list | length) %}
 {% endfor %}
-{% set cam_pct = (ns.ch_online / ns.ch_total * 100) | round if ns.ch_total else 0 %}
-{% set obj_pct = (stats.devices_online / stats.devices_total * 100) | round if stats.devices_total else 0 %}
+{% set cam_pct = ((ns.ch_online / ns.ch_total * 100) | round | int) if ns.ch_total else 0 %}
+{% set obj_pct = ((stats.devices_online / stats.devices_total * 100) | round | int) if stats.devices_total else 0 %}
+{% set arch_total = (archive.totals.full + archive.totals.partial + archive.totals.none) if archive.day else 0 %}
+{% set arch_pct = ((archive.totals.full / arch_total * 100) | round | int) if arch_total else 0 %}
 
 <section class="kpi-row" style="margin-top:18px;">
   {# Кольцо: камеры онлайн #}
-  <div class="chart-card">
+  <div class="chart-card kpi-viz">
     <div class="chart-head"><h3>Камеры</h3><span class="sub">{{ ns.ch_total }} всего</span></div>
-    <div class="ring-flex">
-      <div class="ring" style="--p:{{ cam_pct }}">
-        <span class="ring-val">{{ ns.ch_online }}<small>онлайн</small></span>
-      </div>
-      <div class="ring-legend">
-        <span class="lg"><span class="d" style="background:var(--accent)"></span>Онлайн <b>{{ ns.ch_online }}</b></span>
-        <span class="lg"><span class="d" style="background:var(--err)"></span>Не в норме <b>{{ ns.ch_total - ns.ch_online }}</b></span>
+    <div class="viz-body">
+      <div class="ring-flex">
+        <div class="ring" style="--p:{{ cam_pct }}">
+          <span class="ring-val">{{ ns.ch_online }}<small>онлайн</small></span>
+        </div>
+        <div class="ring-legend">
+          <span class="lg"><span class="d" style="background:var(--accent)"></span>Онлайн <b>{{ ns.ch_online }}</b></span>
+          <span class="lg"><span class="d" style="background:var(--err)"></span>Не в норме <b>{{ ns.ch_total - ns.ch_online }}</b></span>
+        </div>
       </div>
     </div>
   </div>
 
   {# Gauge: объекты в норме #}
-  <div class="chart-card">
+  <div class="chart-card kpi-viz">
     <div class="chart-head"><h3>Объекты в норме</h3><span class="sub">{{ stats.devices_online }} / {{ stats.devices_total }}</span></div>
-    <div class="gauge-wrap">
-      <div class="gauge" style="--p:{{ obj_pct }}">
-        <div class="g-arc"></div><div class="g-hole"></div><div class="g-val">{{ obj_pct }}%</div>
+    <div class="viz-body">
+      <div class="gauge-wrap">
+        <div class="gauge" style="--p:{{ obj_pct }}">
+          <div class="g-arc"></div><div class="g-hole"></div><div class="g-val">{{ obj_pct }}%</div>
+        </div>
+        <span class="g-cap">аптайм парка</span>
       </div>
-      <span class="g-cap">аптайм парка</span>
     </div>
   </div>
+
+  {# Кольцо: покрытие архива (если были проверки) #}
+  {% if archive.day %}
+  <div class="chart-card kpi-viz">
+    <div class="chart-head"><h3>Покрытие архива</h3><span class="sub">за {{ archive.day[8:10] }}.{{ archive.day[5:7] }}</span></div>
+    <div class="viz-body">
+      <div class="ring-flex">
+        <div class="ring ok" style="--p:{{ arch_pct }}"><span class="ring-val">{{ arch_pct }}%<small>с записью</small></span></div>
+        <div class="ring-legend">
+          <span class="lg"><span class="d" style="background:var(--ok)"></span>С записью <b>{{ archive.totals.full }}</b></span>
+          <span class="lg"><span class="d" style="background:var(--warn)"></span>Дыры <b>{{ archive.totals.partial }}</b></span>
+          <span class="lg"><span class="d" style="background:var(--err)"></span>Без записи <b>{{ archive.totals.none }}</b></span>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
 
   {# Спарклайн: события за 24 ч #}
   {% set mx = (events_24h | max) or 1 %}
@@ -51,34 +74,34 @@
     {% set y = (52 - (v / mx * 44)) | round(1) %}
     {% set ns2.line = ns2.line ~ x ~ ',' ~ y ~ ' ' %}
   {% endfor %}
-  <div class="chart-card">
+  <div class="chart-card kpi-viz">
     <div class="chart-head"><h3>События</h3><span class="sub">24 ч · {{ events_24h_total }}</span></div>
-    <svg class="spark" viewBox="0 0 320 56" preserveAspectRatio="none">
-      <polygon class="spark-area" points="0,56 {{ ns2.line }} 320,56"></polygon>
-      <polyline class="spark-line" points="{{ ns2.line }}"></polyline>
-    </svg>
-    <div style="display:flex; justify-content:space-between; margin-top:6px; font-size:10.5px; color:var(--muted);">
-      <span>−24 ч</span><span>−12 ч</span><span>сейчас</span>
-    </div>
-  </div>
-
-  {# Бары: заполнение HDD по объектам (макс. использование диска на объекте) #}
-  <div class="chart-card">
-    <div class="chart-head"><h3>Заполнение HDD</h3><span class="sub">% занято по объектам</span></div>
-    <div class="barlist">
-      {% for d in devices if d.hdds %}
-        {% set use = d.hdds | map(attribute='usage_percent') | max %}
-        <div class="bar {{ 'err' if use >= 90 else 'warn' if use >= 80 else '' }}">
-          <span class="bar-label"><b>{{ d.name }}</b></span>
-          <span class="bar-track"><i class="bar-fill" style="--p:{{ use }}"></i></span>
-          <span class="bar-val">{{ use | round }}%</span>
-        </div>
-      {% else %}
-        <span class="muted">Нет данных о дисках.</span>
-      {% endfor %}
+    <div class="viz-body viz-col">
+      <svg class="spark" viewBox="0 0 320 56" preserveAspectRatio="none">
+        <polygon class="spark-area" points="0,56 {{ ns2.line }} 320,56"></polygon>
+        <polyline class="spark-line" points="{{ ns2.line }}"></polyline>
+      </svg>
+      <div class="spark-axis"><span>−24 ч</span><span>−12 ч</span><span>сейчас</span></div>
     </div>
   </div>
 </section>
+
+{# Бары: заполнение HDD по объектам (макс. использование диска на объекте) — во всю ширину #}
+<div class="chart-card" style="margin-top:14px;">
+  <div class="chart-head"><h3>Заполнение HDD</h3><span class="sub">% занято по объектам</span></div>
+  <div class="barlist">
+    {% for d in devices if d.hdds %}
+      {% set use = (d.hdds | map(attribute='usage_percent') | max) | round | int %}
+      <div class="bar {{ 'err' if use >= 90 else 'warn' if use >= 80 else '' }}">
+        <span class="bar-label"><b>{{ d.name }}</b></span>
+        <span class="bar-track"><i class="bar-fill" style="--p:{{ use }}"></i></span>
+        <span class="bar-val">{{ use }}%</span>
+      </div>
+    {% else %}
+      <span class="muted">Нет данных о дисках.</span>
+    {% endfor %}
+  </div>
+</div>
 
 {% if archive.day %}
 <h2>🎞 Архив записи <span class="muted" style="font-size:14px">за {{ archive.day[8:10] }}.{{ archive.day[5:7] }}</span></h2>
@@ -87,21 +110,6 @@
   <div class="card warn"><span class="num">{{ archive.totals.partial }}</span><span>частично (дыры)</span></div>
   <div class="card err"><span class="num">{{ archive.totals.none }}</span><span>без записи</span></div>
   <div class="card"><span class="num">{{ archive.totals.no_data }}</span><span>нет данных</span></div>
-</section>
-{% set arch_total = archive.totals.full + archive.totals.partial + archive.totals.none %}
-{% set arch_pct = (archive.totals.full / arch_total * 100) | round if arch_total else 0 %}
-<section class="kpi-row" style="margin-top:14px; grid-template-columns:minmax(280px,440px);">
-  <div class="chart-card">
-    <div class="chart-head"><h3>Покрытие архива</h3><span class="sub">за {{ archive.day[8:10] }}.{{ archive.day[5:7] }}</span></div>
-    <div class="ring-flex">
-      <div class="ring ok" style="--p:{{ arch_pct }}"><span class="ring-val">{{ arch_pct }}%<small>с записью</small></span></div>
-      <div class="ring-legend">
-        <span class="lg"><span class="d" style="background:var(--ok)"></span>С записью <b>{{ archive.totals.full }}</b></span>
-        <span class="lg"><span class="d" style="background:var(--warn)"></span>Дыры <b>{{ archive.totals.partial }}</b></span>
-        <span class="lg"><span class="d" style="background:var(--err)"></span>Без записи <b>{{ archive.totals.none }}</b></span>
-      </div>
-    </div>
-  </div>
 </section>
 {% else %}
 <h2>🎞 Архив записи</h2>
