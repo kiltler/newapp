@@ -9,13 +9,14 @@
 </section>
 
 {# --- агрегаты для диаграмм (считаются в шаблоне, бэкенд не трогаем) --- #}
-{% set ns = namespace(ch_total=0, ch_online=0) %}
+{% set ns = namespace(ch_total=0, ch_online=0, green=0) %}
 {% for d in devices %}
   {% set ns.ch_total = ns.ch_total + (d.channels | length) %}
   {% set ns.ch_online = ns.ch_online + (d.channels | selectattr('status','equalto','online') | list | length) %}
+  {% if device_health(d) == 'green' %}{% set ns.green = ns.green + 1 %}{% endif %}
 {% endfor %}
 {% set cam_pct = ((ns.ch_online / ns.ch_total * 100) | round | int) if ns.ch_total else 0 %}
-{% set obj_pct = ((stats.devices_online / stats.devices_total * 100) | round | int) if stats.devices_total else 0 %}
+{% set obj_pct = ((ns.green / stats.devices_total * 100) | round | int) if stats.devices_total else 0 %}
 {% set arch_total = (archive.totals.full + archive.totals.partial + archive.totals.none) if archive.day else 0 %}
 {% set arch_pct = ((archive.totals.full / arch_total * 100) | round | int) if arch_total else 0 %}
 
@@ -38,7 +39,7 @@
 
   {# Gauge: объекты в норме #}
   <div class="chart-card kpi-viz">
-    <div class="chart-head"><h3>Объекты в норме</h3><span class="sub">{{ stats.devices_online }} / {{ stats.devices_total }}</span></div>
+    <div class="chart-head"><h3>Объекты в норме</h3><span class="sub">{{ ns.green }} / {{ stats.devices_total }}</span></div>
     <div class="viz-body">
       <div class="gauge-wrap">
         <div class="gauge" style="--p:{{ obj_pct }}">
@@ -85,23 +86,6 @@
     </div>
   </div>
 </section>
-
-{# Бары: заполнение HDD по объектам (макс. использование диска на объекте) — во всю ширину #}
-<div class="chart-card" style="margin-top:14px;">
-  <div class="chart-head"><h3>Заполнение HDD</h3><span class="sub">% занято по объектам</span></div>
-  <div class="barlist">
-    {% for d in devices if d.hdds %}
-      {% set use = (d.hdds | map(attribute='usage_percent') | max) | round | int %}
-      <div class="bar {{ 'err' if use >= 90 else 'warn' if use >= 80 else '' }}">
-        <span class="bar-label"><b>{{ d.name }}</b></span>
-        <span class="bar-track"><i class="bar-fill" style="--p:{{ use }}"></i></span>
-        <span class="bar-val">{{ use }}%</span>
-      </div>
-    {% else %}
-      <span class="muted">Нет данных о дисках.</span>
-    {% endfor %}
-  </div>
-</div>
 
 {% if archive.day %}
 <h2>🎞 Архив записи <span class="muted" style="font-size:14px">за {{ archive.day[8:10] }}.{{ archive.day[5:7] }}</span></h2>
@@ -175,4 +159,21 @@
   {% endfor %}
   </tbody>
 </table>
+
+<h2>💽 Заполнение HDD</h2>
+<div class="chart-card">
+  <div class="chart-head"><h3 class="muted" style="font-weight:600">% занято по объектам</h3><span class="sub">макс. диск на объекте</span></div>
+  <div class="barlist">
+    {% for d in devices if d.hdds %}
+      {% set use = (d.hdds | map(attribute='usage_percent') | max) | round | int %}
+      <div class="bar {{ 'err' if use >= 90 else 'warn' if use >= 80 else '' }}">
+        <span class="bar-label"><b>{{ d.name }}</b></span>
+        <span class="bar-track"><i class="bar-fill" style="--p:{{ use }}"></i></span>
+        <span class="bar-val">{{ use }}%</span>
+      </div>
+    {% else %}
+      <span class="muted">Нет данных о дисках.</span>
+    {% endfor %}
+  </div>
+</div>
 {% endblock %}
