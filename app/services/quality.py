@@ -74,12 +74,22 @@ def analyze(jpeg: bytes, prev_sig: str | None = None) -> QualityResult:
     frozen = False
     if prev_sig:
         try:
-            prev = np.frombuffer(base64.b64decode(prev_sig), dtype=np.uint8).astype(np.float32)
-            cur = small.astype(np.float32).flatten()
+            prev = np.frombuffer(base64.b64decode(prev_sig), dtype=np.uint8).astype(np.int16)
+            cur = small.astype(np.int16).flatten()
             if prev.shape == cur.shape:
-                # У живого потока всегда есть шум сенсора → кадры не идентичны.
-                # Почти нулевая разница = поток завис/зациклен.
-                frozen = float(np.abs(prev - cur).mean()) < settings.quality_frozen_diff
+                diff = np.abs(prev - cur)
+                mean_diff = float(diff.mean())
+                # Доля «живых» пикселей: у живого потока сенсорный шум заметно
+                # меняет множество пикселей даже на статичной сцене (пустой коридор,
+                # склад). Настоящий фриз/зацикл = кадр идентичен: и среднее отличие
+                # около нуля, и почти нет изменившихся пикселей. Только статичная
+                # сцена с шумоподавлением (низкое среднее, но шум разбросан по кадру)
+                # больше не уходит в ложный «завис».
+                changed_frac = float((diff >= 2).mean())
+                frozen = (
+                    mean_diff < settings.quality_frozen_diff
+                    and changed_frac < settings.quality_frozen_changed_frac
+                )
         except Exception:  # noqa: BLE001
             frozen = False
 

@@ -67,6 +67,26 @@ def test_live_frames_not_frozen():
     assert b.frozen is False
 
 
+def _png(arr: np.ndarray) -> bytes:
+    buf = io.BytesIO()
+    Image.fromarray(arr.astype("uint8"), mode="L").save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_live_static_scene_with_sensor_noise_not_frozen():
+    # Живая статичная сцена (коридор/склад): среднее отличие кадров мало (< порога),
+    # но сенсорный шум «шевелит» множество пикселей. Это НЕ зависание.
+    rng = np.random.default_rng(5)
+    base = rng.integers(0, 256, size=(240, 320)).astype("int16")
+    a = analyze(_png(base.astype("uint8")))
+    mod = base.copy()
+    mask = rng.random(base.shape) < 0.03      # ~3% пикселей шумят
+    mod[mask] += 25
+    mod = np.clip(mod, 0, 255)
+    b = analyze(_png(mod.astype("uint8")), a.signature)
+    assert b.frozen is False
+
+
 async def test_frozen_requires_persistence(db, monkeypatch):
     """Статичная живая сцена не должна попадать во «фриз» — нужен ряд проверок."""
     from sqlalchemy import select

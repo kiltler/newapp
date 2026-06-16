@@ -38,7 +38,8 @@ class Settings(BaseSettings):
     quality_uniform_threshold: float = 8.0  # контраст (ст.откл.) ниже → однотонный (залеплен)
     quality_uniform_min_brightness: float = 50.0  # «залеплен» только если кадр светлее (иначе это просто темнота)
     quality_blur_threshold: float = 15.0    # резкость (дисперсия лапласиана) ниже → расфокус
-    quality_frozen_diff: float = 1.0        # отличие кадров меньше → кадр идентичен
+    quality_frozen_diff: float = 1.0        # среднее отличие кадров меньше → кадр идентичен
+    quality_frozen_changed_frac: float = 0.01  # доля изменившихся пикселей меньше → кадр идентичен (отсекает шум живой статичной сцены)
     quality_frozen_checks: int = 3          # сколько идентичных проверок ПОДРЯД = фриз
 
     # Здоровье железа NVR
