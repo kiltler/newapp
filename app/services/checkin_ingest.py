@@ -179,8 +179,11 @@ async def _run_ffmpeg(url: str, out_path: str, duration_s: float) -> tuple[bool,
         "-rtsp_transport", "tcp",
         "-i", url,
         "-t", f"{max(duration_s, 1):.0f}",
-        "-c", "copy",
-        "-map", "0",
+        # Только видео: аудио регистраторов часто в pcm_alaw/g711, который нельзя
+        # положить в MP4 при -c copy. Для подсчёта заселений звук не нужен.
+        "-map", "0:v:0?",
+        "-c:v", "copy",
+        "-an",
         out_path,
     ]
     try:
@@ -308,6 +311,14 @@ async def ingest_recorder(day: dt.date, recorder_id: int, run_id: int | None = N
         try:
             client = build_recorder_client(recorder)
             win_start, win_end = night_window(recorder, day)
+            # Для сегодняшнего/текущего дня окно ещё не закрыто — берём до «сейчас».
+            now = dt.datetime.now()
+            if win_end > now:
+                win_end = now
+            if win_end <= win_start:
+                await _patch_run(run_id, rec_id=recorder_id, rec_sets={"status": "done"},
+                                 current=f"{label}: окно ещё не наступило")
+                return stats
             for idx, ch in enumerate(channels, 1):
                 await _patch_run(run_id, current=f"{label}: канал {ch.channel_id} ({idx}/{len(channels)}), скачано {stats['downloaded']}")
                 try:

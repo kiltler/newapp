@@ -7,7 +7,8 @@
     <a class="bus-btn secondary" href="/checkin/logs">📋 Журнал заселений</a>
     <a class="bus-btn secondary" href="/checkin/notifications">🔔 Уведомления{% if unread %} <span class="badge err">{{ unread }}</span>{% endif %}</a>
     <a class="bus-btn secondary" href="/checkin/settings">⚙ Настройки</a>
-    <button onclick="runIngest()">▶ Скачать за вчера</button>
+    <button class="secondary" onclick="runIngest()">▶ За вчера</button>
+    <button onclick="runIngestToday()">▶ За сегодня</button>
   </div>
 </div>
 
@@ -160,9 +161,14 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-async function runIngest(){
-  if (!confirm("Запустить скачивание клипов за вчерашний день по всем гостиницам?")) return;
-  const r = await fetch("/api/checkin/ingest/run", {method:"POST", headers:{"Content-Type":"application/json"}, body:"{}"});
+function todayISO(){ const t=new Date(); const p=n=>String(n).padStart(2,"0"); return t.getFullYear()+"-"+p(t.getMonth()+1)+"-"+p(t.getDate()); }
+function runIngestToday(){ runIngest(todayISO()); }
+
+async function runIngest(day){
+  const label = day ? "сегодня (то, что уже записано на данный момент)" : "вчерашний день";
+  if (!confirm("Запустить скачивание клипов за " + label + " по всем гостиницам?")) return;
+  const body = day ? JSON.stringify({day}) : "{}";
+  const r = await fetch("/api/checkin/ingest/run", {method:"POST", headers:{"Content-Type":"application/json"}, body});
   const d = await r.json();
   if (d.running) alert("Ingestion уже выполняется — смотрите прогресс ниже.");
   pollStatus();

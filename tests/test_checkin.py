@@ -431,3 +431,32 @@ async def test_test_recorder_sanitizes_garbled_name(monkeypatch):
     ch = res["channels"][0]
     assert ch["name"] == "канал 6"          # кракозябры → номер канала
     assert ch["raw_name"].startswith("IP")  # исходное имя сохранено
+
+
+async def test_today_window_clamped_to_now(db, monkeypatch, tmp_path):
+    monkeypatch.setattr(checkin_ingest.settings, "clips_dir", str(tmp_path))
+    async with SessionLocal() as s:
+        h = CheckinHotel(name="Гост С"); s.add(h); await s.flush()
+        rec = CheckinRecorder(hotel_id=h.id, host="10.0.0.9", model_type="ds7616ni_e2",
+                              analytics_capable=False, night_start="00:00", night_end="24:00")
+        s.add(rec); await s.flush()
+        s.add(CheckinChannel(recorder_id=rec.id, channel_id=1, substream_trackid=102))
+        await s.commit(); rid = rec.id
+
+    captured = {}
+
+    class FakeClient:
+        async def search_activity(self, ch, a, b, *, mode="all"):
+            captured["start"], captured["end"] = a, b
+            return []  # активности нет → скачивать нечего
+        def rtsp_playback_url(self, *a, **k):
+            return "rtsp://x"
+
+    monkeypatch.setattr(checkin_ingest, "build_recorder_client", lambda rec, password=None: FakeClient())
+
+    today = dt.date.today()
+    await checkin_ingest.ingest_recorder(today, rid)
+    now = dt.datetime.now()
+    assert captured["start"] == dt.datetime.combine(today, dt.time(0, 0))
+    assert captured["end"] <= now + dt.timedelta(seconds=5)   # обрезано до «сейчас»
+    assert captured["end"] > captured["start"]
