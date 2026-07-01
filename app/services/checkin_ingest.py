@@ -166,10 +166,14 @@ async def find_activity(
 
 
 # ── Скачивание одного клипа через ffmpeg ─────────────────────────────────────
-def _track_not_found(err: str) -> bool:
-    """Ошибка ffmpeg про несуществующий трек (404) — тогда пробуем другой trackid."""
+_STALL_SECONDS = 40  # если файл не растёт столько секунд — считаем поток мёртвым и убиваем ffmpeg
+_CANCEL_MSG = "отменено пользователем"
+
+
+def _try_next_track(err: str) -> bool:
+    """Стоит ли пробовать другой trackid: трек не найден (404) или поток не отдаёт данные."""
     e = (err or "").lower()
-    return "404" in e or "not found" in e
+    return "404" in e or "not found" in e or "нет данных" in e or "таймаут" in e
 
 
 # Прогоны, помеченные на отмену (run_id). Проверяется между сегментами и внутри
@@ -218,29 +222,48 @@ async def _ffmpeg_download(
     span = f"{seg.start.strftime('%H:%M:%S')}–{seg.end.strftime('%H:%M:%S')}" if seg else ""
     comm = asyncio.create_task(proc.communicate())
     max_seconds = duration_s * 2 + 120
-    waited = 0.0
+    waited, last_size, stalled = 0.0, -1, 0.0
+
+    async def _kill() -> None:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        try:
+            await asyncio.wait_for(comm, timeout=5)
+        except (asyncio.TimeoutError, Exception):  # noqa: BLE001
+            pass
+
     while True:
         done, _ = await asyncio.wait({comm}, timeout=2.0)
         if comm in done:
             break
         waited += 2.0
         if is_cancelled(run_id):
-            proc.kill()
-            await comm
-            return False, "отменено пользователем"
-        if waited > max_seconds:
-            proc.kill()
-            await comm
-            return False, f"таймаут ffmpeg ({max_seconds:.0f}с)"
+            await _kill()
+            return False, _CANCEL_MSG
         try:
             sz = os.path.getsize(out_path) if os.path.exists(out_path) else 0
         except OSError:
             sz = 0
-        await _patch_run(run_id, current=f"{label}: качается {span} — {sz / 1048576:.1f} МБ")
+        if sz > last_size:
+            last_size, stalled = sz, 0.0
+        else:
+            stalled += 2.0
+        if stalled >= _STALL_SECONDS:
+            await _kill()
+            return False, (f"нет данных от RTSP {int(_STALL_SECONDS)}с — проверьте trackid "
+                           "субпотока, тип потока и сеть (порт 554)")
+        if waited > max_seconds:
+            await _kill()
+            return False, f"таймаут ffmpeg ({max_seconds:.0f}с)"
+        msg = (f"{label}: подключение {span}, ожидание данных…" if sz <= 0
+               else f"{label}: качается {span} — {sz / 1048576:.1f} МБ")
+        await _patch_run(run_id, current=msg)
 
     _, stderr = comm.result()
     if is_cancelled(run_id):
-        return False, "отменено пользователем"
+        return False, _CANCEL_MSG
     if proc.returncode != 0:
         tail = (stderr or b"").decode("utf-8", "replace").strip().splitlines()[-3:]
         return False, "ffmpeg: " + " | ".join(tail)
@@ -301,16 +324,17 @@ async def _ingest_segment(
         url = client.rtsp_playback_url(trackid, seg.start, seg.end, rtsp_port=recorder.rtsp_port)
         for attempt in range(_DOWNLOAD_RETRIES + 1):
             ok, err = await _ffmpeg_download(url, out_path, duration, run_id, label, seg)
-            if ok or _track_not_found(err) or err == "отменено пользователем":
-                break  # 404 — ретраить бессмысленно; отмена — тоже стоп
+            # 404/нет-данных/отмена — ретраить тот же trackid бессмысленно
+            if ok or _try_next_track(err) or err == _CANCEL_MSG:
+                break
             await asyncio.sleep(1.0 * (attempt + 1))
-        if err == "отменено пользователем":
-            break  # не перебираем trackid при отмене
+        if err == _CANCEL_MSG:
+            break  # при отмене не перебираем trackid
         if ok:
             used_track = trackid
             break
-        if not _track_not_found(err):
-            break  # ошибка не про несуществующий трек (auth/timeout) — смена trackid не поможет
+        if not _try_next_track(err):
+            break  # ошибка не про трек/данные (auth и т.п.) — смена trackid не поможет
 
     if ok:
         clip.status = ClipStatus.OK
@@ -334,6 +358,7 @@ async def _ingest_segment(
 async def ingest_recorder(
     day: dt.date, recorder_id: int, run_id: int | None = None, *,
     window: tuple[dt.datetime, dt.datetime] | None = None, whole: bool = False,
+    test_minutes: int | None = None,
 ) -> dict:
     """Скачивает клипы одного регистратора за указанную дату. Идемпотентно.
 
@@ -361,7 +386,19 @@ async def ingest_recorder(
                          current=f"{label}: подключаюсь…")
         try:
             client = build_recorder_client(recorder)
-            if window is not None:
+            use_whole = whole
+            if test_minutes is not None:
+                # Тест-клип: окно от ЧАСОВ РЕГИСТРАТОРА (устраняет рассинхрон TZ).
+                try:
+                    dev_now = await client.get_device_time()
+                except Exception:  # noqa: BLE001  (NVRError или драйвер без метода)
+                    dev_now = dt.datetime.now()
+                win_start = dev_now - dt.timedelta(minutes=test_minutes)
+                win_end = dev_now
+                use_whole = True
+                await _patch_run(run_id, rec_id=recorder_id,
+                                 current=f"{label}: время регистратора {dev_now.strftime('%H:%M:%S')}, тяну последние {test_minutes} мин")
+            elif window is not None:
                 win_start, win_end = window
             else:
                 win_start, win_end = night_window(recorder, day)
@@ -377,7 +414,7 @@ async def ingest_recorder(
                 if is_cancelled(run_id):
                     break
                 await _patch_run(run_id, current=f"{label}: канал {ch.channel_id} ({idx}/{len(channels)}), скачано {stats['downloaded']}")
-                if whole:
+                if use_whole:
                     segments = [ArchiveSegment(win_start, win_end)]
                 else:
                     try:
@@ -423,6 +460,7 @@ async def ingest_recorder(
 async def run_ingestion(
     day: dt.date | None = None, hotel_ids: list[int] | None = None, trigger: str = "manual",
     *, window: tuple[dt.datetime, dt.datetime] | None = None, whole: bool = False,
+    test_minutes: int | None = None,
 ) -> dict:
     """Ночной джоб: качает клипы по всем включённым гостиницам за дату.
 
@@ -463,7 +501,8 @@ async def run_ingestion(
         for rid in rec_ids:
             if is_cancelled(run_id):
                 break
-            st = await ingest_recorder(day, rid, run_id, window=window, whole=whole)
+            st = await ingest_recorder(day, rid, run_id, window=window, whole=whole,
+                                       test_minutes=test_minutes)
             summary["recorders"].append(st)
             summary["downloaded"] += st.get("downloaded", 0)
             summary["errors"] += st.get("errors", 0)
@@ -495,11 +534,10 @@ async def scheduled_ingestion() -> dict:
 
 async def run_test_clip(minutes: int = 10, hotel_ids: list[int] | None = None) -> dict:
     """Тест-клип: тянет ПОСЛЕДНИЕ N минут субпотока целиком, мимо ночного окна и
-    поиска активности — быстрая проверка, что RTSP/trackid/ffmpeg работают."""
-    now = dt.datetime.now()
-    window = (now - dt.timedelta(minutes=max(minutes, 1)), now)
+    поиска активности. Окно привязывается к ЧАСАМ РЕГИСТРАТОРА (иначе при
+    рассинхроне TZ сервера и NVR просим несуществующее время → поток не идёт)."""
     return await run_ingestion(
-        day=now.date(), hotel_ids=hotel_ids, trigger="test", window=window, whole=True,
+        day=dt.date.today(), hotel_ids=hotel_ids, trigger="test", test_minutes=max(minutes, 1),
     )
 
 

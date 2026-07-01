@@ -7,7 +7,7 @@
     <a class="bus-btn secondary" href="/checkin/logs">📋 Журнал заселений</a>
     <a class="bus-btn secondary" href="/checkin/notifications">🔔 Уведомления{% if unread %} <span class="badge err">{{ unread }}</span>{% endif %}</a>
     <a class="bus-btn secondary" href="/checkin/settings">⚙ Настройки</a>
-    <button class="secondary" onclick="runTestClip()">🧪 Тест-клип (10 мин)</button>
+    <button class="secondary" onclick="runTestClip()">🧪 Тест-клип (3 мин)</button>
     <button class="secondary" onclick="runIngest()">▶ За вчера</button>
     <button onclick="runIngestToday()">▶ За сегодня</button>
   </div>
@@ -166,8 +166,8 @@ function todayISO(){ const t=new Date(); const p=n=>String(n).padStart(2,"0"); r
 function runIngestToday(){ runIngest(todayISO()); }
 
 async function runTestClip(){
-  if (!confirm("Скачать тест-клип за последние 10 минут (для проверки, что запись субпотока идёт и всё качается)?")) return;
-  const r = await fetch("/api/checkin/ingest/test-clip", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({minutes:10})});
+  if (!confirm("Скачать тест-клип за последние 3 минуты (для проверки, что запись субпотока идёт и всё качается)?")) return;
+  const r = await fetch("/api/checkin/ingest/test-clip", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({minutes:3})});
   const d = await r.json();
   if (d.running) alert("Ingestion уже выполняется — смотрите прогресс ниже.");
   pollStatus();

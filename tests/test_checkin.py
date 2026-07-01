@@ -542,3 +542,46 @@ async def test_ingestion_cancel_stops(db, monkeypatch, tmp_path):
     async with SessionLocal() as s:
         run = (await s.execute(__import__("sqlalchemy").select(CheckinIngestRun))).scalars().first()
         assert run.status == IngestRunStatus.CANCELED
+
+
+def test_try_next_track_conditions():
+    assert checkin_ingest._try_next_track("Server returned 404 Not Found")
+    assert checkin_ingest._try_next_track("нет данных от RTSP 40с — проверьте trackid")
+    assert checkin_ingest._try_next_track("таймаут ffmpeg (1290с)")
+    assert not checkin_ingest._try_next_track("401 Unauthorized")
+
+
+async def test_test_clip_uses_device_time(db, monkeypatch, tmp_path):
+    monkeypatch.setattr(checkin_ingest.settings, "clips_dir", str(tmp_path))
+    async with SessionLocal() as s:
+        h = CheckinHotel(name="Гост Врем"); s.add(h); await s.flush()
+        rec = CheckinRecorder(hotel_id=h.id, host="10.0.0.5", model_type="ds7616ni_e2")
+        s.add(rec); await s.flush()
+        s.add(CheckinChannel(recorder_id=rec.id, channel_id=60, substream_trackid=6002))
+        await s.commit(); hid = h.id
+
+    dev_time = dt.datetime(2026, 7, 2, 2, 53, 0)
+
+    class FakeClient:
+        async def get_device_time(self):
+            return dev_time
+        async def search_activity(self, *a, **k):
+            raise AssertionError("в тест-клипе поиск активности не нужен")
+        def rtsp_playback_url(self, tid, a, b, *, rtsp_port=554):
+            return f"rtsp://f/{tid}"
+
+    monkeypatch.setattr(checkin_ingest, "build_recorder_client", lambda rec, password=None: FakeClient())
+
+    async def fake_dl(url, out_path, duration_s, run_id=None, label="", seg=None):
+        with open(out_path, "wb") as fh:
+            fh.write(b"X")
+        return True, ""
+
+    monkeypatch.setattr(checkin_ingest, "_ffmpeg_download", fake_dl)
+
+    await checkin_ingest.run_test_clip(10, [hid])
+    async with SessionLocal() as s:
+        clip = (await s.execute(__import__("sqlalchemy").select(CheckinClip))).scalars().first()
+        assert clip.status == ClipStatus.OK
+        assert clip.end_ts == dev_time                       # окно привязано к часам регистратора
+        assert clip.start_ts == dev_time - dt.timedelta(minutes=10)
