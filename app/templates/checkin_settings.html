@@ -64,6 +64,7 @@
       <button class="mini danger" onclick="delRecorder({{r.id}})">Удалить регистратор</button>
       <span id="rtest{{r.id}}" class="muted" style="font-size:13px"></span>
     </div>
+    <div id="chgallery{{r.id}}" style="display:none; margin-top:10px"></div>
 
     {# ── Каналы регистратора ── #}
     <table class="grid" style="margin-top:10px">
@@ -197,12 +198,36 @@ async function testRecorder(id){
   const trkList = document.getElementById("trklist"+id);
   if (d.channels && d.channels.length){
     chList.innerHTML = d.channels.map(c => `<option value="${c.channel_id}">канал ${c.channel_id} · ${c.name}</option>`).join("");
+    // Галерея превью-кадров: опознаём вход/ресепшн по картинке, а не по (битому) имени
+    const g = document.getElementById("chgallery"+id);
+    g.style.display = "flex";
+    g.style.flexWrap = "wrap"; g.style.gap = "8px";
+    g.innerHTML = '<div style="width:100%; font-size:12px; color:var(--muted)">👁 Превью каналов — нажмите «выбрать» под нужной картинкой:</div>' +
+      d.channels.map(c => `
+        <div style="width:160px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--bg-2)">
+          <img src="/api/checkin/recorders/${id}/snapshot/${c.channel_id}" loading="lazy" title="канал ${c.channel_id}"
+               style="width:100%;aspect-ratio:16/9;object-fit:cover;background:#000;display:block"
+               onerror="this.style.opacity=0.2;this.title='нет кадра'">
+          <div style="padding:6px 8px;font-size:12px">
+            <b>канал ${c.channel_id}</b> <span class="muted">${c.name}</span>
+            <button class="mini" style="margin-top:4px" onclick="pickCh(${id},${c.channel_id})">выбрать</button>
+          </div>
+        </div>`).join("");
   }
   if (d.tracks && d.tracks.length){
     const subs = d.tracks.filter(t => t.is_sub);
     const list = (subs.length ? subs : d.tracks);
     trkList.innerHTML = list.map(t => `<option value="${t.trackid}">track ${t.trackid} (кан.${t.channel}${t.is_sub?', суб':''})</option>`).join("");
   }
+}
+
+function pickCh(recId, ch){
+  const inp = document.getElementById("newch_ch"+recId);
+  inp.value = ch;
+  const trk = document.getElementById("newch_trk"+recId);
+  trk.placeholder = "субпоток " + (ch*100+2);
+  inp.scrollIntoView({behavior:"smooth", block:"center"});
+  inp.focus();
 }
 
 // ── Каналы ──

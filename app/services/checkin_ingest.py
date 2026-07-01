@@ -429,8 +429,12 @@ async def test_recorder(recorder: CheckinRecorder, *, password: str | None = Non
 
     try:
         for st in await client.get_channel_statuses():
+            raw = (st.name or "").strip()
+            # Имя с устройства часто в битой кодировке (кракозябры) — тогда ведём
+            # по номеру канала, а превью-кадр даёт визуальное опознание.
+            clean = raw if (raw and "�" not in raw) else f"канал {st.channel_id}"
             result["channels"].append({
-                "channel_id": st.channel_id, "name": st.name or f"канал {st.channel_id}",
+                "channel_id": st.channel_id, "name": clean, "raw_name": raw,
                 "online": st.online,
             })
     except NVRError as exc:

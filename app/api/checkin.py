@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
@@ -247,6 +247,23 @@ async def test_recorder_endpoint(data: schemas.RecorderTestIn, session: AsyncSes
         username=data.username.strip(), password_enc="",
     )
     return await checkin_ingest.test_recorder(tmp, password=data.password)
+
+
+@router.get("/api/checkin/recorders/{rec_id}/snapshot/{channel_id}")
+async def recorder_snapshot(rec_id: int, channel_id: int, session: AsyncSession = Depends(get_session)):
+    """Кадр канала (JPEG) — чтобы опознавать вход/ресепшн визуально, а не по имени."""
+    rec = await session.get(CheckinRecorder, rec_id)
+    if rec is None:
+        raise HTTPException(404, "Регистратор не найден")
+    from app.drivers.base import NVRError
+
+    client = checkin_ingest.build_recorder_client(rec)
+    try:
+        jpeg = await client.get_snapshot(channel_id)
+    except NVRError:
+        return Response(status_code=204)  # нет кадра — превью просто не покажется
+    return Response(content=jpeg, media_type="image/jpeg",
+                    headers={"Cache-Control": "no-store"})
 
 
 # ── Каналы ───────────────────────────────────────────────────────────────────

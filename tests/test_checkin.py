@@ -378,3 +378,56 @@ async def test_trackid_fallback_and_autolearn(db, monkeypatch, tmp_path):
     async with SessionLocal() as s:
         ch = (await s.execute(__import__("sqlalchemy").select(CheckinChannel))).scalars().first()
         assert ch.substream_trackid == 6002  # авто-запомнили рабочий trackid
+
+
+# ── Превью каналов и битые имена ─────────────────────────────────────────────
+async def test_recorder_snapshot_endpoint(db, monkeypatch):
+    async with SessionLocal() as s:
+        h = CheckinHotel(name="Г"); s.add(h); await s.flush()
+        rec = CheckinRecorder(hotel_id=h.id, host="1.2.3.4"); s.add(rec); await s.commit(); rid = rec.id
+
+    class Fake:
+        async def get_snapshot(self, ch):
+            return b"\xff\xd8jpegbytes"
+
+    monkeypatch.setattr(checkin_ingest, "build_recorder_client", lambda rec, password=None: Fake())
+    async with _client() as c:
+        r = await c.get(f"/api/checkin/recorders/{rid}/snapshot/6")
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "image/jpeg"
+        assert r.content == b"\xff\xd8jpegbytes"
+
+
+async def test_recorder_snapshot_no_frame(db, monkeypatch):
+    from app.drivers.base import NVRError
+    async with SessionLocal() as s:
+        h = CheckinHotel(name="Г2"); s.add(h); await s.flush()
+        rec = CheckinRecorder(hotel_id=h.id, host="1.2.3.5"); s.add(rec); await s.commit(); rid = rec.id
+
+    class Fake:
+        async def get_snapshot(self, ch):
+            raise NVRError("нет кадра")
+
+    monkeypatch.setattr(checkin_ingest, "build_recorder_client", lambda rec, password=None: Fake())
+    async with _client() as c:
+        r = await c.get(f"/api/checkin/recorders/{rid}/snapshot/6")
+        assert r.status_code == 204
+
+
+async def test_test_recorder_sanitizes_garbled_name(monkeypatch):
+    from app.drivers.base import ChannelStatus, DeviceInfo
+
+    class Fake:
+        async def test_connection(self):
+            return DeviceInfo(model="X")
+        async def get_channel_statuses(self):
+            return [ChannelStatus(channel_id=6, name="IP ���6", online=True)]
+        async def list_tracks(self):
+            return []
+
+    monkeypatch.setattr(checkin_ingest, "build_recorder_client", lambda rec, password=None: Fake())
+    rec = CheckinRecorder(hotel_id=1, host="h")
+    res = await checkin_ingest.test_recorder(rec)
+    ch = res["channels"][0]
+    assert ch["name"] == "канал 6"          # кракозябры → номер канала
+    assert ch["raw_name"].startswith("IP")  # исходное имя сохранено
