@@ -184,7 +184,7 @@ async function runIngest(day){
 }
 
 const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
-const ST = {running:['warn','идёт'], done:['ok','готово'], error:['err','ошибка'], skipped:['muted','пропущен'], queued:['muted','в очереди']};
+const ST = {running:['warn','идёт'], done:['ok','готово'], error:['err','ошибка'], canceled:['muted','отменено'], skipped:['muted','пропущен'], queued:['muted','в очереди']};
 let pollTimer = null, hadRun = false;
 
 function fmtElapsed(s){ const m = Math.floor(s/60); return m ? `${m}м ${s%60}с` : `${s}с`; }
@@ -225,13 +225,21 @@ function renderStatus(d){
 
   const actions = document.getElementById("ingActions");
   if (d.status === 'running'){
-    actions.innerHTML = '<span class="muted" style="font-size:12px">обновляется автоматически…</span>';
+    actions.innerHTML = '<button class="mini danger" onclick="cancelIngest()">⏹ Отменить</button>' +
+      ' <span class="muted" style="font-size:12px">обновляется автоматически…</span>';
     pollTimer = setTimeout(pollStatus, 2000);
   } else {
     actions.innerHTML = (d.downloaded > 0)
       ? '<button class="mini" onclick="location.reload()">↻ Показать новые клипы</button>'
       : '<span class="muted" style="font-size:12px">новых клипов не добавлено</span>';
   }
+}
+
+async function cancelIngest(){
+  if (!confirm("Отменить текущую загрузку? Уже скачанные клипы останутся.")) return;
+  const d = await (await fetch("/api/checkin/ingest/cancel", {method:"POST"})).json();
+  if (!d.ok) alert(d.message || "Нет активного прогона");
+  pollStatus();
 }
 
 async function pollStatus(){

@@ -150,13 +150,13 @@ async def test_ingestion_downloads_and_is_idempotent(db, monkeypatch, tmp_path):
 
     calls = {"n": 0}
 
-    async def fake_ffmpeg(url, out_path, duration_s):
+    async def fake_ffmpeg(url, out_path, duration_s, run_id=None, label="", seg=None):
         calls["n"] += 1
         with open(out_path, "wb") as fh:
             fh.write(b"FAKECLIP")
         return True, ""
 
-    monkeypatch.setattr(checkin_ingest, "_run_ffmpeg", fake_ffmpeg)
+    monkeypatch.setattr(checkin_ingest, "_ffmpeg_download", fake_ffmpeg)
 
     st1 = await checkin_ingest.ingest_recorder(dt.date(2026, 6, 15), rid)
     assert st1["downloaded"] == 1
@@ -316,14 +316,14 @@ async def test_ingestion_run_tracks_progress(db, monkeypatch, tmp_path):
 
     monkeypatch.setattr(checkin_ingest, "build_recorder_client", lambda rec, password=None: FakeClient())
 
-    async def fake_ffmpeg(url, out_path, duration_s):
+    async def fake_ffmpeg(url, out_path, duration_s, run_id=None, label="", seg=None):
         if url.endswith("202"):                     # канал 2 «падает»
             return False, "ffmpeg: connection refused"
         with open(out_path, "wb") as fh:
             fh.write(b"OK")
         return True, ""
 
-    monkeypatch.setattr(checkin_ingest, "_run_ffmpeg", fake_ffmpeg)
+    monkeypatch.setattr(checkin_ingest, "_ffmpeg_download", fake_ffmpeg)
 
     summary = await checkin_ingest.run_ingestion(dt.date(2026, 6, 15), [hid], "manual")
 
@@ -363,7 +363,7 @@ async def test_trackid_fallback_and_autolearn(db, monkeypatch, tmp_path):
 
     monkeypatch.setattr(checkin_ingest, "build_recorder_client", lambda rec, password=None: FakeClient())
 
-    async def fake_ffmpeg(url, out_path, duration_s):
+    async def fake_ffmpeg(url, out_path, duration_s, run_id=None, label="", seg=None):
         tid = url.rsplit("/", 1)[-1]
         if tid == "6002":                       # правильный субпоток канала 60
             with open(out_path, "wb") as fh:
@@ -371,7 +371,7 @@ async def test_trackid_fallback_and_autolearn(db, monkeypatch, tmp_path):
             return True, ""
         return False, "ffmpeg: Server returned 404 Not Found"
 
-    monkeypatch.setattr(checkin_ingest, "_run_ffmpeg", fake_ffmpeg)
+    monkeypatch.setattr(checkin_ingest, "_ffmpeg_download", fake_ffmpeg)
 
     st = await checkin_ingest.ingest_recorder(dt.date(2026, 6, 15), rid)
     assert st["downloaded"] == 1  # перебор кандидатов нашёл рабочий trackid 6002
@@ -484,12 +484,12 @@ async def test_test_clip_ignores_window_and_search(db, monkeypatch, tmp_path):
 
     monkeypatch.setattr(checkin_ingest, "build_recorder_client", lambda rec, password=None: FakeClient())
 
-    async def fake_ffmpeg(url, out_path, duration_s):
+    async def fake_ffmpeg(url, out_path, duration_s, run_id=None, label="", seg=None):
         with open(out_path, "wb") as fh:
             fh.write(b"CLIP")
         return True, ""
 
-    monkeypatch.setattr(checkin_ingest, "_run_ffmpeg", fake_ffmpeg)
+    monkeypatch.setattr(checkin_ingest, "_ffmpeg_download", fake_ffmpeg)
 
     summary = await checkin_ingest.run_test_clip(10, [hid])
     assert summary["downloaded"] == 1
@@ -499,3 +499,46 @@ async def test_test_clip_ignores_window_and_search(db, monkeypatch, tmp_path):
         assert clip.status == ClipStatus.OK
         assert clip.day == dt.date.today()
         assert (dt.datetime.now() - clip.start_ts).total_seconds() <= 11 * 60  # ~последние 10 мин
+
+
+# ── Отмена прогона ───────────────────────────────────────────────────────────
+async def test_cancel_endpoint_marks_run(db):
+    from app.models import CheckinIngestRun
+    async with SessionLocal() as s:
+        run = CheckinIngestRun(status="running", recorders_total=1)
+        s.add(run); await s.commit(); rid = run.id
+    async with _client() as c:
+        d = (await c.post("/api/checkin/ingest/cancel")).json()
+        assert d["ok"]
+    assert checkin_ingest.is_cancelled(rid)
+    checkin_ingest._clear_cancel(rid)
+
+
+async def test_ingestion_cancel_stops(db, monkeypatch, tmp_path):
+    monkeypatch.setattr(checkin_ingest.settings, "clips_dir", str(tmp_path))
+    async with SessionLocal() as s:
+        h = CheckinHotel(name="Гост Отм"); s.add(h); await s.flush()
+        rec = CheckinRecorder(hotel_id=h.id, host="10.0.0.5", model_type="ds7616ni_e2")
+        s.add(rec); await s.flush()
+        s.add(CheckinChannel(recorder_id=rec.id, channel_id=1, substream_trackid=102))
+        await s.commit(); hid = h.id
+
+    class FakeClient:
+        async def search_activity(self, *a, **k):
+            return [ArchiveSegment(dt.datetime(2026, 6, 15, 8), dt.datetime(2026, 6, 15, 8, 10))]
+        def rtsp_playback_url(self, tid, a, b, *, rtsp_port=554):
+            return f"rtsp://f/{tid}"
+
+    monkeypatch.setattr(checkin_ingest, "build_recorder_client", lambda rec, password=None: FakeClient())
+
+    async def fake_dl(url, out_path, duration_s, run_id=None, label="", seg=None):
+        checkin_ingest.request_cancel(run_id)  # имитируем нажатие «Отменить» во время скачивания
+        return False, "отменено пользователем"
+
+    monkeypatch.setattr(checkin_ingest, "_ffmpeg_download", fake_dl)
+
+    await checkin_ingest.run_test_clip(10, [hid])
+    from app.models import CheckinIngestRun, IngestRunStatus
+    async with SessionLocal() as s:
+        run = (await s.execute(__import__("sqlalchemy").select(CheckinIngestRun))).scalars().first()
+        assert run.status == IngestRunStatus.CANCELED

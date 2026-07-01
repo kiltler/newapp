@@ -172,8 +172,29 @@ def _track_not_found(err: str) -> bool:
     return "404" in e or "not found" in e
 
 
-async def _run_ffmpeg(url: str, out_path: str, duration_s: float) -> tuple[bool, str]:
-    """ffmpeg -c copy (без перекодирования). Возвращает (успех, текст ошибки)."""
+# Прогоны, помеченные на отмену (run_id). Проверяется между сегментами и внутри
+# скачивания (kill ffmpeg).
+_CANCELLED: set[int] = set()
+
+
+def request_cancel(run_id: int) -> None:
+    _CANCELLED.add(run_id)
+
+
+def is_cancelled(run_id: int | None) -> bool:
+    return run_id is not None and run_id in _CANCELLED
+
+
+def _clear_cancel(run_id: int | None) -> None:
+    _CANCELLED.discard(run_id)
+
+
+async def _ffmpeg_download(
+    url: str, out_path: str, duration_s: float,
+    run_id: int | None = None, label: str = "", seg: ArchiveSegment | None = None,
+) -> tuple[bool, str]:
+    """Качает клип через ffmpeg: видео copy, аудио → AAC. Во время работы раз в 2с
+    обновляет прогресс размером файла (видно, что идёт) и слушает отмену (kill)."""
     cmd = [
         settings.ffmpeg_bin, "-y", "-nostdin",
         "-rtsp_transport", "tcp",
@@ -193,35 +214,39 @@ async def _run_ffmpeg(url: str, out_path: str, duration_s: float) -> tuple[bool,
         )
     except FileNotFoundError:
         return False, "ffmpeg не найден (добавьте его в образ)"
-    timeout = duration_s * 2 + 90
-    try:
-        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
-        proc.kill()
-        return False, f"таймаут ffmpeg ({timeout:.0f}с)"
+
+    span = f"{seg.start.strftime('%H:%M:%S')}–{seg.end.strftime('%H:%M:%S')}" if seg else ""
+    comm = asyncio.create_task(proc.communicate())
+    max_seconds = duration_s * 2 + 120
+    waited = 0.0
+    while True:
+        done, _ = await asyncio.wait({comm}, timeout=2.0)
+        if comm in done:
+            break
+        waited += 2.0
+        if is_cancelled(run_id):
+            proc.kill()
+            await comm
+            return False, "отменено пользователем"
+        if waited > max_seconds:
+            proc.kill()
+            await comm
+            return False, f"таймаут ffmpeg ({max_seconds:.0f}с)"
+        try:
+            sz = os.path.getsize(out_path) if os.path.exists(out_path) else 0
+        except OSError:
+            sz = 0
+        await _patch_run(run_id, current=f"{label}: качается {span} — {sz / 1048576:.1f} МБ")
+
+    _, stderr = comm.result()
+    if is_cancelled(run_id):
+        return False, "отменено пользователем"
     if proc.returncode != 0:
         tail = (stderr or b"").decode("utf-8", "replace").strip().splitlines()[-3:]
         return False, "ffmpeg: " + " | ".join(tail)
     if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
         return False, "файл пустой/не создан"
     return True, ""
-
-
-async def _download_monitored(
-    url: str, out_path: str, duration_s: float, run_id: int | None, label: str, seg: ArchiveSegment
-) -> tuple[bool, str]:
-    """Качает клип и раз в 2с обновляет прогресс размером файла — видно, что идёт."""
-    task = asyncio.create_task(_run_ffmpeg(url, out_path, duration_s))
-    span = f"{seg.start.strftime('%H:%M:%S')}–{seg.end.strftime('%H:%M:%S')}"
-    while True:
-        done, _ = await asyncio.wait({task}, timeout=2.0)
-        try:
-            sz = os.path.getsize(out_path) if os.path.exists(out_path) else 0
-        except OSError:
-            sz = 0
-        await _patch_run(run_id, current=f"{label}: качается {span} — {sz / 1048576:.1f} МБ")
-        if task in done:
-            return task.result()
 
 
 def clip_path(recorder: CheckinRecorder, hotel_id: int, channel_id: int, seg: ArchiveSegment) -> str:
@@ -275,10 +300,12 @@ async def _ingest_segment(
     for trackid in candidates:
         url = client.rtsp_playback_url(trackid, seg.start, seg.end, rtsp_port=recorder.rtsp_port)
         for attempt in range(_DOWNLOAD_RETRIES + 1):
-            ok, err = await _download_monitored(url, out_path, duration, run_id, label, seg)
-            if ok or _track_not_found(err):
-                break  # 404 — ретраить тот же trackid бессмысленно
+            ok, err = await _ffmpeg_download(url, out_path, duration, run_id, label, seg)
+            if ok or _track_not_found(err) or err == "отменено пользователем":
+                break  # 404 — ретраить бессмысленно; отмена — тоже стоп
             await asyncio.sleep(1.0 * (attempt + 1))
+        if err == "отменено пользователем":
+            break  # не перебираем trackid при отмене
         if ok:
             used_track = trackid
             break
@@ -347,6 +374,8 @@ async def ingest_recorder(
                                      current=f"{label}: окно ещё не наступило")
                     return stats
             for idx, ch in enumerate(channels, 1):
+                if is_cancelled(run_id):
+                    break
                 await _patch_run(run_id, current=f"{label}: канал {ch.channel_id} ({idx}/{len(channels)}), скачано {stats['downloaded']}")
                 if whole:
                     segments = [ArchiveSegment(win_start, win_end)]
@@ -432,14 +461,21 @@ async def run_ingestion(
     try:
         # Последовательно по регистраторам — бережём тонкий аплоад гостиниц.
         for rid in rec_ids:
+            if is_cancelled(run_id):
+                break
             st = await ingest_recorder(day, rid, run_id, window=window, whole=whole)
             summary["recorders"].append(st)
             summary["downloaded"] += st.get("downloaded", 0)
             summary["errors"] += st.get("errors", 0)
             await _patch_run(run_id, incs={"recorders_done": 1})
-        await _patch_run(run_id, sets={
-            "status": IngestRunStatus.DONE, "finished_at": utcnow(), "current": "Готово",
-        })
+        if is_cancelled(run_id):
+            await _patch_run(run_id, sets={
+                "status": IngestRunStatus.CANCELED, "finished_at": utcnow(), "current": "Отменено",
+            })
+        else:
+            await _patch_run(run_id, sets={
+                "status": IngestRunStatus.DONE, "finished_at": utcnow(), "current": "Готово",
+            })
     except Exception as exc:  # noqa: BLE001
         await _patch_run(run_id, sets={
             "status": IngestRunStatus.ERROR, "finished_at": utcnow(),
@@ -447,6 +483,8 @@ async def run_ingestion(
         })
         log.exception("Ingestion run %s упал: %s", run_id, exc)
         raise
+    finally:
+        _clear_cancel(run_id)
     return summary
 
 

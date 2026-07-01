@@ -359,6 +359,22 @@ async def run_test_clip_now(
     return {"ok": True, "message": f"Тест-клип за последние {data.minutes} мин запущен"}
 
 
+@router.post("/api/checkin/ingest/cancel")
+async def cancel_ingest(session: AsyncSession = Depends(get_session)):
+    """Отменяет активный прогон (убивает текущий ffmpeg, останавливает перебор)."""
+    run = (
+        await session.execute(
+            select(CheckinIngestRun).where(CheckinIngestRun.status == "running").limit(1)
+        )
+    ).scalar_one_or_none()
+    if run is None:
+        return {"ok": False, "message": "Нет активного прогона"}
+    checkin_ingest.request_cancel(run.id)
+    run.current = "Отмена…"
+    await session.commit()
+    return {"ok": True, "message": "Отмена запрошена"}
+
+
 @router.get("/api/checkin/ingest/status")
 async def ingest_status(session: AsyncSession = Depends(get_session)):
     """Состояние последнего прогона ingestion — для прогресс-бара в UI."""

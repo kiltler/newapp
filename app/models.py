@@ -672,6 +672,7 @@ class IngestRunStatus:
     RUNNING = "running"
     DONE = "done"
     ERROR = "error"
+    CANCELED = "canceled"
 
 
 class CheckinIngestRun(Base):
