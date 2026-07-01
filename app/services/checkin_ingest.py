@@ -19,6 +19,7 @@ import os
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.config import settings
 from app.database import SessionLocal
@@ -28,8 +29,11 @@ from app.models import (
     CheckinChannel,
     CheckinClip,
     CheckinHotel,
+    CheckinIngestRun,
     CheckinRecorder,
     ClipStatus,
+    IngestRunStatus,
+    utcnow,
 )
 
 log = logging.getLogger("nvrmon.checkin")
@@ -55,6 +59,42 @@ def build_recorder_client(recorder: CheckinRecorder, *, password: str | None = N
         timeout=settings.default_http_timeout,
         retries=settings.default_http_retries,
     )
+
+
+# ── Прогресс прогона (для UI) ────────────────────────────────────────────────
+async def _patch_run(
+    run_id: int | None, *, rec_id: int | None = None, current: str | None = None,
+    sets: dict | None = None, incs: dict | None = None,
+    rec_sets: dict | None = None, rec_incs: dict | None = None, error_sample: str | None = None,
+) -> None:
+    """Атомарно обновляет запись прогона: агрегаты и/или блок конкретного регистратора."""
+    if run_id is None:
+        return
+    async with SessionLocal() as s:
+        run = await s.get(CheckinIngestRun, run_id)
+        if run is None:
+            return
+        if current is not None:
+            run.current = current
+        for k, val in (sets or {}).items():
+            setattr(run, k, val)
+        for k, val in (incs or {}).items():
+            setattr(run, k, (getattr(run, k) or 0) + val)
+        if rec_id is not None:
+            detail = list(run.detail or [])
+            for e in detail:
+                if e.get("recorder_id") == rec_id:
+                    e.update(rec_sets or {})
+                    for k, val in (rec_incs or {}).items():
+                        e[k] = e.get(k, 0) + val
+                    if error_sample:
+                        e.setdefault("error_samples", [])
+                        if len(e["error_samples"]) < 8:
+                            e["error_samples"].append(error_sample)
+                    break
+            run.detail = detail
+            flag_modified(run, "detail")  # JSON не отслеживает in-place мутации
+        await s.commit()
 
 
 # ── Ночное окно ──────────────────────────────────────────────────────────────
@@ -179,7 +219,7 @@ async def _ingest_segment(
         )
     ).scalar_one_or_none()
     if existing and existing.status == ClipStatus.OK and existing.path and os.path.exists(existing.path):
-        return "skip"  # уже скачан — не качаем повторно
+        return "skip", ""  # уже скачан — не качаем повторно
 
     out_path = clip_path(recorder, hotel_id, ch.channel_id, seg)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -215,12 +255,15 @@ async def _ingest_segment(
         log.warning("рег.%s кан.%s %s: %s", recorder.id, ch.channel_id,
                     seg.start.strftime("%H:%M:%S"), err)
     await session.commit()
-    return "ok" if ok else "error"
+    return ("ok", "") if ok else ("error", err)
 
 
 # ── Прогон по регистратору / всем гостиницам ─────────────────────────────────
-async def ingest_recorder(day: dt.date, recorder_id: int) -> dict:
-    """Скачивает клипы одного регистратора за указанную дату. Идемпотентно."""
+async def ingest_recorder(day: dt.date, recorder_id: int, run_id: int | None = None) -> dict:
+    """Скачивает клипы одного регистратора за указанную дату. Идемпотентно.
+
+    Если задан run_id — по ходу обновляет прогресс прогона для UI.
+    """
     async with SessionLocal() as session:
         recorder = (
             await session.execute(
@@ -230,31 +273,51 @@ async def ingest_recorder(day: dt.date, recorder_id: int) -> dict:
             )
         ).scalar_one_or_none()
         if recorder is None or not recorder.enabled:
+            await _patch_run(run_id, rec_id=recorder_id, rec_sets={"status": "skipped"})
             return {"recorder_id": recorder_id, "skipped": True}
 
+        label = recorder.name or recorder.host
         stats = {"recorder_id": recorder_id, "downloaded": 0, "skipped": 0, "errors": 0}
+        channels = [c for c in recorder.channels if c.enabled]
+        await _patch_run(run_id, rec_id=recorder_id,
+                         rec_sets={"status": "running", "channels_total": len(channels)},
+                         current=f"{label}: подключаюсь…")
         try:
             client = build_recorder_client(recorder)
             win_start, win_end = night_window(recorder, day)
-            channels = [c for c in recorder.channels if c.enabled]
-            for ch in channels:
+            for idx, ch in enumerate(channels, 1):
+                await _patch_run(run_id, current=f"{label}: канал {ch.channel_id} ({idx}/{len(channels)}), скачано {stats['downloaded']}")
                 try:
                     segments = await find_activity(client, recorder, ch.channel_id, win_start, win_end)
                 except NVRError as exc:
                     stats["errors"] += 1
+                    await _patch_run(run_id, incs={"errors": 1}, rec_id=recorder_id,
+                                     rec_incs={"errors": 1}, error_sample=f"кан.{ch.channel_id}: поиск: {exc}")
                     log.warning("рег.%s кан.%s: поиск сорвался: %s", recorder.id, ch.channel_id, exc)
+                    await _patch_run(run_id, rec_id=recorder_id, rec_incs={"channels_done": 1})
                     continue
                 for seg in segments:
-                    res = await _ingest_segment(session, client, recorder, recorder.hotel_id, ch, seg)
+                    res, err = await _ingest_segment(session, client, recorder, recorder.hotel_id, ch, seg)
                     if res == "ok":
                         stats["downloaded"] += 1
+                        await _patch_run(run_id, incs={"downloaded": 1}, rec_id=recorder_id, rec_incs={"downloaded": 1})
                     elif res == "skip":
                         stats["skipped"] += 1
+                        await _patch_run(run_id, incs={"skipped": 1}, rec_id=recorder_id, rec_incs={"skipped": 1})
                     else:
                         stats["errors"] += 1
+                        await _patch_run(run_id, incs={"errors": 1}, rec_id=recorder_id,
+                                         rec_incs={"errors": 1},
+                                         error_sample=f"кан.{ch.channel_id} {seg.start.strftime('%H:%M:%S')}: {err}")
+                await _patch_run(run_id, rec_id=recorder_id, rec_incs={"channels_done": 1})
         except NVRError as exc:
             stats["errors"] += 1
+            await _patch_run(run_id, incs={"errors": 1}, rec_id=recorder_id,
+                             rec_sets={"status": "error"}, error_sample=f"регистратор недоступен: {exc}")
             log.error("рег.%s: недоступен: %s", recorder.id, exc)
+        else:
+            await _patch_run(run_id, rec_id=recorder_id,
+                             rec_sets={"status": "error" if stats["errors"] else "done"})
         log.info(
             "рег.%s за %s: скачано=%d, пропущено=%d, ошибок=%d",
             recorder_id, day, stats["downloaded"], stats["skipped"], stats["errors"],
@@ -262,31 +325,67 @@ async def ingest_recorder(day: dt.date, recorder_id: int) -> dict:
         return stats
 
 
-async def run_ingestion(day: dt.date | None = None, hotel_ids: list[int] | None = None) -> dict:
+async def run_ingestion(
+    day: dt.date | None = None, hotel_ids: list[int] | None = None, trigger: str = "manual"
+) -> dict:
     """Ночной джоб: качает клипы по всем включённым гостиницам за дату.
 
     day по умолчанию — вчерашний день (ночью выкачиваем прошедшие сутки).
+    Создаёт запись прогона (CheckinIngestRun) и обновляет её по ходу — для UI.
     """
     if day is None:
         day = dt.date.today() - dt.timedelta(days=1)
     async with SessionLocal() as session:
-        q = select(CheckinRecorder).join(CheckinHotel).where(
-            CheckinRecorder.enabled.is_(True), CheckinHotel.enabled.is_(True)
+        q = (
+            select(CheckinRecorder).join(CheckinHotel)
+            .where(CheckinRecorder.enabled.is_(True), CheckinHotel.enabled.is_(True))
+            .options(selectinload(CheckinRecorder.hotel))
         )
         if hotel_ids:
             q = q.where(CheckinRecorder.hotel_id.in_(hotel_ids))
-        recorder_ids = (await session.execute(q)).scalars().all()
-        recorder_ids = [r.id for r in recorder_ids]
+        recorders = (await session.execute(q)).scalars().all()
+        rec_ids = [r.id for r in recorders]
+        detail = [{
+            "recorder_id": r.id, "name": r.name or r.host,
+            "hotel": r.hotel.name if r.hotel else "", "status": "queued",
+            "channels_total": 0, "channels_done": 0,
+            "downloaded": 0, "skipped": 0, "errors": 0, "error_samples": [],
+        } for r in recorders]
+        run = CheckinIngestRun(
+            day=day, trigger=trigger, status=IngestRunStatus.RUNNING,
+            recorders_total=len(rec_ids), detail=detail,
+            current="Старт…" if rec_ids else "Нет включённых регистраторов",
+        )
+        session.add(run)
+        await session.commit()
+        run_id = run.id
 
-    log.info("Ingestion за %s: регистраторов=%d", day, len(recorder_ids))
-    summary = {"day": day.isoformat(), "recorders": [], "downloaded": 0, "errors": 0}
-    # Последовательно по регистраторам — бережём тонкий аплоад гостиниц.
-    for rid in recorder_ids:
-        st = await ingest_recorder(day, rid)
-        summary["recorders"].append(st)
-        summary["downloaded"] += st.get("downloaded", 0)
-        summary["errors"] += st.get("errors", 0)
+    log.info("Ingestion за %s: регистраторов=%d (run %s)", day, len(rec_ids), run_id)
+    summary = {"run_id": run_id, "day": day.isoformat(), "recorders": [], "downloaded": 0, "errors": 0}
+    try:
+        # Последовательно по регистраторам — бережём тонкий аплоад гостиниц.
+        for rid in rec_ids:
+            st = await ingest_recorder(day, rid, run_id)
+            summary["recorders"].append(st)
+            summary["downloaded"] += st.get("downloaded", 0)
+            summary["errors"] += st.get("errors", 0)
+            await _patch_run(run_id, incs={"recorders_done": 1})
+        await _patch_run(run_id, sets={
+            "status": IngestRunStatus.DONE, "finished_at": utcnow(), "current": "Готово",
+        })
+    except Exception as exc:  # noqa: BLE001
+        await _patch_run(run_id, sets={
+            "status": IngestRunStatus.ERROR, "finished_at": utcnow(),
+            "error": str(exc), "current": "Сбой",
+        })
+        log.exception("Ingestion run %s упал: %s", run_id, exc)
+        raise
     return summary
+
+
+async def scheduled_ingestion() -> dict:
+    """Обёртка для планировщика — помечает прогон как автоматический."""
+    return await run_ingestion(trigger="schedule")
 
 
 # ── Тест подключения (для UI: пинг + список каналов и треков субпотока) ───────

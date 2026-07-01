@@ -144,7 +144,7 @@ async function saveSchedule(){
 async function runNow(){
   if (!confirm("Запустить ingestion за вчера?")) return;
   const d = await postJSON("/api/checkin/ingest/run", {});
-  if (d) alert(d.message);
+  if (d) location.href = "/checkin";  // там виден прогресс загрузки
 }
 
 // ── Гостиницы ──

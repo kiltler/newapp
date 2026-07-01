@@ -666,3 +666,30 @@ class CheckinNotification(Base):
     payload: Mapped[dict] = mapped_column(JSON, default=dict)  # {camera, ones, delta, clips_url}
     status: Mapped[str] = mapped_column(String(16), default=NotificationStatus.NEW)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class IngestRunStatus:
+    RUNNING = "running"
+    DONE = "done"
+    ERROR = "error"
+
+
+class CheckinIngestRun(Base):
+    """Состояние прогона ночного/ручного ingestion — для прогресс-бара в UI."""
+
+    __tablename__ = "checkin_ingest_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    day: Mapped[dt.date | None] = mapped_column(Date, default=None)
+    trigger: Mapped[str] = mapped_column(String(16), default="manual")  # manual|schedule
+    status: Mapped[str] = mapped_column(String(16), default=IngestRunStatus.RUNNING)
+    started_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    recorders_total: Mapped[int] = mapped_column(Integer, default=0)
+    recorders_done: Mapped[int] = mapped_column(Integer, default=0)
+    downloaded: Mapped[int] = mapped_column(Integer, default=0)
+    skipped: Mapped[int] = mapped_column(Integer, default=0)
+    errors: Mapped[int] = mapped_column(Integer, default=0)
+    current: Mapped[str] = mapped_column(Text, default="")
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    detail: Mapped[list] = mapped_column(JSON, default=list)  # по регистраторам

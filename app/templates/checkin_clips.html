@@ -11,6 +11,18 @@
   </div>
 </div>
 
+<div id="ingestPanel" class="chart-card" style="display:none; margin-bottom:14px;">
+  <div class="chart-head">
+    <h3 id="ingTitle" style="margin:0">Загрузка клипов</h3>
+    <span class="sub" id="ingMeta"></span>
+  </div>
+  <div class="pbar"><div class="pbar-fill" id="ingBar" style="width:0%"></div></div>
+  <div id="ingSummary" class="muted" style="margin-top:8px; font-size:13px"></div>
+  <div id="ingCurrent" style="margin-top:4px; font-size:13px; color:var(--accent-2)"></div>
+  <div id="ingRecorders" style="margin-top:10px; display:flex; flex-direction:column; gap:6px"></div>
+  <div id="ingActions" style="margin-top:10px"></div>
+</div>
+
 <form class="bus-search" method="get">
   <select name="hotel">
     <option value="">Все гостиницы</option>
@@ -152,7 +164,70 @@ async function runIngest(){
   if (!confirm("Запустить скачивание клипов за вчерашний день по всем гостиницам?")) return;
   const r = await fetch("/api/checkin/ingest/run", {method:"POST", headers:{"Content-Type":"application/json"}, body:"{}"});
   const d = await r.json();
-  alert(d.message || "Запущено");
+  if (d.running) alert("Ingestion уже выполняется — смотрите прогресс ниже.");
+  pollStatus();
 }
+
+const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+const ST = {running:['warn','идёт'], done:['ok','готово'], error:['err','ошибка'], skipped:['muted','пропущен'], queued:['muted','в очереди']};
+let pollTimer = null, hadRun = false;
+
+function fmtElapsed(s){ const m = Math.floor(s/60); return m ? `${m}м ${s%60}с` : `${s}с`; }
+
+function renderStatus(d){
+  if (!d.exists){ return; }
+  hadRun = true;
+  const panel = document.getElementById("ingestPanel");
+  panel.style.display = "block";
+  const [cls, label] = ST[d.status] || ['muted', d.status];
+  document.getElementById("ingTitle").innerHTML =
+    `Загрузка клипов <span class="badge ${cls}">${label}</span>`;
+  document.getElementById("ingMeta").textContent =
+    `${d.day || ''} · ${d.trigger === 'schedule' ? 'по расписанию' : 'вручную'} · ${fmtElapsed(d.elapsed)}`;
+  const bar = document.getElementById("ingBar");
+  bar.style.width = d.percent + "%";
+  bar.style.background = d.status === 'error' ? "var(--err)" : (d.errors ? "linear-gradient(90deg,var(--warn),var(--ok))" : "");
+  document.getElementById("ingSummary").innerHTML =
+    `Регистраторы <b>${d.recorders_done}/${d.recorders_total}</b> · ` +
+    `↓ скачано <b>${d.downloaded}</b> · ⤳ пропущено <b>${d.skipped}</b> · ` +
+    `<span style="color:${d.errors?'var(--err)':'inherit'}">✖ ошибок <b>${d.errors}</b></span>`;
+  document.getElementById("ingCurrent").textContent = d.status === 'running' ? (d.current || "") : "";
+
+  document.getElementById("ingRecorders").innerHTML = (d.detail || []).map(e => {
+    const [rc, rl] = ST[e.status] || ['muted', e.status];
+    const samples = (e.error_samples || []).length
+      ? `<details style="margin-top:4px"><summary style="cursor:pointer;color:var(--err);font-size:12px">ошибки (${e.error_samples.length})</summary>
+         <div class="muted" style="font-size:12px;white-space:pre-wrap;margin-top:4px">${e.error_samples.map(esc).join("\n")}</div></details>`
+      : "";
+    return `<div style="border:1px solid var(--line);border-radius:8px;padding:8px 10px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <b>${esc(e.name)}</b> <span class="muted">${esc(e.hotel)}</span>
+        <span class="badge ${rc}">${rl}</span>
+        <span class="muted" style="margin-left:auto;font-size:12px">каналы ${e.channels_done}/${e.channels_total} ·
+          ↓${e.downloaded} ⤳${e.skipped} <span style="color:${e.errors?'var(--err)':'inherit'}">✖${e.errors}</span></span>
+      </div>${samples}</div>`;
+  }).join("");
+
+  const actions = document.getElementById("ingActions");
+  if (d.status === 'running'){
+    actions.innerHTML = '<span class="muted" style="font-size:12px">обновляется автоматически…</span>';
+    pollTimer = setTimeout(pollStatus, 2000);
+  } else {
+    actions.innerHTML = (d.downloaded > 0)
+      ? '<button class="mini" onclick="location.reload()">↻ Показать новые клипы</button>'
+      : '<span class="muted" style="font-size:12px">новых клипов не добавлено</span>';
+  }
+}
+
+async function pollStatus(){
+  if (pollTimer){ clearTimeout(pollTimer); pollTimer = null; }
+  try {
+    const d = await (await fetch("/api/checkin/ingest/status")).json();
+    renderStatus(d);
+  } catch(e){ /* тихо игнорируем сетевые сбои опроса */ }
+}
+
+// При загрузке страницы — показать состояние последнего прогона (и продолжить опрос, если идёт)
+pollStatus();
 </script>
 {% endblock %}

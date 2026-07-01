@@ -28,6 +28,7 @@ from app.models import (
     CheckinChannel,
     CheckinClip,
     CheckinHotel,
+    CheckinIngestRun,
     CheckinLog,
     CheckinNotification,
     CheckinRecorder,
@@ -310,10 +311,48 @@ async def set_schedule(data: schemas.CheckinScheduleIn, session: AsyncSession = 
 async def run_ingest_now(
     data: schemas.IngestRunIn, background: BackgroundTasks, session: AsyncSession = Depends(get_session)
 ):
+    # Не запускаем второй прогон поверх активного
+    active = (
+        await session.execute(
+            select(CheckinIngestRun).where(CheckinIngestRun.status == "running").limit(1)
+        )
+    ).scalar_one_or_none()
+    if active is not None:
+        return {"ok": False, "running": True, "message": "Ingestion уже выполняется"}
     day = data.day or (dt.date.today() - dt.timedelta(days=1))
     hotel_ids = [data.hotel_id] if data.hotel_id else None
-    background.add_task(checkin_ingest.run_ingestion, day, hotel_ids)
+    background.add_task(checkin_ingest.run_ingestion, day, hotel_ids, "manual")
     return {"ok": True, "day": day.isoformat(), "message": "Ingestion запущен в фоне"}
+
+
+@router.get("/api/checkin/ingest/status")
+async def ingest_status(session: AsyncSession = Depends(get_session)):
+    """Состояние последнего прогона ingestion — для прогресс-бара в UI."""
+    run = (
+        await session.execute(
+            select(CheckinIngestRun).order_by(CheckinIngestRun.started_at.desc()).limit(1)
+        )
+    ).scalar_one_or_none()
+    if run is None:
+        return {"exists": False}
+    def _aware(t):
+        return t.replace(tzinfo=dt.timezone.utc) if t.tzinfo is None else t
+
+    started = _aware(run.started_at)
+    end = _aware(run.finished_at) if run.finished_at else dt.datetime.now(dt.timezone.utc)
+    elapsed = max(int((end - started).total_seconds()), 0)
+    pct = round(run.recorders_done / run.recorders_total * 100) if run.recorders_total else (
+        100 if run.status != "running" else 0
+    )
+    return {
+        "exists": True, "id": run.id, "status": run.status, "trigger": run.trigger,
+        "day": run.day.isoformat() if run.day else None,
+        "recorders_total": run.recorders_total, "recorders_done": run.recorders_done,
+        "downloaded": run.downloaded, "skipped": run.skipped, "errors": run.errors,
+        "current": run.current, "error": run.error, "detail": run.detail or [],
+        "percent": pct, "elapsed": elapsed,
+        "started_at": started.isoformat(), "finished": run.finished_at is not None,
+    }
 
 
 # ── Центр уведомлений ────────────────────────────────────────────────────────

@@ -83,7 +83,7 @@ def _add_checkin_job(hour: int, minute: int) -> None:
     from app.services import checkin_ingest
 
     scheduler.add_job(
-        checkin_ingest.run_ingestion,
+        checkin_ingest.scheduled_ingestion,
         trigger=CronTrigger(hour=hour, minute=minute),
         id="checkin_ingest",
         name="Ночной ingestion заселений",
