@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Заселения — журнал{% endblock %}
+{% block content %}
+<div class="device-head">
+  <h1>📋 Журнал заселений</h1>
+  <a class="bus-btn secondary" href="/checkin">← К клипам</a>
+</div>
+
+<section class="bus-summary">
+  <div class="bus-tile"><span class="num">{{ counts.get('checkin', 0) }}</span><span>заселения</span></div>
+  <div class="bus-tile"><span class="num">{{ counts.get('not', 0) }}</span><span>не заселения</span></div>
+  <div class="bus-tile warn"><span class="num">{{ counts.get('disputed', 0) }}</span><span>спорные</span></div>
+</section>
+
+<form class="bus-search" method="get">
+  <select name="hotel">
+    <option value="">Все гостиницы</option>
+    {% for h in hotels %}<option value="{{ h.id }}" {{ 'selected' if f_hotel == h.id }}>{{ h.name }}</option>{% endfor %}
+  </select>
+  <input type="date" name="day" value="{{ f_day }}">
+  <button>Фильтр</button>
+</form>
+
+<table class="grid">
+  <thead><tr><th>Записано</th><th>Гостиница</th><th>Дата</th><th>Смена</th><th>Комната</th><th>Время</th><th>Вердикт</th><th>Оператор</th><th>Заметка</th><th></th></tr></thead>
+  <tbody>
+  {% for x in logs %}
+    <tr>
+      <td class="muted">{{ x.created_at | localtime('%d.%m %H:%M') }}</td>
+      <td>{{ x.hotel }}</td>
+      <td>{{ x.day }}</td>
+      <td>{{ x.shift }}</td>
+      <td>{{ x.room }}</td>
+      <td>{% if x.event_time %}{{ x.event_time.strftime('%H:%M:%S') }}{% else %}—{% endif %}</td>
+      <td>
+        {% if x.verdict == 'checkin' %}<span class="badge ok">заселение</span>
+        {% elif x.verdict == 'disputed' %}<span class="badge warn">спорное</span>
+        {% else %}<span class="badge muted">не заселение</span>{% endif %}
+      </td>
+      <td>{{ x.operator }}</td>
+      <td class="muted">{{ x.note }}</td>
+      <td><button class="mini danger" onclick="delLog({{ x.id }})">✕</button></td>
+    </tr>
+  {% else %}
+    <tr><td colspan="10" class="muted">Записей нет. Отмечайте заселения в плеере на странице клипов.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function delLog(id){
+  if (!confirm("Удалить запись журнала?")) return;
+  const r = await fetch(`/api/checkin/logs/${id}/delete`, {method:"POST"});
+  if (r.ok) location.reload(); else alert("Ошибка");
+}
+</script>
+{% endblock %}

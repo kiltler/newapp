@@ -4,6 +4,7 @@
 <div class="device-head">
   <h1>🏨 Заселения — клипы</h1>
   <div class="device-actions">
+    <a class="bus-btn secondary" href="/checkin/logs">📋 Журнал заселений</a>
     <a class="bus-btn secondary" href="/checkin/notifications">🔔 Уведомления{% if unread %} <span class="badge err">{{ unread }}</span>{% endif %}</a>
     <a class="bus-btn secondary" href="/checkin/settings">⚙ Настройки</a>
     <button onclick="runIngest()">▶ Скачать за вчера</button>
@@ -34,6 +35,23 @@
   <div class="muted" style="font-size:12px; margin-top:6px;">
     ← → перемотка ±5с · Shift+← → ±30с · пробел пауза · ↑ ↓ скорость
   </div>
+
+  {# ── Лог заселения по текущему клипу ── #}
+  <div style="border-top:1px solid var(--line); margin-top:12px; padding-top:12px;">
+    <div class="collect-controls">
+      <input id="lgRoom" placeholder="№ комнаты" style="width:110px">
+      <input id="lgTime" placeholder="время ЧЧ:ММ:СС" style="width:130px">
+      <button class="mini" onclick="timeFromPlayer()">⏱ из плеера</button>
+      <input id="lgShift" placeholder="смена (день/ночь)" style="width:150px">
+      <input id="lgNote" placeholder="заметка" style="flex:1; min-width:160px">
+    </div>
+    <div class="collect-controls" style="margin-top:8px;">
+      <button onclick="saveLog('checkin')" style="background:var(--ok); color:#06210f">✅ Заселение</button>
+      <button onclick="saveLog('not')" class="secondary">❌ Не заселение</button>
+      <button onclick="saveLog('disputed')" style="background:var(--warn); color:#1a1206">⚠ Спорное</button>
+      <span id="lgMsg" class="muted" style="font-size:13px; margin-left:auto"></span>
+    </div>
+  </div>
 </div>
 
 <table class="grid">
@@ -51,7 +69,10 @@
         {% elif c.status == 'pending' %}<span class="badge warn">качается</span>
         {% else %}<span class="badge err" title="{{ c.error }}">ошибка</span>{% endif %}
       </td>
-      <td>{% if c.url %}<button class="mini" onclick="play('{{ c.url }}', '{{ c.hotel }} · кан.{{ c.channel_id }} · {{ c.start.strftime('%H:%M:%S') }}')">▶ Смотреть</button>{% endif %}</td>
+      <td>{% if c.url %}<button class="mini" onclick='playClip(this)'
+            data-url="{{ c.url }}" data-id="{{ c.id }}" data-hotel="{{ c.hotel }}"
+            data-ch="{{ c.channel_id }}" data-day="{{ c.day }}" data-start="{{ c.start.isoformat() }}"
+            data-label="{{ c.hotel }} · кан.{{ c.channel_id }} · {{ c.start.strftime('%H:%M:%S') }}">▶ Смотреть</button>{% endif %}</td>
     </tr>
   {% else %}
     <tr><td colspan="7" class="muted">Клипов нет. Настройте регистраторы и запустите ingestion.</td></tr>
@@ -65,12 +86,48 @@
 const player = document.getElementById("player");
 const box = document.getElementById("playerBox");
 const spdShow = document.getElementById("spdShow");
-function play(url, label){
+let currentClip = null;
+
+function playClip(btn){
+  const d = btn.dataset;
+  currentClip = {id:+d.id, hotel:d.hotel, ch:d.ch, day:d.day, start:d.start};
   box.style.display = "block";
-  document.getElementById("nowPlaying").textContent = label;
-  player.src = url; player.playbackRate = 1; spdShow.textContent = "x1";
+  document.getElementById("nowPlaying").textContent = d.label;
+  document.getElementById("lgMsg").textContent = "";
+  document.getElementById("lgTime").value = "";
+  player.src = d.url; player.playbackRate = 1; spdShow.textContent = "x1";
   box.scrollIntoView({behavior:"smooth", block:"start"});
   player.play().catch(()=>{});
+}
+
+// Время события = время начала клипа + позиция в плеере → ЧЧ:ММ:СС
+function timeFromPlayer(){
+  if (!currentClip) return;
+  const base = new Date(currentClip.start.replace(" ", "T"));
+  const t = new Date(base.getTime() + (player.currentTime || 0) * 1000);
+  const p = n => String(n).padStart(2, "0");
+  document.getElementById("lgTime").value = p(t.getHours())+":"+p(t.getMinutes())+":"+p(t.getSeconds());
+}
+
+async function saveLog(verdict){
+  if (!currentClip){ alert("Сначала откройте клип"); return; }
+  const time = document.getElementById("lgTime").value.trim();
+  const body = {
+    clip_id: currentClip.id, verdict,
+    room: document.getElementById("lgRoom").value.trim() || null,
+    shift: document.getElementById("lgShift").value.trim() || null,
+    note: document.getElementById("lgNote").value.trim() || null,
+    event_time: time ? (currentClip.day + "T" + (time.length === 5 ? time+":00" : time)) : null,
+  };
+  const r = await fetch("/api/checkin/logs", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+  const msg = document.getElementById("lgMsg");
+  if (r.ok){
+    const names = {checkin:"✅ заселение", not:"❌ не заселение", disputed:"⚠ спорное"};
+    msg.textContent = "Записано: "+names[verdict]; msg.style.color = "var(--ok)";
+    document.getElementById("lgRoom").value = ""; document.getElementById("lgNote").value = "";
+  } else {
+    msg.textContent = "Ошибка сохранения"; msg.style.color = "var(--err)";
+  }
 }
 function setSpeed(s){ player.playbackRate = s; spdShow.textContent = "x"+s; }
 document.querySelectorAll(".spd").forEach(b => b.onclick = () => setSpeed(parseFloat(b.dataset.s)));

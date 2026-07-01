@@ -27,8 +27,10 @@ from app.models import (
     CheckinChannel,
     CheckinClip,
     CheckinHotel,
+    CheckinLog,
     CheckinNotification,
     CheckinRecorder,
+    CheckinVerdict,
     ClipStatus,
     NotificationStatus,
     RecorderModel,
@@ -320,3 +322,74 @@ async def set_notification_status(
     note.status = data.status
     await session.commit()
     return {"ok": True}
+
+
+# ── Лог заселений (Фаза 2) ───────────────────────────────────────────────────
+_VERDICTS = (CheckinVerdict.CHECKIN, CheckinVerdict.NOT, CheckinVerdict.DISPUTED)
+
+
+@router.post("/api/checkin/logs")
+async def create_log(
+    data: schemas.CheckinLogIn, request: Request, session: AsyncSession = Depends(get_session)
+):
+    if data.verdict not in _VERDICTS:
+        raise HTTPException(422, "Неизвестный вердикт")
+    hotel_id, day = data.hotel_id, data.day
+    if data.clip_id:
+        clip = await session.get(CheckinClip, data.clip_id)
+        if clip is None:
+            raise HTTPException(404, "Клип не найден")
+        hotel_id = clip.hotel_id
+        day = day or clip.day
+    if hotel_id is None:
+        raise HTTPException(422, "Не указана гостиница")
+    if day is None:
+        day = data.event_time.date() if data.event_time else dt.date.today()
+    entry = CheckinLog(
+        clip_id=data.clip_id, hotel_id=hotel_id, day=day, shift=(data.shift or None),
+        room=(data.room or None), event_time=data.event_time, verdict=data.verdict,
+        note=(data.note or None), operator=request.session.get("user"),
+    )
+    session.add(entry)
+    await session.commit()
+    return {"id": entry.id}
+
+
+@router.post("/api/checkin/logs/{log_id}/delete")
+async def delete_log(log_id: int, session: AsyncSession = Depends(get_session)):
+    await session.execute(delete(CheckinLog).where(CheckinLog.id == log_id))
+    await session.commit()
+    return {"ok": True}
+
+
+@router.get("/checkin/logs", response_class=HTMLResponse)
+async def checkin_logs_page(
+    request: Request, hotel: int | None = None, day: str | None = None,
+    session: AsyncSession = Depends(get_session),
+):
+    hotels = (await session.execute(select(CheckinHotel).order_by(CheckinHotel.name))).scalars().all()
+    q = select(CheckinLog).order_by(CheckinLog.created_at.desc())
+    if hotel:
+        q = q.where(CheckinLog.hotel_id == hotel)
+    if day:
+        try:
+            q = q.where(CheckinLog.day == dt.date.fromisoformat(day))
+        except ValueError:
+            pass
+    logs = (await session.execute(q.limit(500))).scalars().all()
+    hotel_names = {h.id: h.name for h in hotels}
+    counts = {v: sum(1 for x in logs if x.verdict == v) for v in _VERDICTS}
+    rows = [
+        {
+            "id": x.id, "hotel": hotel_names.get(x.hotel_id, x.hotel_id),
+            "day": x.day.isoformat() if x.day else "", "shift": x.shift or "—",
+            "room": x.room or "—", "verdict": x.verdict,
+            "event_time": x.event_time, "note": x.note or "",
+            "operator": x.operator or "—", "created_at": x.created_at,
+        }
+        for x in logs
+    ]
+    return templates.TemplateResponse("checkin_logs.html", {
+        "request": request, "logs": rows, "hotels": hotels,
+        "f_hotel": hotel, "f_day": day or "", "counts": counts,
+    })

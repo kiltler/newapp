@@ -357,3 +357,15 @@ class IngestRunIn(BaseModel):
 
 class NotificationStatusIn(BaseModel):
     status: str
+
+
+class CheckinLogIn(BaseModel):
+    """Вердикт оператора по заселению (Фаза 2)."""
+    clip_id: int | None = None
+    hotel_id: int | None = None      # если clip_id не задан
+    day: dt.date | None = None
+    shift: str | None = None
+    room: str | None = None
+    event_time: dt.datetime | None = None
+    verdict: str = "checkin"
+    note: str | None = None

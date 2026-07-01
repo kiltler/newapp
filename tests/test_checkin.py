@@ -220,3 +220,57 @@ async def test_schedule_saved(db):
     async with _client() as c:
         r = await c.post("/api/checkin/schedule", json={"hour": 3, "minute": 15})
         assert r.json() == {"ok": True, "hour": 3, "minute": 15}
+
+
+# ── Фаза 2: лог заселений ────────────────────────────────────────────────────
+async def _make_hotel_with_clip():
+    import datetime as _dt
+    async with SessionLocal() as s:
+        h = CheckinHotel(name="Гост Л")
+        s.add(h); await s.flush()
+        clip = CheckinClip(
+            hotel_id=h.id, recorder_id=1, channel_id=1, role="reception",
+            day=_dt.date(2026, 6, 15),
+            start_ts=_dt.datetime(2026, 6, 15, 8, 0, 0),
+            end_ts=_dt.datetime(2026, 6, 15, 8, 1, 0),
+            path="clips/x.mp4", status="ok",
+        )
+        s.add(clip); await s.commit()
+        return h.id, clip.id
+
+
+async def test_log_created_from_clip(db):
+    hid, cid = await _make_hotel_with_clip()
+    async with _client() as c:
+        r = await c.post("/api/checkin/logs", json={
+            "clip_id": cid, "verdict": "checkin", "room": "214",
+            "shift": "день", "note": "багаж, ключ выдан",
+            "event_time": "2026-06-15T08:00:30",
+        })
+        assert r.status_code == 200
+    from app.models import CheckinLog
+    async with SessionLocal() as s:
+        rows = (await s.execute(__import__("sqlalchemy").select(CheckinLog))).scalars().all()
+        assert len(rows) == 1
+        lg = rows[0]
+        assert lg.verdict == "checkin" and lg.room == "214"
+        assert lg.hotel_id == hid and lg.day.isoformat() == "2026-06-15"  # взято из клипа
+
+
+async def test_log_bad_verdict_rejected(db):
+    hid, cid = await _make_hotel_with_clip()
+    async with _client() as c:
+        r = await c.post("/api/checkin/logs", json={"clip_id": cid, "verdict": "maybe"})
+        assert r.status_code == 422
+
+
+async def test_log_delete_and_page(db):
+    hid, cid = await _make_hotel_with_clip()
+    async with _client() as c:
+        lid = (await c.post("/api/checkin/logs", json={"clip_id": cid, "verdict": "disputed"})).json()["id"]
+        r = await c.get("/checkin/logs")
+        assert r.status_code == 200 and "спорное" in r.text
+        assert (await c.post(f"/api/checkin/logs/{lid}/delete")).status_code == 200
+    from app.models import CheckinLog
+    async with SessionLocal() as s:
+        assert (await s.execute(__import__("sqlalchemy").select(CheckinLog))).scalars().first() is None
