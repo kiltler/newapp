@@ -532,6 +532,31 @@ async def scheduled_ingestion() -> dict:
     return await run_ingestion(trigger="schedule")
 
 
+async def abort_orphan_runs() -> None:
+    """На старте: прогоны и клипы не переживают перезапуск процесса. Помечаем
+    зависшие running/pending как прерванные, чтобы UI не показывал вечное «идёт»."""
+    async with SessionLocal() as s:
+        runs = (
+            await s.execute(
+                select(CheckinIngestRun).where(CheckinIngestRun.status == IngestRunStatus.RUNNING)
+            )
+        ).scalars().all()
+        for r in runs:
+            r.status = IngestRunStatus.ERROR
+            r.finished_at = utcnow()
+            r.current = "прервано (перезапуск сервера)"
+            r.error = r.error or "прервано перезапуском сервера"
+        clips = (
+            await s.execute(select(CheckinClip).where(CheckinClip.status == ClipStatus.PENDING))
+        ).scalars().all()
+        for c in clips:
+            c.status = ClipStatus.ERROR
+            c.error = "прервано (перезапуск сервера)"
+        if runs or clips:
+            await s.commit()
+            log.info("Очищено зависших прогонов: %d, клипов: %d", len(runs), len(clips))
+
+
 async def run_test_clip(minutes: int = 10, hotel_ids: list[int] | None = None) -> dict:
     """Тест-клип: тянет ПОСЛЕДНИЕ N минут субпотока целиком, мимо ночного окна и
     поиска активности. Окно привязывается к ЧАСАМ РЕГИСТРАТОРА (иначе при

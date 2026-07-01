@@ -585,3 +585,23 @@ async def test_test_clip_uses_device_time(db, monkeypatch, tmp_path):
         assert clip.status == ClipStatus.OK
         assert clip.end_ts == dev_time                       # окно привязано к часам регистратора
         assert clip.start_ts == dev_time - dt.timedelta(minutes=10)
+
+
+async def test_abort_orphan_runs(db):
+    from app.models import CheckinIngestRun, IngestRunStatus
+    async with SessionLocal() as s:
+        h = CheckinHotel(name="Z"); s.add(h); await s.flush()
+        run = CheckinIngestRun(status=IngestRunStatus.RUNNING, recorders_total=1, current="идёт")
+        s.add(run)
+        s.add(CheckinClip(hotel_id=h.id, recorder_id=1, channel_id=60, day=dt.date(2026, 7, 2),
+                          start_ts=dt.datetime(2026, 7, 2, 2, 51), end_ts=dt.datetime(2026, 7, 2, 3, 1),
+                          path="x.mp4", status=ClipStatus.PENDING))
+        await s.commit()
+
+    await checkin_ingest.abort_orphan_runs()
+
+    async with SessionLocal() as s:
+        run = (await s.execute(__import__("sqlalchemy").select(CheckinIngestRun))).scalars().first()
+        assert run.status == IngestRunStatus.ERROR and run.finished_at is not None
+        clip = (await s.execute(__import__("sqlalchemy").select(CheckinClip))).scalars().first()
+        assert clip.status == ClipStatus.ERROR

@@ -369,10 +369,14 @@ async def cancel_ingest(session: AsyncSession = Depends(get_session)):
     ).scalar_one_or_none()
     if run is None:
         return {"ok": False, "message": "Нет активного прогона"}
+    # Сигналим живой задаче (убьёт ffmpeg) И сразу финализируем запись — чтобы
+    # «зомби»-прогон после перезапуска сервера тоже гарантированно закрылся.
     checkin_ingest.request_cancel(run.id)
-    run.current = "Отмена…"
+    run.status = "canceled"
+    run.current = "Отменено"
+    run.finished_at = dt.datetime.now(dt.timezone.utc)
     await session.commit()
-    return {"ok": True, "message": "Отмена запрошена"}
+    return {"ok": True, "message": "Отменено"}
 
 
 @router.get("/api/checkin/ingest/status")

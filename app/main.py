@@ -33,6 +33,8 @@ BASE_DIR = Path(__file__).resolve().parent
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    from app.services import checkin_ingest
+    await checkin_ingest.abort_orphan_runs()  # чистим зомби-прогоны после рестарта
     start_scheduler()
     await configure_checkin_job()
     bot_task = asyncio.create_task(bot.run_bot())
