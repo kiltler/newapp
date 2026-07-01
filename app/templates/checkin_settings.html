@@ -85,18 +85,20 @@
           </td>
         </tr>
       {% else %}
-        <tr><td colspan="5" class="muted">Каналы не добавлены. Нажмите «Проверить подключение» — каналы и track-id подтянутся с устройства.</td></tr>
+        <tr><td colspan="5" class="muted">Каналы не добавлены. Введите № канала вручную ниже, либо нажмите «Проверить подключение» — тогда каналы и track-id подтянутся с устройства как подсказки.</td></tr>
       {% endfor %}
       </tbody>
     </table>
 
-    {# ── Добавить канал (селекты заполняются после теста) ── #}
+    {# ── Добавить канал: ручной ввод + подсказки из теста (datalist) ── #}
     <div class="collect-controls" style="margin-top:8px">
-      <select id="newch_ch{{r.id}}" class="loc-sel" style="min-width:160px"><option value="">— канал —</option></select>
+      <input id="newch_ch{{r.id}}" type="number" min="1" list="chlist{{r.id}}" class="loc-sel" style="width:150px" placeholder="№ канала">
+      <datalist id="chlist{{r.id}}"></datalist>
       <select id="newch_role{{r.id}}" class="loc-sel">
         {% for rk, rn in role_names.items() %}<option value="{{ rk }}">{{ rn }}</option>{% endfor %}
       </select>
-      <select id="newch_trk{{r.id}}" class="loc-sel" style="min-width:150px"><option value="">— субпоток —</option></select>
+      <input id="newch_trk{{r.id}}" type="number" list="trklist{{r.id}}" class="loc-sel" style="width:180px" placeholder="trackid (авто ..02)">
+      <datalist id="trklist{{r.id}}"></datalist>
       <button class="mini" onclick="addChannel({{r.id}})">+ Канал</button>
     </div>
   </div>
@@ -189,25 +191,24 @@ async function testRecorder(id){
   const d = await postJSON("/api/checkin/test-recorder", body);
   if (!d) { el.textContent = "ошибка запроса"; return; }
   el.textContent = d.message; el.style.color = d.ok ? "var(--ok)" : "var(--err)";
-  // Заполняем выпадающие списки каналов и субпотоков
-  const chSel = document.getElementById("newch_ch"+id);
-  const trkSel = document.getElementById("newch_trk"+id);
+  // Заполняем подсказки (datalist) для ручного ввода канала и субпотока
+  const chList = document.getElementById("chlist"+id);
+  const trkList = document.getElementById("trklist"+id);
   if (d.channels && d.channels.length){
-    chSel.innerHTML = '<option value="">— канал —</option>' +
-      d.channels.map(c => `<option value="${c.channel_id}">${c.channel_id} · ${c.name}</option>`).join("");
+    chList.innerHTML = d.channels.map(c => `<option value="${c.channel_id}">канал ${c.channel_id} · ${c.name}</option>`).join("");
   }
   if (d.tracks && d.tracks.length){
     const subs = d.tracks.filter(t => t.is_sub);
     const list = (subs.length ? subs : d.tracks);
-    trkSel.innerHTML = '<option value="">— субпоток —</option>' +
-      list.map(t => `<option value="${t.trackid}">track ${t.trackid} (кан.${t.channel}${t.is_sub?', суб':''})</option>`).join("");
+    trkList.innerHTML = list.map(t => `<option value="${t.trackid}">track ${t.trackid} (кан.${t.channel}${t.is_sub?', суб':''})</option>`).join("");
   }
 }
 
 // ── Каналы ──
 async function addChannel(recId){
-  const ch = v("newch_ch"+recId); if (ch === ""){ alert("Выберите канал (или проверьте подключение)"); return; }
-  const trk = v("newch_trk"+recId);
+  const ch = v("newch_ch"+recId).trim();
+  if (ch === "" || isNaN(+ch)){ alert("Введите номер канала (например 1)"); return; }
+  const trk = v("newch_trk"+recId).trim();
   const body = {recorder_id:recId, channel_id:+ch, role:v("newch_role"+recId),
                 substream_trackid: trk ? +trk : (+ch*100+2)};
   if (await postJSON("/api/checkin/channels", body)) location.reload();

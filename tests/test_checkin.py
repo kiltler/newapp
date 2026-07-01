@@ -274,3 +274,19 @@ async def test_log_delete_and_page(db):
     from app.models import CheckinLog
     async with SessionLocal() as s:
         assert (await s.execute(__import__("sqlalchemy").select(CheckinLog))).scalars().first() is None
+
+
+async def test_channel_manual_add_auto_trackid_and_duplicate(db):
+    async with _client() as c:
+        hid = (await c.post("/api/checkin/hotels", json={"name": "Гост М"})).json()["id"]
+        rid = (await c.post("/api/checkin/recorders", json={
+            "hotel_id": hid, "host": "10.0.0.9", "model_type": "ds7616ni_e2"})).json()["id"]
+        # ручной ввод только номера канала — trackid должен проставиться авто (1→102)
+        r = await c.post("/api/checkin/channels", json={"recorder_id": rid, "channel_id": 1, "role": "entrance"})
+        assert r.status_code == 200
+        # дубликат того же канала — дружелюбный 409, а не 500
+        r2 = await c.post("/api/checkin/channels", json={"recorder_id": rid, "channel_id": 1, "role": "entrance"})
+        assert r2.status_code == 409
+    async with SessionLocal() as s:
+        ch = (await s.execute(__import__("sqlalchemy").select(CheckinChannel))).scalars().first()
+        assert ch.substream_trackid == 102

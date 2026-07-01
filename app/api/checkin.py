@@ -13,6 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -258,12 +259,18 @@ async def create_channel(data: schemas.CheckinChannelIn, session: AsyncSession =
     _validate_channel(data)
     if await session.get(CheckinRecorder, data.recorder_id) is None:
         raise HTTPException(404, "Регистратор не найден")
+    # авто-trackid субпотока, если не задан: канал*100+2 (напр. кан.1 → 102)
+    trackid = data.substream_trackid or (data.channel_id * 100 + 2)
     ch = CheckinChannel(
         recorder_id=data.recorder_id, channel_id=data.channel_id, name=data.name,
-        role=data.role, substream_trackid=data.substream_trackid, enabled=data.enabled,
+        role=data.role, substream_trackid=trackid, enabled=data.enabled,
     )
     session.add(ch)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(409, f"Канал {data.channel_id} уже добавлен для этого регистратора")
     return {"id": ch.id}
 
 
