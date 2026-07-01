@@ -377,6 +377,67 @@ class HikvisionClient(NVRClient):
             position += page
         return segments
 
+    async def search_playback(
+        self, channel_id: int, start: dt.datetime, end: dt.datetime, *, substream: bool = True
+    ) -> list[dict]:
+        """Ищет записанные сегменты трека и возвращает их ГОТОВЫЙ playbackURI с
+        устройства (там верный trackid и формат времени самого регистратора).
+
+        Возвращает [{'start': dt, 'end': dt, 'uri': 'rtsp://ip/Streaming/tracks/..'}].
+        """
+        track_id = channel_id * 100 + (2 if substream else 1)
+        search_id = str(uuid.uuid4())
+        out: list[dict] = []
+        position, page = 0, 200
+        for _ in range(50):
+            body = (
+                '<?xml version="1.0" encoding="utf-8"?>'
+                "<CMSearchDescription>"
+                f"<searchID>{search_id}</searchID>"
+                f"<trackList><trackID>{track_id}</trackID></trackList>"
+                "<timeSpanList><timeSpan>"
+                f"<startTime>{start.strftime('%Y-%m-%dT%H:%M:%SZ')}</startTime>"
+                f"<endTime>{end.strftime('%Y-%m-%dT%H:%M:%SZ')}</endTime>"
+                "</timeSpan></timeSpanList>"
+                f"<maxResults>{page}</maxResults>"
+                f"<searchResultPosition>{position}</searchResultPosition>"
+                "</CMSearchDescription>"
+            )
+            resp = await self._request(
+                "POST", "/ISAPI/ContentMgmt/search", data=body,
+                headers={"Content-Type": "application/xml"},
+            )
+            if resp.status_code in (400, 404):
+                raise FeatureUnavailable(f"search: HTTP {resp.status_code}")
+            if resp.status_code != 200:
+                raise FeatureUnavailable(f"search: HTTP {resp.status_code}")
+            root = _strip_ns(_body(resp))
+            matches = root.findall(".//searchMatchItem")
+            for m in matches:
+                ts = m.find(".//timeSpan")
+                st = _text(ts, "startTime") if ts is not None else None
+                en = _text(ts, "endTime") if ts is not None else None
+                uri = _text(m, "playbackURI")
+                if st and en:
+                    out.append({
+                        "start": _parse_hik_time(st), "end": _parse_hik_time(en),
+                        "uri": (uri or "").strip(),
+                    })
+            status_str = (_text(root, "responseStatusStrg") or "").upper()
+            if len(matches) < page or status_str == "OK":
+                break
+            position += page
+        return out
+
+    def authed_rtsp(self, uri: str) -> str:
+        """Вставляет логин/пароль в rtsp://host/... → rtsp://user:pass@host/..."""
+        if not uri.startswith("rtsp://"):
+            return uri
+        rest = uri[len("rtsp://"):]
+        if "@" in rest.split("/", 1)[0]:
+            return uri  # креды уже есть
+        return f"rtsp://{quote(self.username, safe='')}:{quote(self.password, safe='')}@{rest}"
+
     async def search_activity(
         self, channel_id: int, start: dt.datetime, end: dt.datetime, *, mode: str = "all"
     ) -> list[ArchiveSegment]:

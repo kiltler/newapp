@@ -15,6 +15,7 @@ import asyncio
 import datetime as dt
 import logging
 import os
+import re
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -272,6 +273,38 @@ async def _ffmpeg_download(
     return True, ""
 
 
+def _rewrite_uri_window(uri: str, start: dt.datetime, end: dt.datetime) -> str:
+    """Подменяет starttime/endtime в playbackURI устройства на нужное окно."""
+    st = start.strftime("%Y%m%dT%H%M%SZ")
+    en = end.strftime("%Y%m%dT%H%M%SZ")
+    if "starttime=" in uri:
+        uri = re.sub(r"starttime=[^&]*", "starttime=" + st, uri)
+    if "endtime=" in uri:
+        uri = re.sub(r"endtime=[^&]*", "endtime=" + en, uri)
+    return uri
+
+
+async def _test_clip_jobs(client, ch, search_start, search_end, minutes) -> list[tuple]:
+    """Для тест-клипа: спрашиваем у устройства реально записанные сегменты
+    субпотока и берём ПОСЛЕДНИЕ N минут по РОДНОМУ playbackURI (верный trackid и
+    время самого регистратора → без догадок про TZ/трек)."""
+    try:
+        segs = await client.search_playback(ch.channel_id, search_start, search_end, substream=True)
+        if not segs:
+            segs = await client.search_playback(ch.channel_id, search_start, search_end, substream=False)
+    except NVRError as exc:
+        log.info("рег.кан.%s: playback-поиск недоступен: %s", ch.channel_id, exc)
+        return []
+    if not segs:
+        return []
+    latest = max(segs, key=lambda x: x["end"])
+    win_end = latest["end"]
+    win_start = max(win_end - dt.timedelta(minutes=minutes), latest["start"])
+    uri = latest.get("uri") or ""
+    uri = client.authed_rtsp(_rewrite_uri_window(uri, win_start, win_end)) if uri else None
+    return [(ArchiveSegment(win_start, win_end), uri)]
+
+
 def clip_path(recorder: CheckinRecorder, hotel_id: int, channel_id: int, seg: ArchiveSegment) -> str:
     day = seg.start.strftime("%Y-%m-%d")
     fname = f"{seg.start.strftime('%H%M%S')}-{seg.end.strftime('%H%M%S')}.mp4"
@@ -281,9 +314,12 @@ def clip_path(recorder: CheckinRecorder, hotel_id: int, channel_id: int, seg: Ar
 async def _ingest_segment(
     session: AsyncSession, client: HikvisionClient, recorder: CheckinRecorder,
     hotel_id: int, ch: CheckinChannel, seg: ArchiveSegment,
-    run_id: int | None = None, label: str = "",
+    run_id: int | None = None, label: str = "", playback_uri: str | None = None,
 ) -> tuple[str, str]:
-    """Идемпотентно качает один сегмент. Возвращает (статус, ошибка)."""
+    """Идемпотентно качает один сегмент. Возвращает (статус, ошибка).
+
+    playback_uri — готовый RTSP-URI от устройства (тогда без перебора trackid).
+    """
     existing = (
         await session.execute(
             select(CheckinClip).where(
@@ -300,13 +336,20 @@ async def _ingest_segment(
     out_path = clip_path(recorder, hotel_id, ch.channel_id, seg)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     duration = (seg.end - seg.start).total_seconds()
-    # Кандидаты trackid: заданный → субпоток канала (N*100+2) → основной (N*100+1).
-    # Устойчивость к неверно введённому/угаданному trackid (частый источник 404).
     ch_num = ch.channel_id
-    candidates: list[int] = []
-    for t in (ch.substream_trackid, ch_num * 100 + 2, ch_num * 100 + 1):
-        if t and t not in candidates:
-            candidates.append(t)
+    if playback_uri:
+        # Готовый URI устройства — грузим по нему, без перебора trackid.
+        url_candidates: list[tuple[int | None, str]] = [(None, playback_uri)]
+    else:
+        # Кандидаты trackid: заданный → субпоток (N*100+2) → основной (N*100+1).
+        tids: list[int] = []
+        for t in (ch.substream_trackid, ch_num * 100 + 2, ch_num * 100 + 1):
+            if t and t not in tids:
+                tids.append(t)
+        url_candidates = [
+            (t, client.rtsp_playback_url(t, seg.start, seg.end, rtsp_port=recorder.rtsp_port))
+            for t in tids
+        ]
 
     clip = existing or CheckinClip(
         hotel_id=hotel_id, recorder_id=recorder.id, channel_id=ch.channel_id, role=ch.role,
@@ -320,18 +363,16 @@ async def _ingest_segment(
     await session.commit()
 
     ok, err, used_track = False, "не начато", None
-    for trackid in candidates:
-        url = client.rtsp_playback_url(trackid, seg.start, seg.end, rtsp_port=recorder.rtsp_port)
+    for tid, url in url_candidates:
         for attempt in range(_DOWNLOAD_RETRIES + 1):
             ok, err = await _ffmpeg_download(url, out_path, duration, run_id, label, seg)
-            # 404/нет-данных/отмена — ретраить тот же trackid бессмысленно
             if ok or _try_next_track(err) or err == _CANCEL_MSG:
                 break
             await asyncio.sleep(1.0 * (attempt + 1))
         if err == _CANCEL_MSG:
-            break  # при отмене не перебираем trackid
+            break  # при отмене не перебираем
         if ok:
-            used_track = trackid
+            used_track = tid
             break
         if not _try_next_track(err):
             break  # ошибка не про трек/данные (auth и т.п.) — смена trackid не поможет
@@ -340,7 +381,7 @@ async def _ingest_segment(
         clip.status = ClipStatus.OK
         clip.size_bytes = os.path.getsize(out_path)
         clip.error = None
-        # авто-обучение: запоминаем рабочий trackid, чтобы не перебирать в след. раз
+        # авто-обучение trackid (только когда собирали URL сами)
         if used_track and ch.substream_trackid != used_track:
             log.info("рег.%s кан.%s: рабочий trackid субпотока = %s (сохранён)",
                      recorder.id, ch_num, used_track)
@@ -387,16 +428,20 @@ async def ingest_recorder(
         try:
             client = build_recorder_client(recorder)
             use_whole = whole
-            if test_minutes is not None:
-                # Тест-клип: окно в UTC. Hikvision RTSP playback ждёт время в GMT/UTC
-                # (суффикс Z). utcnow даёт правильный момент, если сервер синхронизирован
-                # по NTP (тот же принцип, что у рабочего прогона «За вчера»).
-                win_end = dt.datetime.utcnow()
-                win_start = win_end - dt.timedelta(minutes=test_minutes)
-                use_whole = True
+            test_mode = test_minutes is not None
+            search_start = search_end = None
+            if test_mode:
+                # Тест-клип: якорь — ЧАСЫ РЕГИСТРАТОРА (get_device_time). Затем спросим
+                # у устройства реально записанные сегменты субпотока и качаем по родному
+                # playbackURI — без догадок про часовой пояс и trackid.
+                try:
+                    anchor = await client.get_device_time()
+                except NVRError:
+                    anchor = dt.datetime.utcnow()
+                search_start = anchor - dt.timedelta(hours=18)
+                search_end = anchor + dt.timedelta(hours=2)
                 await _patch_run(run_id, rec_id=recorder_id,
-                                 current=f"{label}: тяну последние {test_minutes} мин "
-                                         f"(UTC {win_start.strftime('%H:%M')}–{win_end.strftime('%H:%M')})")
+                                 current=f"{label}: часы регистратора {anchor.strftime('%d.%m %H:%M')}, ищу свежую запись")
             elif window is not None:
                 win_start, win_end = window
             else:
@@ -413,22 +458,32 @@ async def ingest_recorder(
                 if is_cancelled(run_id):
                     break
                 await _patch_run(run_id, current=f"{label}: канал {ch.channel_id} ({idx}/{len(channels)}), скачано {stats['downloaded']}")
-                if use_whole:
-                    segments = [ArchiveSegment(win_start, win_end)]
+                if test_mode:
+                    jobs = await _test_clip_jobs(client, ch, search_start, search_end, test_minutes)
+                    if not jobs:
+                        stats["errors"] += 1
+                        await _patch_run(run_id, incs={"errors": 1}, rec_id=recorder_id,
+                                         rec_incs={"errors": 1, "channels_done": 1},
+                                         error_sample=f"кан.{ch.channel_id}: нет записанного субпотока за последние 18ч "
+                                                      "(включена ли запись субпотока на этом канале?)")
+                        continue
+                elif use_whole:
+                    jobs = [(ArchiveSegment(win_start, win_end), None)]
                 else:
                     try:
-                        segments = await find_activity(client, recorder, ch.channel_id, win_start, win_end)
+                        segs = await find_activity(client, recorder, ch.channel_id, win_start, win_end)
                     except NVRError as exc:
                         stats["errors"] += 1
                         await _patch_run(run_id, incs={"errors": 1}, rec_id=recorder_id,
-                                         rec_incs={"errors": 1}, error_sample=f"кан.{ch.channel_id}: поиск: {exc}")
+                                         rec_incs={"errors": 1, "channels_done": 1},
+                                         error_sample=f"кан.{ch.channel_id}: поиск: {exc}")
                         log.warning("рег.%s кан.%s: поиск сорвался: %s", recorder.id, ch.channel_id, exc)
-                        await _patch_run(run_id, rec_id=recorder_id, rec_incs={"channels_done": 1})
                         continue
-                for seg in segments:
+                    jobs = [(s, None) for s in segs]
+                for seg, uri in jobs:
                     res, err = await _ingest_segment(
                         session, client, recorder, recorder.hotel_id, ch, seg,
-                        run_id=run_id, label=label)
+                        run_id=run_id, label=label, playback_uri=uri)
                     if res == "ok":
                         stats["downloaded"] += 1
                         await _patch_run(run_id, incs={"downloaded": 1}, rec_id=recorder_id, rec_incs={"downloaded": 1})
