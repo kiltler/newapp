@@ -166,6 +166,12 @@ async def find_activity(
 
 
 # ── Скачивание одного клипа через ffmpeg ─────────────────────────────────────
+def _track_not_found(err: str) -> bool:
+    """Ошибка ffmpeg про несуществующий трек (404) — тогда пробуем другой trackid."""
+    e = (err or "").lower()
+    return "404" in e or "not found" in e
+
+
 async def _run_ffmpeg(url: str, out_path: str, duration_s: float) -> tuple[bool, str]:
     """ffmpeg -c copy (без перекодирования). Возвращает (успех, текст ошибки)."""
     cmd = [
@@ -223,9 +229,14 @@ async def _ingest_segment(
 
     out_path = clip_path(recorder, hotel_id, ch.channel_id, seg)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    trackid = ch.substream_trackid or (ch.channel_id * 100 + 2)
-    url = client.rtsp_playback_url(trackid, seg.start, seg.end, rtsp_port=recorder.rtsp_port)
     duration = (seg.end - seg.start).total_seconds()
+    # Кандидаты trackid: заданный → субпоток канала (N*100+2) → основной (N*100+1).
+    # Устойчивость к неверно введённому/угаданному trackid (частый источник 404).
+    ch_num = ch.channel_id
+    candidates: list[int] = []
+    for t in (ch.substream_trackid, ch_num * 100 + 2, ch_num * 100 + 1):
+        if t and t not in candidates:
+            candidates.append(t)
 
     clip = existing or CheckinClip(
         hotel_id=hotel_id, recorder_id=recorder.id, channel_id=ch.channel_id, role=ch.role,
@@ -238,17 +249,29 @@ async def _ingest_segment(
         session.add(clip)
     await session.commit()
 
-    ok, err = False, "не начато"
-    for attempt in range(_DOWNLOAD_RETRIES + 1):
-        ok, err = await _run_ffmpeg(url, out_path, duration)
+    ok, err, used_track = False, "не начато", None
+    for trackid in candidates:
+        url = client.rtsp_playback_url(trackid, seg.start, seg.end, rtsp_port=recorder.rtsp_port)
+        for attempt in range(_DOWNLOAD_RETRIES + 1):
+            ok, err = await _run_ffmpeg(url, out_path, duration)
+            if ok or _track_not_found(err):
+                break  # 404 — ретраить тот же trackid бессмысленно
+            await asyncio.sleep(1.0 * (attempt + 1))
         if ok:
+            used_track = trackid
             break
-        await asyncio.sleep(1.0 * (attempt + 1))
+        if not _track_not_found(err):
+            break  # ошибка не про несуществующий трек (auth/timeout) — смена trackid не поможет
 
     if ok:
         clip.status = ClipStatus.OK
         clip.size_bytes = os.path.getsize(out_path)
         clip.error = None
+        # авто-обучение: запоминаем рабочий trackid, чтобы не перебирать в след. раз
+        if used_track and ch.substream_trackid != used_track:
+            log.info("рег.%s кан.%s: рабочий trackid субпотока = %s (сохранён)",
+                     recorder.id, ch_num, used_track)
+            ch.substream_trackid = used_track
     else:
         clip.status = ClipStatus.ERROR
         clip.error = err

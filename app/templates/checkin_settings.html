@@ -92,7 +92,8 @@
 
     {# ── Добавить канал: ручной ввод + подсказки из теста (datalist) ── #}
     <div class="collect-controls" style="margin-top:8px">
-      <input id="newch_ch{{r.id}}" type="number" min="1" list="chlist{{r.id}}" class="loc-sel" style="width:150px" placeholder="№ канала">
+      <input id="newch_ch{{r.id}}" type="number" min="1" list="chlist{{r.id}}" class="loc-sel" style="width:150px" placeholder="№ канала"
+             oninput="document.getElementById('newch_trk{{r.id}}').placeholder = this.value ? ('субпоток '+(this.value*100+2)) : 'trackid (авто ..02)'">
       <datalist id="chlist{{r.id}}"></datalist>
       <select id="newch_role{{r.id}}" class="loc-sel">
         {% for rk, rn in role_names.items() %}<option value="{{ rk }}">{{ rn }}</option>{% endfor %}

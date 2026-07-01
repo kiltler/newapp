@@ -340,3 +340,41 @@ async def test_ingestion_run_tracks_progress(db, monkeypatch, tmp_path):
         d = (await c.get("/api/checkin/ingest/status")).json()
         assert d["exists"] and d["status"] == "done"
         assert d["downloaded"] == 1 and d["errors"] == 1 and d["percent"] == 100
+
+
+async def test_trackid_fallback_and_autolearn(db, monkeypatch, tmp_path):
+    monkeypatch.setattr(checkin_ingest.settings, "clips_dir", str(tmp_path))
+    async with SessionLocal() as s:
+        h = CheckinHotel(name="Гост Т"); s.add(h); await s.flush()
+        rec = CheckinRecorder(hotel_id=h.id, host="10.0.0.8", model_type="ds7616ni_e2",
+                              night_start="07:00", night_end="24:00")
+        s.add(rec); await s.flush()
+        # заведомо неверный trackid (как «60» у пользователя) при канале 60
+        s.add(CheckinChannel(recorder_id=rec.id, channel_id=60, substream_trackid=60))
+        await s.commit(); rid = rec.id
+
+    seg = ArchiveSegment(dt.datetime(2026, 6, 15, 8, 0, 0), dt.datetime(2026, 6, 15, 8, 0, 30))
+
+    class FakeClient:
+        async def search_activity(self, ch, a, b, *, mode="all"):
+            return [seg]
+        def rtsp_playback_url(self, trackid, a, b, *, rtsp_port=554):
+            return f"rtsp://fake/{trackid}"
+
+    monkeypatch.setattr(checkin_ingest, "build_recorder_client", lambda rec, password=None: FakeClient())
+
+    async def fake_ffmpeg(url, out_path, duration_s):
+        tid = url.rsplit("/", 1)[-1]
+        if tid == "6002":                       # правильный субпоток канала 60
+            with open(out_path, "wb") as fh:
+                fh.write(b"OK")
+            return True, ""
+        return False, "ffmpeg: Server returned 404 Not Found"
+
+    monkeypatch.setattr(checkin_ingest, "_run_ffmpeg", fake_ffmpeg)
+
+    st = await checkin_ingest.ingest_recorder(dt.date(2026, 6, 15), rid)
+    assert st["downloaded"] == 1  # перебор кандидатов нашёл рабочий trackid 6002
+    async with SessionLocal() as s:
+        ch = (await s.execute(__import__("sqlalchemy").select(CheckinChannel))).scalars().first()
+        assert ch.substream_trackid == 6002  # авто-запомнили рабочий trackid
