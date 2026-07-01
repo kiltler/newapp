@@ -207,6 +207,23 @@ async def _run_ffmpeg(url: str, out_path: str, duration_s: float) -> tuple[bool,
     return True, ""
 
 
+async def _download_monitored(
+    url: str, out_path: str, duration_s: float, run_id: int | None, label: str, seg: ArchiveSegment
+) -> tuple[bool, str]:
+    """Качает клип и раз в 2с обновляет прогресс размером файла — видно, что идёт."""
+    task = asyncio.create_task(_run_ffmpeg(url, out_path, duration_s))
+    span = f"{seg.start.strftime('%H:%M:%S')}–{seg.end.strftime('%H:%M:%S')}"
+    while True:
+        done, _ = await asyncio.wait({task}, timeout=2.0)
+        try:
+            sz = os.path.getsize(out_path) if os.path.exists(out_path) else 0
+        except OSError:
+            sz = 0
+        await _patch_run(run_id, current=f"{label}: качается {span} — {sz / 1048576:.1f} МБ")
+        if task in done:
+            return task.result()
+
+
 def clip_path(recorder: CheckinRecorder, hotel_id: int, channel_id: int, seg: ArchiveSegment) -> str:
     day = seg.start.strftime("%Y-%m-%d")
     fname = f"{seg.start.strftime('%H%M%S')}-{seg.end.strftime('%H%M%S')}.mp4"
@@ -216,8 +233,9 @@ def clip_path(recorder: CheckinRecorder, hotel_id: int, channel_id: int, seg: Ar
 async def _ingest_segment(
     session: AsyncSession, client: HikvisionClient, recorder: CheckinRecorder,
     hotel_id: int, ch: CheckinChannel, seg: ArchiveSegment,
-) -> str:
-    """Идемпотентно качает один сегмент. Возвращает статус: ok|skip|error."""
+    run_id: int | None = None, label: str = "",
+) -> tuple[str, str]:
+    """Идемпотентно качает один сегмент. Возвращает (статус, ошибка)."""
     existing = (
         await session.execute(
             select(CheckinClip).where(
@@ -257,7 +275,7 @@ async def _ingest_segment(
     for trackid in candidates:
         url = client.rtsp_playback_url(trackid, seg.start, seg.end, rtsp_port=recorder.rtsp_port)
         for attempt in range(_DOWNLOAD_RETRIES + 1):
-            ok, err = await _run_ffmpeg(url, out_path, duration)
+            ok, err = await _download_monitored(url, out_path, duration, run_id, label, seg)
             if ok or _track_not_found(err):
                 break  # 404 — ретраить тот же trackid бессмысленно
             await asyncio.sleep(1.0 * (attempt + 1))
@@ -343,7 +361,9 @@ async def ingest_recorder(
                         await _patch_run(run_id, rec_id=recorder_id, rec_incs={"channels_done": 1})
                         continue
                 for seg in segments:
-                    res, err = await _ingest_segment(session, client, recorder, recorder.hotel_id, ch, seg)
+                    res, err = await _ingest_segment(
+                        session, client, recorder, recorder.hotel_id, ch, seg,
+                        run_id=run_id, label=label)
                     if res == "ok":
                         stats["downloaded"] += 1
                         await _patch_run(run_id, incs={"downloaded": 1}, rec_id=recorder_id, rec_incs={"downloaded": 1})
