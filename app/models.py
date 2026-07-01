@@ -489,3 +489,180 @@ DISK_LOCATIONS = {
 }
 
 WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+
+
+# ── Модуль «Заселения» (ingestion субпотока + учёт заселений + сверка с 1С) ──
+class RecorderModel:
+    """Типы регистраторов модуля заселений."""
+    E2 = "ds7616ni_e2"       # Hikvision DS-7616NI-E2/8P — аналитики нет, motion-поиск
+    H332 = "dsh332_2q"       # HiWatch DS-H332/2Q(B) — есть аналитика «человек»
+
+
+# analytics_capable по умолчанию из типа регистратора
+RECORDER_ANALYTICS_DEFAULT = {
+    RecorderModel.E2: False,
+    RecorderModel.H332: True,
+}
+RECORDER_MODEL_NAMES = {
+    RecorderModel.E2: "Hikvision DS-7616NI-E2/8P",
+    RecorderModel.H332: "HiWatch DS-H332/2Q(B)",
+}
+
+
+class ChannelRole:
+    ENTRANCE = "entrance"
+    RECEPTION = "reception"
+
+
+CHANNEL_ROLE_NAMES = {ChannelRole.ENTRANCE: "вход", ChannelRole.RECEPTION: "ресепшн"}
+
+
+class ClipStatus:
+    PENDING = "pending"
+    OK = "ok"
+    ERROR = "error"
+
+
+class CheckinVerdict:
+    CHECKIN = "checkin"
+    NOT = "not"
+    DISPUTED = "disputed"
+
+
+class NotificationStatus:
+    NEW = "new"
+    SEEN = "seen"
+    RESOLVED = "resolved"
+
+
+class CheckinHotel(Base):
+    """Гостиница."""
+
+    __tablename__ = "checkin_hotels"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(255))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    recorders: Mapped[list["CheckinRecorder"]] = relationship(
+        back_populates="hotel", cascade="all, delete-orphan"
+    )
+
+
+class CheckinRecorder(Base):
+    """Регистратор гостиницы (реквизиты подключения + ночное окно)."""
+
+    __tablename__ = "checkin_recorders"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    hotel_id: Mapped[int] = mapped_column(ForeignKey("checkin_hotels.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(255), default="")
+    host: Mapped[str] = mapped_column(String(255))
+    http_port: Mapped[int] = mapped_column(Integer, default=80)
+    rtsp_port: Mapped[int] = mapped_column(Integer, default=554)
+    username: Mapped[str] = mapped_column(String(255), default="admin")
+    password_enc: Mapped[str] = mapped_column(Text, default="")
+    model_type: Mapped[str] = mapped_column(String(32), default=RecorderModel.E2)
+    analytics_capable: Mapped[bool] = mapped_column(Boolean, default=False)
+    night_start: Mapped[str] = mapped_column(String(5), default="07:00")  # HH:MM
+    night_end: Mapped[str] = mapped_column(String(5), default="24:00")    # HH:MM (24:00 = конец суток)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_test_ok: Mapped[bool | None] = mapped_column(Boolean, default=None)
+    last_test_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    last_test_msg: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    hotel: Mapped["CheckinHotel"] = relationship(back_populates="recorders")
+    channels: Mapped[list["CheckinChannel"]] = relationship(
+        back_populates="recorder", cascade="all, delete-orphan"
+    )
+
+
+class CheckinChannel(Base):
+    """Канал интереса (вход/ресепшн) с track-id субпотока."""
+
+    __tablename__ = "checkin_channels"
+    __table_args__ = (UniqueConstraint("recorder_id", "channel_id", name="uq_checkin_channel"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    recorder_id: Mapped[int] = mapped_column(ForeignKey("checkin_recorders.id", ondelete="CASCADE"))
+    channel_id: Mapped[int] = mapped_column(Integer)
+    name: Mapped[str | None] = mapped_column(String(255), default=None)
+    role: Mapped[str] = mapped_column(String(16), default=ChannelRole.ENTRANCE)
+    substream_trackid: Mapped[int] = mapped_column(Integer, default=0)  # напр. 102 = кан.1 субпоток
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    recorder: Mapped["CheckinRecorder"] = relationship(back_populates="channels")
+
+
+class CheckinClip(Base):
+    """Скачанный клип субпотока (метаданные + статус загрузки)."""
+
+    __tablename__ = "checkin_clips"
+    __table_args__ = (
+        UniqueConstraint("recorder_id", "channel_id", "start_ts", "end_ts", name="uq_checkin_clip"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    hotel_id: Mapped[int] = mapped_column(ForeignKey("checkin_hotels.id", ondelete="CASCADE"))
+    recorder_id: Mapped[int] = mapped_column(ForeignKey("checkin_recorders.id", ondelete="CASCADE"))
+    channel_id: Mapped[int] = mapped_column(Integer)
+    role: Mapped[str] = mapped_column(String(16), default=ChannelRole.ENTRANCE)
+    day: Mapped[dt.date] = mapped_column(Date)
+    start_ts: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    end_ts: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    path: Mapped[str] = mapped_column(Text, default="")
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(16), default=ClipStatus.PENDING)
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CheckinLog(Base):
+    """Вердикт оператора по клипу/заселению (Фаза 2)."""
+
+    __tablename__ = "checkin_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    clip_id: Mapped[int | None] = mapped_column(ForeignKey("checkin_clips.id", ondelete="SET NULL"), default=None)
+    hotel_id: Mapped[int] = mapped_column(ForeignKey("checkin_hotels.id", ondelete="CASCADE"))
+    day: Mapped[dt.date] = mapped_column(Date)
+    shift: Mapped[str | None] = mapped_column(String(32), default=None)
+    room: Mapped[str | None] = mapped_column(String(32), default=None)
+    event_time: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    verdict: Mapped[str] = mapped_column(String(16), default=CheckinVerdict.CHECKIN)
+    note: Mapped[str | None] = mapped_column(Text, default=None)
+    operator: Mapped[str | None] = mapped_column(String(64), default=None)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CheckinReconciliation(Base):
+    """Результат сверки смены: по камере (оператор) ↔ 1С (Фаза 3)."""
+
+    __tablename__ = "checkin_reconciliation"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    hotel_id: Mapped[int] = mapped_column(ForeignKey("checkin_hotels.id", ondelete="CASCADE"))
+    day: Mapped[dt.date] = mapped_column(Date)
+    shift: Mapped[str | None] = mapped_column(String(32), default=None)
+    camera_count: Mapped[int] = mapped_column(Integer, default=0)
+    ones_count: Mapped[int] = mapped_column(Integer, default=0)
+    delta: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CheckinNotification(Base):
+    """Запись Центра уведомлений (создаётся движком сверки при расхождении)."""
+
+    __tablename__ = "checkin_notifications"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    type: Mapped[str] = mapped_column(String(32), default="shift_discrepancy")
+    hotel_id: Mapped[int | None] = mapped_column(ForeignKey("checkin_hotels.id", ondelete="SET NULL"), default=None)
+    day: Mapped[dt.date | None] = mapped_column(Date, default=None)
+    shift: Mapped[str | None] = mapped_column(String(32), default=None)
+    title: Mapped[str] = mapped_column(Text, default="")
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)  # {camera, ones, delta, clips_url}
+    status: Mapped[str] = mapped_column(String(16), default=NotificationStatus.NEW)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

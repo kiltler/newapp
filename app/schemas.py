@@ -304,3 +304,56 @@ class ArchiveCoverageOut(BaseModel):
     recorded_minutes: int
     largest_gap_minutes: int
     gaps: list = Field(default_factory=list)
+
+
+# ── Модуль «Заселения» ────────────────────────────────────────────────────────
+class CheckinHotelIn(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    enabled: bool = True
+
+
+class CheckinRecorderIn(BaseModel):
+    hotel_id: int
+    name: str = ""
+    host: str = Field(min_length=1, max_length=255)
+    http_port: int = Field(default=80, ge=1, le=65535)
+    rtsp_port: int = Field(default=554, ge=1, le=65535)
+    username: str = "admin"
+    password: str = ""            # пусто при update = не менять
+    model_type: str = "ds7616ni_e2"
+    analytics_capable: bool | None = None   # None = авто по типу
+    night_start: str = "07:00"
+    night_end: str = "24:00"
+    enabled: bool = True
+
+
+class CheckinChannelIn(BaseModel):
+    recorder_id: int
+    channel_id: int = Field(ge=0, le=100000)
+    name: str | None = None
+    role: str = "entrance"
+    substream_trackid: int = 0
+    enabled: bool = True
+
+
+class CheckinScheduleIn(BaseModel):
+    hour: int = Field(ge=0, le=23)
+    minute: int = Field(ge=0, le=59)
+
+
+class RecorderTestIn(BaseModel):
+    """Тест подключения по id (пароль из БД) или по явным реквизитам (до сохранения)."""
+    recorder_id: int | None = None
+    host: str | None = None
+    http_port: int = 80
+    username: str = "admin"
+    password: str = ""
+
+
+class IngestRunIn(BaseModel):
+    day: dt.date | None = None
+    hotel_id: int | None = None
+
+
+class NotificationStatusIn(BaseModel):
+    status: str

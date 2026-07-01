@@ -19,6 +19,9 @@ class Settings(BaseSettings):
 
     # Шифрование
     secret_key: str = ""
+    # Мастер-ключ модуля «Заселения» (приоритетнее secret_key). Если пуст — берётся
+    # secret_key, иначе автогенерация с сохранением в data/secret.key.
+    nvr_secret_key: str = ""
 
     # Планировщик
     poll_interval_minutes: int = 5
@@ -70,6 +73,13 @@ class Settings(BaseSettings):
     # Вход в панель (если admin_password пуст — вход отключён, панель открыта)
     admin_username: str = "admin"
     admin_password: str = ""
+
+    # Модуль «Заселения» (ingestion субпотока)
+    clips_dir: str = "clips"          # корень для скачанных клипов (в Docker монтируется /clips)
+    ffmpeg_bin: str = "ffmpeg"        # бинарь ffmpeg (в образе ставится apt-ом)
+    checkin_segment_padding_sec: int = 10   # добор до/после найденной активности
+    checkin_merge_gap_sec: int = 60         # склеивать соседние сегменты ближе этого
+    checkin_max_segments: int = 300         # предохранитель: клипов на канал за прогон
 
     # Прочее
     log_level: str = "INFO"

@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Заселения — уведомления{% endblock %}
+{% block content %}
+<div class="device-head">
+  <h1>🔔 Центр уведомлений</h1>
+  <a class="bus-btn secondary" href="/checkin">← К клипам</a>
+</div>
+
+<form class="bus-search" method="get">
+  <select name="status">
+    <option value="">Все статусы</option>
+    {% for s, n in {'new':'новые','seen':'просмотренные','resolved':'разобранные'}.items() %}
+      <option value="{{ s }}" {{ 'selected' if f_status == s }}>{{ n }}</option>
+    {% endfor %}
+  </select>
+  <button>Фильтр</button>
+</form>
+
+<table class="grid">
+  <thead><tr><th>Когда</th><th>Тип</th><th>Гостиница</th><th>Смена</th><th>Расхождение</th><th>Статус</th><th></th></tr></thead>
+  <tbody>
+  {% for n in notes %}
+    <tr>
+      <td class="muted">{{ n.created_at | localtime('%d.%m %H:%M') }}</td>
+      <td>{{ n.title or n.type }}</td>
+      <td>{{ hotels.get(n.hotel_id, '—') }}</td>
+      <td>{{ n.shift or '—' }}{% if n.day %} · {{ n.day }}{% endif %}</td>
+      <td>
+        {% if n.payload %}по камере <b>{{ n.payload.get('camera','?') }}</b> / 1С <b>{{ n.payload.get('ones','?') }}</b>
+          <span class="badge {{ 'err' if (n.payload.get('delta',0)|abs) else 'ok' }}">Δ {{ n.payload.get('delta','?') }}</span>
+          {% if n.payload.get('clips_url') %}<a href="{{ n.payload.get('clips_url') }}">клипы смены</a>{% endif %}
+        {% else %}—{% endif %}
+      </td>
+      <td>
+        {% if n.status == 'new' %}<span class="badge warn">новый</span>
+        {% elif n.status == 'seen' %}<span class="badge muted">просмотрен</span>
+        {% else %}<span class="badge ok">разобран</span>{% endif %}
+      </td>
+      <td>
+        {% if n.status != 'seen' %}<button class="mini" onclick="setStatus({{n.id}},'seen')">Просмотрен</button>{% endif %}
+        {% if n.status != 'resolved' %}<button class="mini" onclick="setStatus({{n.id}},'resolved')">Разобран</button>{% endif %}
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="muted">Уведомлений нет. Они появятся при расхождении сверки камеры с 1С (Фаза 3).</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function setStatus(id, status){
+  const r = await fetch(`/api/checkin/notifications/${id}/status`, {
+    method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({status})
+  });
+  if (r.ok) location.reload(); else alert("Ошибка");
+}
+</script>
+{% endblock %}

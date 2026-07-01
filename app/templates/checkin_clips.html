@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Заселения — клипы{% endblock %}
+{% block content %}
+<div class="device-head">
+  <h1>🏨 Заселения — клипы</h1>
+  <div class="device-actions">
+    <a class="bus-btn secondary" href="/checkin/notifications">🔔 Уведомления{% if unread %} <span class="badge err">{{ unread }}</span>{% endif %}</a>
+    <a class="bus-btn secondary" href="/checkin/settings">⚙ Настройки</a>
+    <button onclick="runIngest()">▶ Скачать за вчера</button>
+  </div>
+</div>
+
+<form class="bus-search" method="get">
+  <select name="hotel">
+    <option value="">Все гостиницы</option>
+    {% for h in hotels %}<option value="{{ h.id }}" {{ 'selected' if f_hotel == h.id }}>{{ h.name }}</option>{% endfor %}
+  </select>
+  <input type="date" name="day" value="{{ f_day }}">
+  <select name="channel">
+    <option value="">Все каналы</option>
+    {% for c in channels %}<option value="{{ c }}" {{ 'selected' if f_channel == c }}>канал {{ c }}</option>{% endfor %}
+  </select>
+  <button>Фильтр</button>
+</form>
+
+<div id="playerBox" class="chart-card" style="display:none; margin-bottom:14px;">
+  <video id="player" controls preload="metadata" style="width:100%; max-height:60vh; background:#000; border-radius:10px;"></video>
+  <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:10px;">
+    <span class="muted" id="nowPlaying" style="margin-right:auto"></span>
+    <span class="muted">Скорость:</span>
+    {% for s in [1,2,4,8,12,16] %}<button class="mini spd" data-s="{{ s }}">x{{ s }}</button>{% endfor %}
+    <span class="badge muted" id="spdShow">x1</span>
+  </div>
+  <div class="muted" style="font-size:12px; margin-top:6px;">
+    ← → перемотка ±5с · Shift+← → ±30с · пробел пауза · ↑ ↓ скорость
+  </div>
+</div>
+
+<table class="grid">
+  <thead><tr><th>Гостиница</th><th>Дата</th><th>Канал</th><th>Интервал</th><th>Размер</th><th>Статус</th><th></th></tr></thead>
+  <tbody>
+  {% for c in clips %}
+    <tr>
+      <td>{{ c.hotel }}</td>
+      <td>{{ c.day }}</td>
+      <td>{{ c.channel_id }} <span class="muted">· {{ c.role }}</span></td>
+      <td>{{ c.start.strftime('%H:%M:%S') }}–{{ c.end.strftime('%H:%M:%S') }}</td>
+      <td>{{ c.size_mb }} МБ</td>
+      <td>
+        {% if c.status == 'ok' %}<span class="badge ok">готов</span>
+        {% elif c.status == 'pending' %}<span class="badge warn">качается</span>
+        {% else %}<span class="badge err" title="{{ c.error }}">ошибка</span>{% endif %}
+      </td>
+      <td>{% if c.url %}<button class="mini" onclick="play('{{ c.url }}', '{{ c.hotel }} · кан.{{ c.channel_id }} · {{ c.start.strftime('%H:%M:%S') }}')">▶ Смотреть</button>{% endif %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="muted">Клипов нет. Настройте регистраторы и запустите ingestion.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const player = document.getElementById("player");
+const box = document.getElementById("playerBox");
+const spdShow = document.getElementById("spdShow");
+function play(url, label){
+  box.style.display = "block";
+  document.getElementById("nowPlaying").textContent = label;
+  player.src = url; player.playbackRate = 1; spdShow.textContent = "x1";
+  box.scrollIntoView({behavior:"smooth", block:"start"});
+  player.play().catch(()=>{});
+}
+function setSpeed(s){ player.playbackRate = s; spdShow.textContent = "x"+s; }
+document.querySelectorAll(".spd").forEach(b => b.onclick = () => setSpeed(parseFloat(b.dataset.s)));
+
+const SPEEDS = [1,2,4,8,12,16];
+document.addEventListener("keydown", (e) => {
+  if (box.style.display === "none") return;
+  if (["INPUT","SELECT","TEXTAREA"].includes(document.activeElement.tagName)) return;
+  const step = e.shiftKey ? 30 : 5;
+  if (e.key === "ArrowRight"){ player.currentTime += step; e.preventDefault(); }
+  else if (e.key === "ArrowLeft"){ player.currentTime -= step; e.preventDefault(); }
+  else if (e.key === " "){ player.paused ? player.play() : player.pause(); e.preventDefault(); }
+  else if (e.key === "ArrowUp" || e.key === "ArrowDown"){
+    let i = SPEEDS.indexOf(player.playbackRate);
+    if (i < 0) i = 0;
+    i = e.key === "ArrowUp" ? Math.min(i+1, SPEEDS.length-1) : Math.max(i-1, 0);
+    setSpeed(SPEEDS[i]); e.preventDefault();
+  }
+});
+
+async function runIngest(){
+  if (!confirm("Запустить скачивание клипов за вчерашний день по всем гостиницам?")) return;
+  const r = await fetch("/api/checkin/ingest/run", {method:"POST", headers:{"Content-Type":"application/json"}, body:"{}"});
+  const d = await r.json();
+  alert(d.message || "Запущено");
+}
+</script>
+{% endblock %}

@@ -13,10 +13,12 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.api import auth, backup_api, buses, dashboard, devices, monitoring, plan, users_api
+from app.api import (
+    auth, backup_api, buses, checkin, dashboard, devices, monitoring, plan, users_api,
+)
 from app.config import settings
 from app.database import init_db
-from app.scheduler import shutdown_scheduler, start_scheduler
+from app.scheduler import configure_checkin_job, shutdown_scheduler, start_scheduler
 from app.services import bot
 
 logging.basicConfig(
@@ -32,6 +34,7 @@ BASE_DIR = Path(__file__).resolve().parent
 async def lifespan(app: FastAPI):
     await init_db()
     start_scheduler()
+    await configure_checkin_job()
     bot_task = asyncio.create_task(bot.run_bot())
     log.info("NVR Monitor запущен (mock_mode=%s)", settings.mock_mode)
     try:
@@ -83,6 +86,7 @@ app.include_router(devices.router)
 app.include_router(monitoring.router)
 app.include_router(plan.router)
 app.include_router(buses.router)
+app.include_router(checkin.router)
 app.include_router(users_api.router)
 app.include_router(backup_api.router)
 app.include_router(dashboard.router)
@@ -91,6 +95,12 @@ app.include_router(dashboard.router)
 static_dir = BASE_DIR / "static"
 static_dir.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+# Локальные клипы модуля «Заселения» (за авторизацией; StaticFiles поддерживает
+# Range → перемотка/скраб видео работает). Каталог берётся из настроек.
+clips_dir = Path(settings.clips_dir)
+clips_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/clips", StaticFiles(directory=str(clips_dir)), name="clips")
 
 # Встроенный mock-сервер NVR (только для разработки)
 if settings.mock_mode:

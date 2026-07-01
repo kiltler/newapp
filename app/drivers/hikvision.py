@@ -6,8 +6,14 @@ import logging
 import re
 import uuid
 import xml.etree.ElementTree as ET
+from urllib.parse import quote
 
 import httpx
+
+# Дескрипторы метаданных ISAPI для поиска по типу активности (best-effort;
+# при неподдержке прошивкой сервис откатывается на motion → всё окно целиком).
+_MOTION_DESC = "//recordType.meta.std-cgi.com/motionDetection"
+_HUMAN_DESC = "//recordType.meta.std-cgi.com/humanDetection"
 
 from app.drivers.base import (
     ArchiveSegment,
@@ -294,3 +300,104 @@ class HikvisionClient(NVRClient):
             except ValueError:
                 temp = None
         return HealthInfo(cpu_percent=cpu, memory_percent=mem, temperature_c=temp)
+
+    # ── Модуль «Заселения» ────────────────────────────────────────────────────
+    async def list_tracks(self) -> list[dict]:
+        """Дорожки записи устройства (для выбора trackid субпотока в UI)."""
+        resp = await self._request("GET", "/ISAPI/ContentMgmt/record/tracks")
+        if resp.status_code != 200:
+            raise FeatureUnavailable(f"tracks: HTTP {resp.status_code}")
+        root = _strip_ns(_body(resp))
+        tracks: list[dict] = []
+        for tr in root.findall(".//Track"):
+            tid = _text(tr, "id") or _text(tr, "trackID")
+            if tid is None or not tid.isdigit():
+                continue
+            tid_i = int(tid)
+            ttype = (_text(tr, "TrackType") or _text(tr, "trackType") or "").lower()
+            if ttype and ttype != "video":
+                continue  # интересует только видео-дорожка
+            ch = _text(tr, "Channel") or _text(tr, "channel")
+            tracks.append({
+                "trackid": tid_i,
+                "channel": int(ch) if ch and ch.isdigit() else tid_i // 100,
+                "type": ttype or "video",
+                "is_sub": (tid_i % 100) == 2,
+            })
+        if not tracks:
+            raise FeatureUnavailable("список треков пуст")
+        return sorted(tracks, key=lambda t: t["trackid"])
+
+    async def _search_segments(
+        self, track_id: int, start: dt.datetime, end: dt.datetime, descriptor: str | None = None
+    ) -> list[ArchiveSegment]:
+        """Поиск отрезков записи по треку; при descriptor — только с этой активностью."""
+        search_id = str(uuid.uuid4())
+        meta = (
+            f"<metadataList><metadataDescriptor>{descriptor}</metadataDescriptor></metadataList>"
+            if descriptor else ""
+        )
+        segments: list[ArchiveSegment] = []
+        position, page = 0, 100
+        for _ in range(50):
+            body = (
+                '<?xml version="1.0" encoding="utf-8"?>'
+                "<CMSearchDescription>"
+                f"<searchID>{search_id}</searchID>"
+                f"<trackList><trackID>{track_id}</trackID></trackList>"
+                "<timeSpanList><timeSpan>"
+                f"<startTime>{start.strftime('%Y-%m-%dT%H:%M:%SZ')}</startTime>"
+                f"<endTime>{end.strftime('%Y-%m-%dT%H:%M:%SZ')}</endTime>"
+                "</timeSpan></timeSpanList>"
+                f"<maxResults>{page}</maxResults>"
+                f"<searchResultPosition>{position}</searchResultPosition>"
+                f"{meta}</CMSearchDescription>"
+            )
+            resp = await self._request(
+                "POST", "/ISAPI/ContentMgmt/search", data=body,
+                headers={"Content-Type": "application/xml"},
+            )
+            if resp.status_code in (400, 404):
+                # прошивка не понимает дескриптор/поиск — сигналим фолбэк
+                raise FeatureUnavailable(f"search ({descriptor or 'plain'}): HTTP {resp.status_code}")
+            if resp.status_code != 200:
+                raise FeatureUnavailable(f"search: HTTP {resp.status_code}")
+            root = _strip_ns(_body(resp))
+            matches = root.findall(".//searchMatchItem")
+            for m in matches:
+                ts = m.find(".//timeSpan")
+                if ts is None:
+                    continue
+                st, en = _text(ts, "startTime"), _text(ts, "endTime")
+                if st and en:
+                    segments.append(ArchiveSegment(_parse_hik_time(st), _parse_hik_time(en)))
+            status_str = (_text(root, "responseStatusStrg") or "").upper()
+            if len(matches) < page or status_str == "OK":
+                break
+            position += page
+        return segments
+
+    async def search_activity(
+        self, channel_id: int, start: dt.datetime, end: dt.datetime, *, mode: str = "all"
+    ) -> list[ArchiveSegment]:
+        """Отрезки с активностью на канале за окно. mode: human|motion|all.
+
+        Поиск идёт по основному треку (аналитика/детекция привязаны к нему);
+        качать найденные интервалы будем с лёгкого субпотока.
+        """
+        if mode == "all":
+            return [ArchiveSegment(start, end)]
+        descriptor = _HUMAN_DESC if mode == "human" else _MOTION_DESC
+        return await self._search_segments(channel_id * 100 + 1, start, end, descriptor)
+
+    def rtsp_playback_url(
+        self, trackid: int, start: dt.datetime, end: dt.datetime, *, rtsp_port: int = 554
+    ) -> str:
+        user = quote(self.username, safe="")
+        pwd = quote(self.password, safe="")
+        st = start.strftime("%Y%m%dT%H%M%SZ")
+        en = end.strftime("%Y%m%dT%H%M%SZ")
+        return (
+            f"rtsp://{user}:{pwd}@{self.host}:{rtsp_port}"
+            f"/Streaming/tracks/{trackid}?starttime={st}&endtime={en}"
+        )

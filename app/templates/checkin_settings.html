@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+{% block title %}Заселения — настройки{% endblock %}
+{% block content %}
+<div class="device-head">
+  <h1>⚙ Заселения — настройки</h1>
+  <a class="bus-btn secondary" href="/checkin">← К клипам</a>
+</div>
+
+<!-- Ночной джоб -->
+<div class="chart-card" style="margin-bottom:16px">
+  <h3 style="margin-top:0">🌙 Ночной ingestion</h3>
+  <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
+    <label class="muted">Время запуска
+      <input id="jobHour" type="number" min="0" max="23" value="{{ job_hour }}" style="width:60px">:
+      <input id="jobMinute" type="number" min="0" max="59" value="{{ job_minute }}" style="width:60px">
+    </label>
+    <button onclick="saveSchedule()">Сохранить расписание</button>
+    <button class="secondary" onclick="runNow()">▶ Запустить сейчас (за вчера)</button>
+  </div>
+  <p class="muted" style="font-size:12px">Применяется без перезапуска. Джоб качает клипы за прошедшие сутки.</p>
+</div>
+
+<!-- Добавить гостиницу -->
+<div class="bus-search">
+  <input id="newHotel" placeholder="Название гостиницы" maxlength="255">
+  <button onclick="addHotel()">+ Гостиница</button>
+</div>
+
+{% for h in hotels %}
+<div class="chart-card" style="margin-bottom:16px">
+  <div class="device-head" style="margin-bottom:10px">
+    <h3 style="margin:0">🏨 <input id="hname{{h.id}}" value="{{ h.name }}" style="font-size:16px; width:240px"></h3>
+    <div style="display:flex; gap:8px; align-items:center">
+      <label class="muted"><input type="checkbox" id="hen{{h.id}}" {{ 'checked' if h.enabled }}> включена</label>
+      <button class="mini" onclick="saveHotel({{h.id}})">Сохранить</button>
+      <button class="mini danger" onclick="delHotel({{h.id}})">Удалить</button>
+    </div>
+  </div>
+
+  {# ── Регистраторы ── #}
+  {% for r in h.recorders %}
+  <div class="collect-row" style="margin-bottom:10px" data-rec="{{ r.id }}">
+    <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px">
+      <label class="muted">Имя<input id="rname{{r.id}}" value="{{ r.name }}"></label>
+      <label class="muted">Host/IP<input id="rhost{{r.id}}" value="{{ r.host }}"></label>
+      <label class="muted">HTTP-порт<input id="rport{{r.id}}" type="number" value="{{ r.http_port }}"></label>
+      <label class="muted">RTSP-порт<input id="rrtsp{{r.id}}" type="number" value="{{ r.rtsp_port }}"></label>
+      <label class="muted">Логин<input id="ruser{{r.id}}" value="{{ r.username }}"></label>
+      <label class="muted">Пароль<input id="rpass{{r.id}}" type="password" placeholder="•••• (не менять)"></label>
+      <label class="muted">Тип
+        <select id="rmodel{{r.id}}">
+          {% for mt, mn in model_names.items() %}<option value="{{ mt }}" {{ 'selected' if r.model_type == mt }}>{{ mn }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="muted">Ночное окно
+        <span style="display:flex;gap:4px"><input id="rns{{r.id}}" value="{{ r.night_start }}" style="width:60px"> – <input id="rne{{r.id}}" value="{{ r.night_end }}" style="width:60px"></span>
+      </label>
+      <label class="muted">Аналитика «человек»<br><input type="checkbox" id="ranl{{r.id}}" {{ 'checked' if r.analytics_capable }}></label>
+      <label class="muted">Включён<br><input type="checkbox" id="ren{{r.id}}" {{ 'checked' if r.enabled }}></label>
+    </div>
+    <div class="collect-controls" style="margin-top:8px">
+      <button class="mini" onclick="saveRecorder({{h.id}},{{r.id}})">💾 Сохранить</button>
+      <button class="mini" onclick="testRecorder({{r.id}})">🔌 Проверить подключение</button>
+      <button class="mini danger" onclick="delRecorder({{r.id}})">Удалить регистратор</button>
+      <span id="rtest{{r.id}}" class="muted" style="font-size:13px"></span>
+    </div>
+
+    {# ── Каналы регистратора ── #}
+    <table class="grid" style="margin-top:10px">
+      <thead><tr><th>Канал</th><th>Роль</th><th>Trackid субпотока</th><th>Вкл</th><th></th></tr></thead>
+      <tbody>
+      {% for c in r.channels %}
+        <tr>
+          <td>{{ c.channel_id }} <span class="muted">{{ c.name or '' }}</span></td>
+          <td>
+            <select id="crole{{c.id}}" class="loc-sel">
+              {% for rk, rn in role_names.items() %}<option value="{{ rk }}" {{ 'selected' if c.role == rk }}>{{ rn }}</option>{% endfor %}
+            </select>
+          </td>
+          <td><input id="ctrk{{c.id}}" type="number" value="{{ c.substream_trackid }}" style="width:90px"></td>
+          <td><input type="checkbox" id="cen{{c.id}}" {{ 'checked' if c.enabled }}></td>
+          <td>
+            <button class="mini" onclick="saveChannel({{c.id}})">💾</button>
+            <button class="mini danger" onclick="delChannel({{c.id}})">✕</button>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5" class="muted">Каналы не добавлены. Нажмите «Проверить подключение» — каналы и track-id подтянутся с устройства.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+
+    {# ── Добавить канал (селекты заполняются после теста) ── #}
+    <div class="collect-controls" style="margin-top:8px">
+      <select id="newch_ch{{r.id}}" class="loc-sel" style="min-width:160px"><option value="">— канал —</option></select>
+      <select id="newch_role{{r.id}}" class="loc-sel">
+        {% for rk, rn in role_names.items() %}<option value="{{ rk }}">{{ rn }}</option>{% endfor %}
+      </select>
+      <select id="newch_trk{{r.id}}" class="loc-sel" style="min-width:150px"><option value="">— субпоток —</option></select>
+      <button class="mini" onclick="addChannel({{r.id}})">+ Канал</button>
+    </div>
+  </div>
+  {% endfor %}
+
+  {# ── Добавить регистратор ── #}
+  <details>
+    <summary style="cursor:pointer; color:var(--accent)">+ Регистратор</summary>
+    <div class="collect-controls" style="margin-top:8px">
+      <input id="nrhost{{h.id}}" placeholder="Host/IP" style="min-width:140px">
+      <input id="nrname{{h.id}}" placeholder="Имя (напр. Вход)" style="min-width:120px">
+      <select id="nrmodel{{h.id}}" class="loc-sel">
+        {% for mt, mn in model_names.items() %}<option value="{{ mt }}">{{ mn }}</option>{% endfor %}
+      </select>
+      <input id="nruser{{h.id}}" placeholder="Логин" value="admin" style="width:100px">
+      <input id="nrpass{{h.id}}" type="password" placeholder="Пароль" style="width:120px">
+      <button class="mini" onclick="addRecorder({{h.id}})">Добавить</button>
+    </div>
+  </details>
+</div>
+{% else %}
+<p class="muted">Гостиниц нет. Добавьте первую гостиницу выше.</p>
+{% endfor %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+const v = id => document.getElementById(id).value;
+const ck = id => document.getElementById(id).checked;
+
+async function postJSON(url, body){
+  const r = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body||{})});
+  let d = {}; try { d = await r.json(); } catch(e){}
+  if (!r.ok){ alert(d.detail || ("Ошибка "+r.status)); return null; }
+  return d;
+}
+
+// ── Расписание ──
+async function saveSchedule(){
+  const d = await postJSON("/api/checkin/schedule", {hour:+v("jobHour"), minute:+v("jobMinute")});
+  if (d) alert("Расписание сохранено: "+String(d.hour).padStart(2,"0")+":"+String(d.minute).padStart(2,"0"));
+}
+async function runNow(){
+  if (!confirm("Запустить ingestion за вчера?")) return;
+  const d = await postJSON("/api/checkin/ingest/run", {});
+  if (d) alert(d.message);
+}
+
+// ── Гостиницы ──
+async function addHotel(){
+  const name = v("newHotel").trim(); if (!name){ alert("Введите название"); return; }
+  if (await postJSON("/api/checkin/hotels", {name})) location.reload();
+}
+async function saveHotel(id){
+  if (await postJSON("/api/checkin/hotels/"+id, {name:v("hname"+id).trim(), enabled:ck("hen"+id)})) location.reload();
+}
+async function delHotel(id){
+  if (confirm("Удалить гостиницу со всеми регистраторами и каналами?") && await postJSON("/api/checkin/hotels/"+id+"/delete")) location.reload();
+}
+
+// ── Регистраторы ──
+function recBody(hotelId, id){
+  return {
+    hotel_id: hotelId,
+    name: v("rname"+id), host: v("rhost"+id).trim(),
+    http_port: +v("rport"+id), rtsp_port: +v("rrtsp"+id),
+    username: v("ruser"+id), password: v("rpass"+id),
+    model_type: v("rmodel"+id), analytics_capable: ck("ranl"+id),
+    night_start: v("rns"+id), night_end: v("rne"+id), enabled: ck("ren"+id),
+  };
+}
+async function saveRecorder(hotelId, id){
+  if (await postJSON("/api/checkin/recorders/"+id, recBody(hotelId,id))) location.reload();
+}
+async function addRecorder(hotelId){
+  const host = v("nrhost"+hotelId).trim(); if (!host){ alert("Укажите host/IP"); return; }
+  const body = {hotel_id:hotelId, host, name:v("nrname"+hotelId), model_type:v("nrmodel"+hotelId),
+                username:v("nruser"+hotelId), password:v("nrpass"+hotelId)};
+  if (await postJSON("/api/checkin/recorders", body)) location.reload();
+}
+async function delRecorder(id){
+  if (confirm("Удалить регистратор и его каналы?") && await postJSON("/api/checkin/recorders/"+id+"/delete")) location.reload();
+}
+async function testRecorder(id){
+  const el = document.getElementById("rtest"+id);
+  el.textContent = "проверяю…"; el.style.color = "";
+  const pass = v("rpass"+id);
+  const body = pass ? {host:v("rhost"+id).trim(), http_port:+v("rport"+id), username:v("ruser"+id), password:pass}
+                    : {recorder_id:id};
+  const d = await postJSON("/api/checkin/test-recorder", body);
+  if (!d) { el.textContent = "ошибка запроса"; return; }
+  el.textContent = d.message; el.style.color = d.ok ? "var(--ok)" : "var(--err)";
+  // Заполняем выпадающие списки каналов и субпотоков
+  const chSel = document.getElementById("newch_ch"+id);
+  const trkSel = document.getElementById("newch_trk"+id);
+  if (d.channels && d.channels.length){
+    chSel.innerHTML = '<option value="">— канал —</option>' +
+      d.channels.map(c => `<option value="${c.channel_id}">${c.channel_id} · ${c.name}</option>`).join("");
+  }
+  if (d.tracks && d.tracks.length){
+    const subs = d.tracks.filter(t => t.is_sub);
+    const list = (subs.length ? subs : d.tracks);
+    trkSel.innerHTML = '<option value="">— субпоток —</option>' +
+      list.map(t => `<option value="${t.trackid}">track ${t.trackid} (кан.${t.channel}${t.is_sub?', суб':''})</option>`).join("");
+  }
+}
+
+// ── Каналы ──
+async function addChannel(recId){
+  const ch = v("newch_ch"+recId); if (ch === ""){ alert("Выберите канал (или проверьте подключение)"); return; }
+  const trk = v("newch_trk"+recId);
+  const body = {recorder_id:recId, channel_id:+ch, role:v("newch_role"+recId),
+                substream_trackid: trk ? +trk : (+ch*100+2)};
+  if (await postJSON("/api/checkin/channels", body)) location.reload();
+}
+async function saveChannel(id){
+  // channel_id не меняем здесь (он идентификатор канала на устройстве)
+  const row = document.querySelector(`#crole${id}`).closest("tr");
+  const chNum = parseInt(row.querySelector("td").textContent);
+  const body = {recorder_id:0, channel_id:chNum, role:v("crole"+id),
+                substream_trackid:+v("ctrk"+id), enabled:ck("cen"+id)};
+  if (await postJSON("/api/checkin/channels/"+id, body)) location.reload();
+}
+async function delChannel(id){
+  if (await postJSON("/api/checkin/channels/"+id+"/delete")) location.reload();
+}
+</script>
+{% endblock %}

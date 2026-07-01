@@ -250,6 +250,30 @@ class NVRClient(abc.ABC):
         """Возвращает температуру/нагрузку устройства, если доступно."""
         raise FeatureUnavailable("телеметрия здоровья не поддерживается")
 
+    # ── Модуль «Заселения»: треки, поиск активности, RTSP архива ──────────────
+    async def list_tracks(self) -> list[dict]:
+        """Список дорожек записи: [{'trackid':101,'channel':1,'type':'video','is_sub':False}].
+
+        Нужен, чтобы в UI выбирать trackid субпотока из списка, а не угадывать.
+        """
+        raise FeatureUnavailable("список треков не поддерживается")
+
+    async def search_activity(
+        self, channel_id: int, start: dt.datetime, end: dt.datetime, *, mode: str = "all"
+    ) -> list[ArchiveSegment]:
+        """Сегменты с активностью. mode: 'human' | 'motion' | 'all'.
+
+        Реализация по умолчанию не умеет фильтровать → возвращает всё окно целиком
+        (субпоток лёгкий — это штатный фолбэк из ТЗ).
+        """
+        return [ArchiveSegment(start, end)]
+
+    def rtsp_playback_url(
+        self, trackid: int, start: dt.datetime, end: dt.datetime, *, rtsp_port: int = 554
+    ) -> str:
+        """URL для выкачивания отрезка архива по треку через RTSP."""
+        raise FeatureUnavailable("RTSP playback не поддерживается")
+
     async def test_connection(self) -> DeviceInfo:
         """Базовый тест: получить инфо об устройстве (бросает при ошибке)."""
         return await self.get_device_info()
