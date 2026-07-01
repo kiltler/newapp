@@ -388,16 +388,15 @@ async def ingest_recorder(
             client = build_recorder_client(recorder)
             use_whole = whole
             if test_minutes is not None:
-                # Тест-клип: окно от ЧАСОВ РЕГИСТРАТОРА (устраняет рассинхрон TZ).
-                try:
-                    dev_now = await client.get_device_time()
-                except Exception:  # noqa: BLE001  (NVRError или драйвер без метода)
-                    dev_now = dt.datetime.now()
-                win_start = dev_now - dt.timedelta(minutes=test_minutes)
-                win_end = dev_now
+                # Тест-клип: окно в UTC. Hikvision RTSP playback ждёт время в GMT/UTC
+                # (суффикс Z). utcnow даёт правильный момент, если сервер синхронизирован
+                # по NTP (тот же принцип, что у рабочего прогона «За вчера»).
+                win_end = dt.datetime.utcnow()
+                win_start = win_end - dt.timedelta(minutes=test_minutes)
                 use_whole = True
                 await _patch_run(run_id, rec_id=recorder_id,
-                                 current=f"{label}: время регистратора {dev_now.strftime('%H:%M:%S')}, тяну последние {test_minutes} мин")
+                                 current=f"{label}: тяну последние {test_minutes} мин "
+                                         f"(UTC {win_start.strftime('%H:%M')}–{win_end.strftime('%H:%M')})")
             elif window is not None:
                 win_start, win_end = window
             else:

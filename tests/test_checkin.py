@@ -551,7 +551,7 @@ def test_try_next_track_conditions():
     assert not checkin_ingest._try_next_track("401 Unauthorized")
 
 
-async def test_test_clip_uses_device_time(db, monkeypatch, tmp_path):
+async def test_test_clip_uses_utc_window(db, monkeypatch, tmp_path):
     monkeypatch.setattr(checkin_ingest.settings, "clips_dir", str(tmp_path))
     async with SessionLocal() as s:
         h = CheckinHotel(name="Гост Врем"); s.add(h); await s.flush()
@@ -560,11 +560,7 @@ async def test_test_clip_uses_device_time(db, monkeypatch, tmp_path):
         s.add(CheckinChannel(recorder_id=rec.id, channel_id=60, substream_trackid=6002))
         await s.commit(); hid = h.id
 
-    dev_time = dt.datetime(2026, 7, 2, 2, 53, 0)
-
     class FakeClient:
-        async def get_device_time(self):
-            return dev_time
         async def search_activity(self, *a, **k):
             raise AssertionError("в тест-клипе поиск активности не нужен")
         def rtsp_playback_url(self, tid, a, b, *, rtsp_port=554):
@@ -579,12 +575,15 @@ async def test_test_clip_uses_device_time(db, monkeypatch, tmp_path):
 
     monkeypatch.setattr(checkin_ingest, "_ffmpeg_download", fake_dl)
 
+    before = dt.datetime.utcnow()
     await checkin_ingest.run_test_clip(10, [hid])
+    after = dt.datetime.utcnow()
     async with SessionLocal() as s:
         clip = (await s.execute(__import__("sqlalchemy").select(CheckinClip))).scalars().first()
         assert clip.status == ClipStatus.OK
-        assert clip.end_ts == dev_time                       # окно привязано к часам регистратора
-        assert clip.start_ts == dev_time - dt.timedelta(minutes=10)
+        # окно = последние 10 минут в UTC (Hikvision RTSP ждёт время в GMT/UTC)
+        assert before - dt.timedelta(seconds=5) <= clip.end_ts <= after + dt.timedelta(seconds=5)
+        assert clip.start_ts == clip.end_ts - dt.timedelta(minutes=10)
 
 
 async def test_abort_orphan_runs(db):
