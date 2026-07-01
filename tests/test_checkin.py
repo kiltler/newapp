@@ -460,3 +460,42 @@ async def test_today_window_clamped_to_now(db, monkeypatch, tmp_path):
     assert captured["start"] == dt.datetime.combine(today, dt.time(0, 0))
     assert captured["end"] <= now + dt.timedelta(seconds=5)   # обрезано до «сейчас»
     assert captured["end"] > captured["start"]
+
+
+async def test_test_clip_ignores_window_and_search(db, monkeypatch, tmp_path):
+    monkeypatch.setattr(checkin_ingest.settings, "clips_dir", str(tmp_path))
+    async with SessionLocal() as s:
+        h = CheckinHotel(name="Гост Тест"); s.add(h); await s.flush()
+        # ночное окно 07:00-24:00 — сейчас неважно, тест-клип должен его игнорировать
+        rec = CheckinRecorder(hotel_id=h.id, host="192.168.100.8", model_type="ds7616ni_e2",
+                              night_start="07:00", night_end="24:00")
+        s.add(rec); await s.flush()
+        s.add(CheckinChannel(recorder_id=rec.id, channel_id=60, role="reception", substream_trackid=6002))
+        await s.commit(); hid = h.id
+
+    called = {"search": 0}
+
+    class FakeClient:
+        async def search_activity(self, *a, **k):
+            called["search"] += 1
+            return []
+        def rtsp_playback_url(self, tid, a, b, *, rtsp_port=554):
+            return f"rtsp://f/{tid}"
+
+    monkeypatch.setattr(checkin_ingest, "build_recorder_client", lambda rec, password=None: FakeClient())
+
+    async def fake_ffmpeg(url, out_path, duration_s):
+        with open(out_path, "wb") as fh:
+            fh.write(b"CLIP")
+        return True, ""
+
+    monkeypatch.setattr(checkin_ingest, "_run_ffmpeg", fake_ffmpeg)
+
+    summary = await checkin_ingest.run_test_clip(10, [hid])
+    assert summary["downloaded"] == 1
+    assert called["search"] == 0  # whole-режим → без поиска активности
+    async with SessionLocal() as s:
+        clip = (await s.execute(__import__("sqlalchemy").select(CheckinClip))).scalars().first()
+        assert clip.status == ClipStatus.OK
+        assert clip.day == dt.date.today()
+        assert (dt.datetime.now() - clip.start_ts).total_seconds() <= 11 * 60  # ~последние 10 мин

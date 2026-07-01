@@ -7,6 +7,7 @@
     <a class="bus-btn secondary" href="/checkin/logs">📋 Журнал заселений</a>
     <a class="bus-btn secondary" href="/checkin/notifications">🔔 Уведомления{% if unread %} <span class="badge err">{{ unread }}</span>{% endif %}</a>
     <a class="bus-btn secondary" href="/checkin/settings">⚙ Настройки</a>
+    <button class="secondary" onclick="runTestClip()">🧪 Тест-клип (10 мин)</button>
     <button class="secondary" onclick="runIngest()">▶ За вчера</button>
     <button onclick="runIngestToday()">▶ За сегодня</button>
   </div>
@@ -163,6 +164,14 @@ document.addEventListener("keydown", (e) => {
 
 function todayISO(){ const t=new Date(); const p=n=>String(n).padStart(2,"0"); return t.getFullYear()+"-"+p(t.getMonth()+1)+"-"+p(t.getDate()); }
 function runIngestToday(){ runIngest(todayISO()); }
+
+async function runTestClip(){
+  if (!confirm("Скачать тест-клип за последние 10 минут (для проверки, что запись субпотока идёт и всё качается)?")) return;
+  const r = await fetch("/api/checkin/ingest/test-clip", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({minutes:10})});
+  const d = await r.json();
+  if (d.running) alert("Ingestion уже выполняется — смотрите прогресс ниже.");
+  pollStatus();
+}
 
 async function runIngest(day){
   const label = day ? "сегодня (то, что уже записано на данный момент)" : "вчерашний день";

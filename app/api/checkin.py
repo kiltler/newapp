@@ -342,6 +342,23 @@ async def run_ingest_now(
     return {"ok": True, "day": day.isoformat(), "message": "Ingestion запущен в фоне"}
 
 
+@router.post("/api/checkin/ingest/test-clip")
+async def run_test_clip_now(
+    data: schemas.TestClipIn, background: BackgroundTasks, session: AsyncSession = Depends(get_session)
+):
+    """Тест-клип: последние N минут субпотока целиком (мимо ночного окна)."""
+    active = (
+        await session.execute(
+            select(CheckinIngestRun).where(CheckinIngestRun.status == "running").limit(1)
+        )
+    ).scalar_one_or_none()
+    if active is not None:
+        return {"ok": False, "running": True, "message": "Ingestion уже выполняется"}
+    hotel_ids = [data.hotel_id] if data.hotel_id else None
+    background.add_task(checkin_ingest.run_test_clip, data.minutes, hotel_ids)
+    return {"ok": True, "message": f"Тест-клип за последние {data.minutes} мин запущен"}
+
+
 @router.get("/api/checkin/ingest/status")
 async def ingest_status(session: AsyncSession = Depends(get_session)):
     """Состояние последнего прогона ingestion — для прогресс-бара в UI."""

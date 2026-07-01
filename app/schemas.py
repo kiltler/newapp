@@ -369,3 +369,8 @@ class CheckinLogIn(BaseModel):
     event_time: dt.datetime | None = None
     verdict: str = "checkin"
     note: str | None = None
+
+
+class TestClipIn(BaseModel):
+    minutes: int = Field(default=10, ge=1, le=60)
+    hotel_id: int | None = None

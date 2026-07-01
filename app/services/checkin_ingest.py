@@ -286,10 +286,15 @@ async def _ingest_segment(
 
 
 # ── Прогон по регистратору / всем гостиницам ─────────────────────────────────
-async def ingest_recorder(day: dt.date, recorder_id: int, run_id: int | None = None) -> dict:
+async def ingest_recorder(
+    day: dt.date, recorder_id: int, run_id: int | None = None, *,
+    window: tuple[dt.datetime, dt.datetime] | None = None, whole: bool = False,
+) -> dict:
     """Скачивает клипы одного регистратора за указанную дату. Идемпотентно.
 
     Если задан run_id — по ходу обновляет прогресс прогона для UI.
+    window — явные границы (мимо ночного окна, для тест-клипа).
+    whole=True — качать всё окно целиком, без поиска активности (для теста).
     """
     async with SessionLocal() as session:
         recorder = (
@@ -311,26 +316,32 @@ async def ingest_recorder(day: dt.date, recorder_id: int, run_id: int | None = N
                          current=f"{label}: подключаюсь…")
         try:
             client = build_recorder_client(recorder)
-            win_start, win_end = night_window(recorder, day)
-            # Для сегодняшнего/текущего дня окно ещё не закрыто — берём до «сейчас».
-            now = dt.datetime.now()
-            if win_end > now:
-                win_end = now
-            if win_end <= win_start:
-                await _patch_run(run_id, rec_id=recorder_id, rec_sets={"status": "done"},
-                                 current=f"{label}: окно ещё не наступило")
-                return stats
+            if window is not None:
+                win_start, win_end = window
+            else:
+                win_start, win_end = night_window(recorder, day)
+                # Для сегодняшнего/текущего дня окно ещё не закрыто — берём до «сейчас».
+                now = dt.datetime.now()
+                if win_end > now:
+                    win_end = now
+                if win_end <= win_start:
+                    await _patch_run(run_id, rec_id=recorder_id, rec_sets={"status": "done"},
+                                     current=f"{label}: окно ещё не наступило")
+                    return stats
             for idx, ch in enumerate(channels, 1):
                 await _patch_run(run_id, current=f"{label}: канал {ch.channel_id} ({idx}/{len(channels)}), скачано {stats['downloaded']}")
-                try:
-                    segments = await find_activity(client, recorder, ch.channel_id, win_start, win_end)
-                except NVRError as exc:
-                    stats["errors"] += 1
-                    await _patch_run(run_id, incs={"errors": 1}, rec_id=recorder_id,
-                                     rec_incs={"errors": 1}, error_sample=f"кан.{ch.channel_id}: поиск: {exc}")
-                    log.warning("рег.%s кан.%s: поиск сорвался: %s", recorder.id, ch.channel_id, exc)
-                    await _patch_run(run_id, rec_id=recorder_id, rec_incs={"channels_done": 1})
-                    continue
+                if whole:
+                    segments = [ArchiveSegment(win_start, win_end)]
+                else:
+                    try:
+                        segments = await find_activity(client, recorder, ch.channel_id, win_start, win_end)
+                    except NVRError as exc:
+                        stats["errors"] += 1
+                        await _patch_run(run_id, incs={"errors": 1}, rec_id=recorder_id,
+                                         rec_incs={"errors": 1}, error_sample=f"кан.{ch.channel_id}: поиск: {exc}")
+                        log.warning("рег.%s кан.%s: поиск сорвался: %s", recorder.id, ch.channel_id, exc)
+                        await _patch_run(run_id, rec_id=recorder_id, rec_incs={"channels_done": 1})
+                        continue
                 for seg in segments:
                     res, err = await _ingest_segment(session, client, recorder, recorder.hotel_id, ch, seg)
                     if res == "ok":
@@ -361,7 +372,8 @@ async def ingest_recorder(day: dt.date, recorder_id: int, run_id: int | None = N
 
 
 async def run_ingestion(
-    day: dt.date | None = None, hotel_ids: list[int] | None = None, trigger: str = "manual"
+    day: dt.date | None = None, hotel_ids: list[int] | None = None, trigger: str = "manual",
+    *, window: tuple[dt.datetime, dt.datetime] | None = None, whole: bool = False,
 ) -> dict:
     """Ночной джоб: качает клипы по всем включённым гостиницам за дату.
 
@@ -400,7 +412,7 @@ async def run_ingestion(
     try:
         # Последовательно по регистраторам — бережём тонкий аплоад гостиниц.
         for rid in rec_ids:
-            st = await ingest_recorder(day, rid, run_id)
+            st = await ingest_recorder(day, rid, run_id, window=window, whole=whole)
             summary["recorders"].append(st)
             summary["downloaded"] += st.get("downloaded", 0)
             summary["errors"] += st.get("errors", 0)
@@ -421,6 +433,16 @@ async def run_ingestion(
 async def scheduled_ingestion() -> dict:
     """Обёртка для планировщика — помечает прогон как автоматический."""
     return await run_ingestion(trigger="schedule")
+
+
+async def run_test_clip(minutes: int = 10, hotel_ids: list[int] | None = None) -> dict:
+    """Тест-клип: тянет ПОСЛЕДНИЕ N минут субпотока целиком, мимо ночного окна и
+    поиска активности — быстрая проверка, что RTSP/trackid/ffmpeg работают."""
+    now = dt.datetime.now()
+    window = (now - dt.timedelta(minutes=max(minutes, 1)), now)
+    return await run_ingestion(
+        day=now.date(), hotel_ids=hotel_ids, trigger="test", window=window, whole=True,
+    )
 
 
 # ── Тест подключения (для UI: пинг + список каналов и треков субпотока) ───────
