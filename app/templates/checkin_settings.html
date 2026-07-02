@@ -2,7 +2,7 @@
 {% block title %}Заселения — настройки{% endblock %}
 {% block content %}
 <div class="device-head">
-  <h1>⚙ Заселения — настройки</h1>
+  <h1>⚙ Заселения — настройки <span class="muted" style="font-size:12px">build {{ build }}</span></h1>
   <a class="bus-btn secondary" href="/checkin">← К клипам</a>
 </div>
 
@@ -61,9 +61,11 @@
     <div class="collect-controls" style="margin-top:8px">
       <button class="mini" onclick="saveRecorder({{h.id}},{{r.id}})">💾 Сохранить</button>
       <button class="mini" onclick="testRecorder({{r.id}})">🔌 Проверить подключение</button>
+      <button class="mini" onclick="diag({{r.id}})">🔎 Диагностика архива</button>
       <button class="mini danger" onclick="delRecorder({{r.id}})">Удалить регистратор</button>
       <span id="rtest{{r.id}}" class="muted" style="font-size:13px"></span>
     </div>
+    <pre id="diag{{r.id}}" style="display:none; white-space:pre-wrap; font-size:12px; background:var(--bg-2); border:1px solid var(--line-2); border-radius:8px; padding:10px; margin-top:8px; max-height:340px; overflow:auto"></pre>
     <div id="chgallery{{r.id}}" style="display:none; margin-top:10px"></div>
 
     {# ── Каналы регистратора ── #}
@@ -184,6 +186,15 @@ async function addRecorder(hotelId){
 async function delRecorder(id){
   if (confirm("Удалить регистратор и его каналы?") && await postJSON("/api/checkin/recorders/"+id+"/delete")) location.reload();
 }
+async function diag(id){
+  const el = document.getElementById("diag"+id);
+  el.style.display = "block"; el.textContent = "запрашиваю у устройства…";
+  try {
+    const r = await fetch(`/api/checkin/recorders/${id}/diag`);
+    el.textContent = JSON.stringify(await r.json(), null, 2);
+  } catch(e){ el.textContent = "ошибка запроса: " + e; }
+}
+
 async function testRecorder(id){
   const el = document.getElementById("rtest"+id);
   el.textContent = "проверяю…"; el.style.color = "";

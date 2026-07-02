@@ -447,17 +447,13 @@ async def ingest_recorder(
             test_mode = test_minutes is not None
             search_start = search_end = None
             if test_mode:
-                # Тест-клип: якорь — ЧАСЫ РЕГИСТРАТОРА (get_device_time). Затем спросим
-                # у устройства реально записанные сегменты субпотока и качаем по родному
-                # playbackURI — без догадок про часовой пояс и trackid.
-                try:
-                    anchor = await client.get_device_time()
-                except NVRError:
-                    anchor = dt.datetime.utcnow()
-                search_start = anchor - dt.timedelta(hours=18)
-                search_end = anchor + dt.timedelta(hours=2)
+                # Широкое окно поиска в UTC (±сутки) — ловит запись при любом TZ и
+                # даже если часы NVR сбиты. Реальное окно клипа берём из времени
+                # НАЙДЕННОГО сегмента, а качаем по родному playbackURI устройства.
+                search_end = dt.datetime.utcnow() + dt.timedelta(hours=14)
+                search_start = search_end - dt.timedelta(hours=54)
                 await _patch_run(run_id, rec_id=recorder_id,
-                                 current=f"{label}: часы регистратора {anchor.strftime('%d.%m %H:%M')}, ищу свежую запись")
+                                 current=f"{label}: ищу свежую запись в архиве…")
             elif window is not None:
                 win_start, win_end = window
             else:

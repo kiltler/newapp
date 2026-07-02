@@ -618,3 +618,31 @@ def test_rewrite_uri_window():
     out = checkin_ingest._rewrite_uri_window(uri, dt.datetime(2026, 7, 2, 3, 46), dt.datetime(2026, 7, 2, 3, 49))
     assert out == "rtsp://h/Streaming/tracks/6001/?starttime=20260702T034600Z&endtime=20260702T034900Z"
     assert "name=" not in out and "size=" not in out  # лишние параметры убраны
+
+
+async def test_recorder_diag_endpoint(db, monkeypatch):
+    async with SessionLocal() as s:
+        h = CheckinHotel(name="Д"); s.add(h); await s.flush()
+        rec = CheckinRecorder(hotel_id=h.id, host="192.168.100.8"); s.add(rec); await s.flush()
+        s.add(CheckinChannel(recorder_id=rec.id, channel_id=60, substream_trackid=6002))
+        await s.commit(); rid = rec.id
+
+    class Fake:
+        async def get_device_time(self):
+            return dt.datetime(2026, 7, 2, 4, 0, 0)
+        async def list_tracks(self):
+            return [{"trackid": 6002, "channel": 60, "is_sub": True}]
+        async def search_playback(self, ch, s0, e0, *, substream=True):
+            if substream:
+                return []  # субпоток не пишется
+            return [{"start": dt.datetime(2026, 7, 1, 16), "end": dt.datetime(2026, 7, 1, 20),
+                     "uri": "rtsp://192.168.100.8/Streaming/tracks/6001/?starttime=x&endtime=y"}]
+
+    monkeypatch.setattr(checkin_ingest, "build_recorder_client", lambda rec, password=None: Fake())
+    async with _client() as c:
+        d = (await c.get(f"/api/checkin/recorders/{rid}/diag")).json()
+    assert d["build"]
+    ch0 = d["channels"][0]
+    assert ch0["sub_matches"] == 0
+    assert ch0["main_matches"] == 1
+    assert ch0["main_trackid_returned"] == "6001"

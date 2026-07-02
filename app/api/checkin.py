@@ -48,6 +48,9 @@ _register_filters(templates)
 
 router = APIRouter(tags=["checkin"])
 
+# Метка сборки — видно в UI, сразу понятно, задеплоен ли новый код.
+CHECKIN_BUILD = "2026-07-02-playbackuri-diag"
+
 
 def _clip_url(path: str) -> str:
     """Файловый путь клипа → веб-URL под /clips."""
@@ -123,7 +126,7 @@ async def checkin_settings(request: Request, session: AsyncSession = Depends(get
         "request": request, "hotels": hotels,
         "model_names": RECORDER_MODEL_NAMES, "role_names": CHANNEL_ROLE_NAMES,
         "analytics_default": RECORDER_ANALYTICS_DEFAULT,
-        "job_hour": job_hour, "job_minute": job_minute,
+        "job_hour": job_hour, "job_minute": job_minute, "build": CHECKIN_BUILD,
     })
 
 
@@ -247,6 +250,58 @@ async def test_recorder_endpoint(data: schemas.RecorderTestIn, session: AsyncSes
         username=data.username.strip(), password_enc="",
     )
     return await checkin_ingest.test_recorder(tmp, password=data.password)
+
+
+@router.get("/api/checkin/recorders/{rec_id}/diag")
+async def recorder_diag(rec_id: int, session: AsyncSession = Depends(get_session)):
+    """Живая диагностика: время устройства, треки, поиск записи sub/main по каналам.
+    Показывает, что реально отдаёт регистратор — чтобы не гадать."""
+    import re as _re
+
+    from app.drivers.base import NVRError
+
+    rec = (
+        await session.execute(
+            select(CheckinRecorder).where(CheckinRecorder.id == rec_id)
+            .options(selectinload(CheckinRecorder.channels))
+        )
+    ).scalar_one_or_none()
+    if rec is None:
+        raise HTTPException(404, "Регистратор не найден")
+
+    client = checkin_ingest.build_recorder_client(rec)
+    out: dict = {"build": CHECKIN_BUILD, "host": rec.host}
+    try:
+        out["device_time"] = (await client.get_device_time()).isoformat()
+    except Exception as exc:  # noqa: BLE001
+        out["device_time_error"] = str(exc)
+    try:
+        out["tracks_sample"] = (await client.list_tracks())[:6]
+    except Exception as exc:  # noqa: BLE001
+        out["tracks_error"] = str(exc)
+
+    # Широкое окно, чтобы поймать запись при любом толковании TZ (±сутки).
+    end = dt.datetime.utcnow() + dt.timedelta(hours=14)
+    start = end - dt.timedelta(hours=40)
+    out["search_window_utc"] = f"{start.strftime('%d.%m %H:%M')}..{end.strftime('%d.%m %H:%M')}"
+    out["channels"] = []
+    for ch in rec.channels:
+        e: dict = {"channel_id": ch.channel_id, "role": ch.role, "trackid_cfg": ch.substream_trackid}
+        for lbl, sub in (("sub", True), ("main", False)):
+            try:
+                segs = await client.search_playback(ch.channel_id, start, end, substream=sub)
+                e[f"{lbl}_matches"] = len(segs)
+                if segs:
+                    latest = max(segs, key=lambda x: x["end"])
+                    e[f"{lbl}_latest"] = f"{latest['start'].isoformat()}..{latest['end'].isoformat()}"
+                    uri = latest.get("uri") or ""
+                    m = _re.search(r"/tracks/(\d+)", uri)
+                    e[f"{lbl}_trackid_returned"] = m.group(1) if m else "?"
+                    e[f"{lbl}_uri"] = uri
+            except NVRError as exc:
+                e[f"{lbl}_error"] = str(exc)
+        out["channels"].append(e)
+    return out
 
 
 @router.get("/api/checkin/recorders/{rec_id}/snapshot/{channel_id}")
