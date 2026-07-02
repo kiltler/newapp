@@ -334,14 +334,22 @@ async def _test_clip_jobs(client, ch, search_start, search_end, minutes) -> list
 
 
 async def _ffmpeg_trim(src: str, dst: str, offset_s: float, duration_s: float) -> tuple[bool, str]:
-    """Вырезает из локального файла окно [offset, offset+duration] → mp4 (видео copy,
-    аудио → AAC). -ss перед -i = быстрый поиск по ключевому кадру."""
+    """Вырезает окно [offset, offset+duration] в чистый браузеро-совместимый MP4.
+
+    Hikvision отдаёт поток с «кривым» таймингом → при -c copy MP4 выходит без
+    длительности/индекса (браузер показывает первый кадр, но не играет). Поэтому
+    видео ПЕРЕКОДИРУЕМ в H.264 (yuv420p) + faststart — гарантированно играбельно.
+    """
     cmd = [
         settings.ffmpeg_bin, "-y", "-nostdin",
+        "-fflags", "+genpts",
         "-ss", f"{max(offset_s, 0):.3f}",
         "-i", src,
         "-t", f"{max(duration_s, 1):.0f}",
-        "-map", "0:v:0?", "-map", "0:a:0?", "-c:v", "copy", "-c:a", "aac",
+        "-map", "0:v:0?", "-map", "0:a:0?",
+        "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-movflags", "+faststart",
         dst,
     ]
     try:
