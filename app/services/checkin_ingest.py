@@ -275,15 +275,18 @@ async def _ffmpeg_download(
 
 
 def _rewrite_uri_window(uri: str, start: dt.datetime, end: dt.datetime) -> str:
-    """Берём путь трека из playbackURI устройства и ставим своё окно (playback-by-time).
+    """Подменяет только starttime/endtime в playbackURI устройства, СОХРАНЯЯ name/size.
 
-    Лишние параметры (name/size — привязаны к конкретному файлу-сегменту) убираем:
-    для проигрывания произвольного отрезка нужен только starttime/endtime.
-    """
-    base = uri.split("?", 1)[0]
+    Важно: у HiWatch-DVR путь трека одинаков для sub и main (tracks/6001),
+    а различаются они параметром name (идентификатор физического файла записи).
+    Поэтому name трогать нельзя — иначе устройство отдаёт основной поток."""
     st = start.strftime("%Y%m%dT%H%M%SZ")
     en = end.strftime("%Y%m%dT%H%M%SZ")
-    return f"{base}?starttime={st}&endtime={en}"
+    if "starttime=" in uri:
+        uri = re.sub(r"starttime=[^&]*", "starttime=" + st, uri)
+    if "endtime=" in uri:
+        uri = re.sub(r"endtime=[^&]*", "endtime=" + en, uri)
+    return uri
 
 
 def _mask(url: str) -> str:
