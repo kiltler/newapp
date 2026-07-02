@@ -294,6 +294,19 @@ def _mask(url: str) -> str:
     return re.sub(r"(rtsp://[^:/@]+:)[^@]*@", r"\1***@", url or "")
 
 
+def _closed_segment(segs: list[dict], min_age: dt.timedelta = dt.timedelta(minutes=15)) -> dict | None:
+    """Выбирает ПОСЛЕДНИЙ уже закрытый сегмент (конец которого не свежее min_age
+    от самого нового куска). Hikvision не отдаёт playback открытого (пишущегося)
+    файла — поэтому качать надо из закрытого."""
+    if not segs:
+        return None
+    ref = max(s["end"] for s in segs)  # ~ «сейчас» по времени устройства
+    closed = [s for s in segs if s["end"] <= ref - min_age]
+    if closed:
+        return max(closed, key=lambda s: s["end"])
+    return min(segs, key=lambda s: s["start"])  # запасной: самый старый
+
+
 async def _test_clip_jobs(client, ch, search_start, search_end, minutes) -> list[tuple]:
     """Для тест-клипа: спрашиваем у устройства реально записанные сегменты
     субпотока и берём ПОСЛЕДНИЕ N минут по РОДНОМУ playbackURI (верный trackid и
@@ -313,19 +326,14 @@ async def _test_clip_jobs(client, ch, search_start, search_end, minutes) -> list
              search_start.strftime("%d.%m %H:%M"), search_end.strftime("%d.%m %H:%M"))
     if not segs:
         return []
-    latest = max(segs, key=lambda x: x["end"])
+    # Берём ЗАКРЫТЫЙ сегмент (открытый/пишущийся файл Hikvision не отдаёт).
+    latest = _closed_segment(segs)
+    if latest is None:
+        return []
     seg_start, seg_end = latest["start"], latest["end"]
-    # Отступ от «живого края»: Hikvision не отдаёт playback самого свежего куска
-    # (текущий записываемый файл ещё не готов к воспроизведению). Берём окно чуть
-    # раньше конца записи — гарантированно уже записанный отрезок.
-    lag = dt.timedelta(minutes=5)
-    win_end = seg_end - lag
-    if win_end <= seg_start:
-        win_end = seg_end - dt.timedelta(seconds=30)
+    # Закрытый файл проигрывается целиком — берём последние `minutes` до его конца.
+    win_end = seg_end
     win_start = max(win_end - dt.timedelta(minutes=minutes), seg_start)
-    if win_end <= win_start:
-        win_start = seg_start
-        win_end = min(seg_start + dt.timedelta(minutes=minutes), seg_end)
     uri = latest.get("uri") or ""
     uri = client.authed_rtsp(_rewrite_uri_window(uri, win_start, win_end)) if uri else None
     log.info("тест-клип кан.%s: последние %d мин %s..%s → %s", ch.channel_id, minutes,

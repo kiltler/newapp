@@ -49,7 +49,7 @@ _register_filters(templates)
 router = APIRouter(tags=["checkin"])
 
 # Метка сборки — видно в UI, сразу понятно, задеплоен ли новый код.
-CHECKIN_BUILD = "2026-07-02-probe"
+CHECKIN_BUILD = "2026-07-02-closedseg"
 
 
 def _clip_url(path: str) -> str:
@@ -310,11 +310,12 @@ async def recorder_diag(rec_id: int, session: AsyncSession = Depends(get_session
         seg = None
         if ch0 is not None:
             subs = await client.search_playback(ch0, start, end, substream=True)
-            seg = max(subs, key=lambda x: x["end"]) if subs else None
+            seg = checkin_ingest._closed_segment(subs) if subs else None  # закрытый сегмент!
         if seg:
-            w0 = seg["start"] + dt.timedelta(minutes=2)   # у начала сегмента = точно записано
-            w1 = w0 + dt.timedelta(seconds=15)
+            w1 = seg["end"] - dt.timedelta(seconds=5)     # у конца ЗАКРЫТОГО файла = точно доступно
+            w0 = w1 - dt.timedelta(seconds=15)
             probe["channel"] = ch0
+            probe["segment_used"] = f"{seg['start'].isoformat()}..{seg['end'].isoformat()}"
             probe["window"] = f"{w0.isoformat()}..{w1.isoformat()}"
             targets = {
                 "main_6001_by_time": client.rtsp_playback_url(ch0 * 100 + 1, w0, w1, rtsp_port=rec.rtsp_port),

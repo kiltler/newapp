@@ -473,15 +473,18 @@ async def test_test_clip_uses_device_playback(db, monkeypatch, tmp_path):
         s.add(CheckinChannel(recorder_id=rec.id, channel_id=60, role="reception", substream_trackid=6002))
         await s.commit(); hid = h.id
 
-    dev_time = dt.datetime(2026, 7, 2, 3, 49, 0)
-    seg_start = dev_time - dt.timedelta(hours=1)
+    dev_time = dt.datetime(2026, 7, 2, 23, 42, 0)
+    # Открытый (пишущийся) сегмент до «сейчас» и ЗАКРЫТЫЙ (закончился 20 мин назад).
+    open_seg = {"start": dev_time - dt.timedelta(minutes=12), "end": dev_time,
+                "uri": "rtsp://192.168.100.8/Streaming/tracks/6001/?starttime=a&endtime=b&name=OPEN&size=1"}
+    closed_seg = {"start": dev_time - dt.timedelta(hours=1), "end": dev_time - dt.timedelta(minutes=20),
+                  "uri": "rtsp://192.168.100.8/Streaming/tracks/6001/?starttime=X&endtime=Y&name=CLOSED&size=9"}
 
     class FakeClient:
         async def get_device_time(self):
             return dev_time
         async def search_playback(self, ch, s0, e0, *, substream=True):
-            return [{"start": seg_start, "end": dev_time,
-                     "uri": "rtsp://192.168.100.8/Streaming/tracks/6002/?starttime=X&endtime=Y&name=n&size=1"}]
+            return [open_seg, closed_seg]
         def authed_rtsp(self, uri):
             return "rtsp://admin:pw@" + uri[len("rtsp://"):]
         async def search_activity(self, *a, **k):
@@ -504,12 +507,12 @@ async def test_test_clip_uses_device_playback(db, monkeypatch, tmp_path):
     async with SessionLocal() as s:
         clip = (await s.execute(__import__("sqlalchemy").select(CheckinClip))).scalars().first()
         assert clip.status == ClipStatus.OK
-        # окно = 3 мин с отступом 5 мин от «живого края» записи
-        assert clip.end_ts == dev_time - dt.timedelta(minutes=5)
-        assert clip.start_ts == dev_time - dt.timedelta(minutes=8)
-    # качали по playbackURI устройства (с кредами), а не по собранному URL
+        # взят ЗАКРЫТЫЙ сегмент, окно — последние 3 мин до его конца
+        assert clip.end_ts == dev_time - dt.timedelta(minutes=20)
+        assert clip.start_ts == dev_time - dt.timedelta(minutes=23)
+    # качали по playbackURI ЗАКРЫТОГО сегмента (name=CLOSED) с кредами
     assert captured["url"].startswith("rtsp://admin:pw@")
-    assert "starttime=" in captured["url"]
+    assert "name=CLOSED" in captured["url"]
 
 
 # ── Отмена прогона ───────────────────────────────────────────────────────────
