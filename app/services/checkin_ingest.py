@@ -213,6 +213,7 @@ async def _ffmpeg_download(
         "-c:a", "aac",
         out_path,
     ]
+    log.info("ffmpeg ← %s", _mask(url))
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
@@ -284,17 +285,28 @@ def _rewrite_uri_window(uri: str, start: dt.datetime, end: dt.datetime) -> str:
     return uri
 
 
+def _mask(url: str) -> str:
+    """Прячет пароль в rtsp://user:pass@host для логов."""
+    return re.sub(r"(rtsp://[^:/@]+:)[^@]*@", r"\1***@", url or "")
+
+
 async def _test_clip_jobs(client, ch, search_start, search_end, minutes) -> list[tuple]:
     """Для тест-клипа: спрашиваем у устройства реально записанные сегменты
     субпотока и берём ПОСЛЕДНИЕ N минут по РОДНОМУ playbackURI (верный trackid и
     время самого регистратора → без догадок про TZ/трек)."""
+    sub = main = 0
     try:
         segs = await client.search_playback(ch.channel_id, search_start, search_end, substream=True)
+        sub = len(segs)
         if not segs:
             segs = await client.search_playback(ch.channel_id, search_start, search_end, substream=False)
+            main = len(segs)
     except NVRError as exc:
-        log.info("рег.кан.%s: playback-поиск недоступен: %s", ch.channel_id, exc)
+        log.warning("кан.%s: playback-поиск недоступен: %s", ch.channel_id, exc)
         return []
+    log.info("тест-клип кан.%s: сегментов субпотока=%d, основного=%d (окно %s..%s)",
+             ch.channel_id, sub, main,
+             search_start.strftime("%d.%m %H:%M"), search_end.strftime("%d.%m %H:%M"))
     if not segs:
         return []
     latest = max(segs, key=lambda x: x["end"])
@@ -302,6 +314,9 @@ async def _test_clip_jobs(client, ch, search_start, search_end, minutes) -> list
     win_start = max(win_end - dt.timedelta(minutes=minutes), latest["start"])
     uri = latest.get("uri") or ""
     uri = client.authed_rtsp(_rewrite_uri_window(uri, win_start, win_end)) if uri else None
+    log.info("тест-клип кан.%s: последние %d мин %s..%s → %s", ch.channel_id, minutes,
+             win_start.strftime("%H:%M:%S"), win_end.strftime("%H:%M:%S"),
+             _mask(uri) if uri else "(URL соберём сами)")
     return [(ArchiveSegment(win_start, win_end), uri)]
 
 
