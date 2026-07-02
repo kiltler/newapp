@@ -314,8 +314,18 @@ async def _test_clip_jobs(client, ch, search_start, search_end, minutes) -> list
     if not segs:
         return []
     latest = max(segs, key=lambda x: x["end"])
-    win_end = latest["end"]
-    win_start = max(win_end - dt.timedelta(minutes=minutes), latest["start"])
+    seg_start, seg_end = latest["start"], latest["end"]
+    # Отступ от «живого края»: Hikvision не отдаёт playback самого свежего куска
+    # (текущий записываемый файл ещё не готов к воспроизведению). Берём окно чуть
+    # раньше конца записи — гарантированно уже записанный отрезок.
+    lag = dt.timedelta(minutes=5)
+    win_end = seg_end - lag
+    if win_end <= seg_start:
+        win_end = seg_end - dt.timedelta(seconds=30)
+    win_start = max(win_end - dt.timedelta(minutes=minutes), seg_start)
+    if win_end <= win_start:
+        win_start = seg_start
+        win_end = min(seg_start + dt.timedelta(minutes=minutes), seg_end)
     uri = latest.get("uri") or ""
     uri = client.authed_rtsp(_rewrite_uri_window(uri, win_start, win_end)) if uri else None
     log.info("тест-клип кан.%s: последние %d мин %s..%s → %s", ch.channel_id, minutes,

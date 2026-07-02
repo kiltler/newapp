@@ -504,8 +504,9 @@ async def test_test_clip_uses_device_playback(db, monkeypatch, tmp_path):
     async with SessionLocal() as s:
         clip = (await s.execute(__import__("sqlalchemy").select(CheckinClip))).scalars().first()
         assert clip.status == ClipStatus.OK
-        assert clip.end_ts == dev_time                       # до конца последнего записанного сегмента
-        assert clip.start_ts == dev_time - dt.timedelta(minutes=3)
+        # окно = 3 мин с отступом 5 мин от «живого края» записи
+        assert clip.end_ts == dev_time - dt.timedelta(minutes=5)
+        assert clip.start_ts == dev_time - dt.timedelta(minutes=8)
     # качали по playbackURI устройства (с кредами), а не по собранному URL
     assert captured["url"].startswith("rtsp://admin:pw@")
     assert "starttime=" in captured["url"]
