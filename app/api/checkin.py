@@ -49,7 +49,7 @@ _register_filters(templates)
 router = APIRouter(tags=["checkin"])
 
 # Метка сборки — видно в UI, сразу понятно, задеплоен ли новый код.
-CHECKIN_BUILD = "2026-07-02-httpdl2"
+CHECKIN_BUILD = "2026-07-02-httpdl3"
 
 
 def _clip_url(path: str) -> str:
@@ -321,11 +321,13 @@ async def recorder_diag(rec_id: int, session: AsyncSession = Depends(get_session
             probe["window"] = f"{w0.isoformat()}..{w1.isoformat()}"
             dl_uri = checkin_ingest._rewrite_uri_window(seg["uri"], w0, w1)
             tmp = os.path.join(settings.clips_dir, f"probe_{rec.id}_http.bin")
+            # Тянем максимум 5 МБ — только подтвердить, что данные идут по HTTP.
             try:
                 ok, nbytes, err = await _asyncio.wait_for(
-                    client.download_segment(dl_uri, tmp), timeout=30)
+                    client.download_segment(dl_uri, tmp, max_bytes=5 * 1024 * 1024), timeout=45)
             except _asyncio.TimeoutError:
-                ok, nbytes, err = False, 0, "таймаут HTTP-скачивания 30с"
+                nbytes = os.path.getsize(tmp) if os.path.exists(tmp) else 0
+                ok, err = (nbytes > 0), (f"таймаут 45с, но скачано {nbytes} байт" if nbytes else "таймаут 45с, 0 байт")
             probe["http_download_isapi"] = {"ok": ok, "bytes": nbytes, "error": err[:300]}
             probe["uri_used"] = dl_uri  # playbackURI устройства без пароля
             try:

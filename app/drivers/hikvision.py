@@ -429,11 +429,14 @@ class HikvisionClient(NVRClient):
             position += page
         return out
 
-    async def download_segment(self, playback_uri: str, out_path: str) -> tuple[bool, int, str]:
+    async def download_segment(
+        self, playback_uri: str, out_path: str, max_bytes: int | None = None
+    ) -> tuple[bool, int, str]:
         """Скачивает отрезок архива по HTTP через /ISAPI/ContentMgmt/download.
 
         Обход RTSP (порт 554): использует playbackURI устройства и HTTP-порт 80
-        (там же, где работает ISAPI). Возвращает (успех, байт, ошибка)."""
+        (там же, где работает ISAPI). max_bytes — остановиться после N байт
+        (для пробы). Возвращает (успех, байт, ошибка)."""
         esc = playback_uri.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         body = (
             '<?xml version="1.0" encoding="utf-8"?>'
@@ -456,6 +459,8 @@ class HikvisionClient(NVRClient):
                         async for chunk in resp.aiter_bytes(65536):
                             fh.write(chunk)
                             total += len(chunk)
+                            if max_bytes and total >= max_bytes:
+                                break  # достаточно для пробы
             return (total > 0), total, "" if total > 0 else "пустой ответ"
         except Exception as exc:  # noqa: BLE001
             return False, 0, f"{type(exc).__name__}: {exc}"
