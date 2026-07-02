@@ -429,6 +429,37 @@ class HikvisionClient(NVRClient):
             position += page
         return out
 
+    async def download_segment(self, playback_uri: str, out_path: str) -> tuple[bool, int, str]:
+        """Скачивает отрезок архива по HTTP через /ISAPI/ContentMgmt/download.
+
+        Обход RTSP (порт 554): использует playbackURI устройства и HTTP-порт 80
+        (там же, где работает ISAPI). Возвращает (успех, байт, ошибка)."""
+        esc = playback_uri.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        body = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<downloadRequest version="2.0" xmlns="http://www.hikvision.com/ver20/XMLSchema">'
+            f"<playbackURI>{esc}</playbackURI></downloadRequest>"
+        )
+        url = f"{self.base_url}/ISAPI/ContentMgmt/download"
+        try:
+            async with httpx.AsyncClient(
+                auth=self._make_auth(), timeout=self.timeout, verify=False, follow_redirects=True
+            ) as http:
+                async with http.stream(
+                    "POST", url, content=body, headers={"Content-Type": "application/xml"}
+                ) as resp:
+                    if resp.status_code != 200:
+                        text = (await resp.aread()).decode("utf-8", "replace")[:200]
+                        return False, 0, f"HTTP {resp.status_code}: {text}"
+                    total = 0
+                    with open(out_path, "wb") as fh:
+                        async for chunk in resp.aiter_bytes(65536):
+                            fh.write(chunk)
+                            total += len(chunk)
+            return (total > 0), total, "" if total > 0 else "пустой ответ"
+        except Exception as exc:  # noqa: BLE001
+            return False, 0, f"{type(exc).__name__}: {exc}"
+
     def authed_rtsp(self, uri: str) -> str:
         """Вставляет логин/пароль в rtsp://host/... → rtsp://user:pass@host/..."""
         if not uri.startswith("rtsp://"):

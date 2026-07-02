@@ -49,7 +49,7 @@ _register_filters(templates)
 router = APIRouter(tags=["checkin"])
 
 # Метка сборки — видно в UI, сразу понятно, задеплоен ли новый код.
-CHECKIN_BUILD = "2026-07-02-closedseg"
+CHECKIN_BUILD = "2026-07-02-httpdl"
 
 
 def _clip_url(path: str) -> str:
@@ -329,6 +329,16 @@ async def recorder_diag(rec_id: int, session: AsyncSession = Depends(get_session
                 ok, err = await checkin_ingest._ffmpeg_download(url, tmp, 15)
                 probe[key] = {"ok": ok, "bytes": (os.path.getsize(tmp) if os.path.exists(tmp) else 0),
                               "error": err[:200]}
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+            # 4-й способ — HTTP-скачивание через ISAPI (порт 80, обход RTSP):
+            if seg.get("uri"):
+                dl_uri = checkin_ingest._rewrite_uri_window(seg["uri"], w0, w1)
+                tmp = os.path.join(settings.clips_dir, f"probe_{rec.id}_http.bin")
+                ok, nbytes, err = await client.download_segment(dl_uri, tmp)
+                probe["http_download_isapi"] = {"ok": ok, "bytes": nbytes, "error": err[:200]}
                 try:
                     os.remove(tmp)
                 except OSError:
