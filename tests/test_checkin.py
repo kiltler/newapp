@@ -462,57 +462,57 @@ async def test_today_window_clamped_to_now(db, monkeypatch, tmp_path):
     assert captured["end"] > captured["start"]
 
 
-async def test_test_clip_uses_device_playback(db, monkeypatch, tmp_path):
-    """Тест-клип: якорь на часы регистратора + скачивание по РОДНОМУ playbackURI."""
+async def test_test_clip_http_download_and_trim(db, monkeypatch, tmp_path):
+    """Тест-клип: HTTP-скачивание сегмента ЗАКРЫТОГО файла + обрезка окна ffmpeg'ом."""
     monkeypatch.setattr(checkin_ingest.settings, "clips_dir", str(tmp_path))
     async with SessionLocal() as s:
         h = CheckinHotel(name="Гост Тест"); s.add(h); await s.flush()
-        rec = CheckinRecorder(hotel_id=h.id, host="192.168.100.8", model_type="ds7616ni_e2",
-                              night_start="07:00", night_end="24:00")
+        rec = CheckinRecorder(hotel_id=h.id, host="192.168.100.8", model_type="ds7616ni_e2")
         s.add(rec); await s.flush()
         s.add(CheckinChannel(recorder_id=rec.id, channel_id=60, role="reception", substream_trackid=6002))
         await s.commit(); hid = h.id
 
     dev_time = dt.datetime(2026, 7, 2, 23, 42, 0)
-    # Открытый (пишущийся) сегмент до «сейчас» и ЗАКРЫТЫЙ (закончился 20 мин назад).
     open_seg = {"start": dev_time - dt.timedelta(minutes=12), "end": dev_time,
-                "uri": "rtsp://192.168.100.8/Streaming/tracks/6001/?starttime=a&endtime=b&name=OPEN&size=1"}
+                "uri": "rtsp://192.168.100.8/Streaming/tracks/6001/?name=OPEN"}
     closed_seg = {"start": dev_time - dt.timedelta(hours=1), "end": dev_time - dt.timedelta(minutes=20),
                   "uri": "rtsp://192.168.100.8/Streaming/tracks/6001/?starttime=X&endtime=Y&name=CLOSED&size=9"}
 
+    dl = {}
+
     class FakeClient:
-        async def get_device_time(self):
-            return dev_time
         async def search_playback(self, ch, s0, e0, *, substream=True):
             return [open_seg, closed_seg]
-        def authed_rtsp(self, uri):
-            return "rtsp://admin:pw@" + uri[len("rtsp://"):]
-        async def search_activity(self, *a, **k):
-            raise AssertionError("тест-клип не должен искать активность")
+        async def download_segment(self, uri, out_path, max_bytes=None):
+            dl["uri"] = uri
+            with open(out_path, "wb") as fh:
+                fh.write(b"X" * 2048)
+            return True, 2048, ""
 
     monkeypatch.setattr(checkin_ingest, "build_recorder_client", lambda rec, password=None: FakeClient())
 
-    captured = {}
+    trim = {}
 
-    async def fake_ffmpeg(url, out_path, duration_s, run_id=None, label="", seg=None):
-        captured["url"] = url
-        with open(out_path, "wb") as fh:
+    async def fake_trim(src, dst, offset_s, duration_s):
+        trim["offset"], trim["duration"] = offset_s, duration_s
+        with open(dst, "wb") as fh:
             fh.write(b"CLIP")
         return True, ""
 
-    monkeypatch.setattr(checkin_ingest, "_ffmpeg_download", fake_ffmpeg)
+    monkeypatch.setattr(checkin_ingest, "_ffmpeg_trim", fake_trim)
 
     summary = await checkin_ingest.run_test_clip(3, [hid])
     assert summary["downloaded"] == 1
+    # качали по URI ЗАКРЫТОГО сегмента (не открытого)
+    assert "name=CLOSED" in dl["uri"]
+    # обрезка: смещение = win_start - seg_start = (−23мин) − (−60мин) = 37 мин; длительность 3 мин
+    assert trim["offset"] == 37 * 60
+    assert trim["duration"] == 3 * 60
     async with SessionLocal() as s:
         clip = (await s.execute(__import__("sqlalchemy").select(CheckinClip))).scalars().first()
         assert clip.status == ClipStatus.OK
-        # взят ЗАКРЫТЫЙ сегмент, окно — последние 3 мин до его конца
         assert clip.end_ts == dev_time - dt.timedelta(minutes=20)
         assert clip.start_ts == dev_time - dt.timedelta(minutes=23)
-    # качали по playbackURI ЗАКРЫТОГО сегмента (name=CLOSED) с кредами
-    assert captured["url"].startswith("rtsp://admin:pw@")
-    assert "name=CLOSED" in captured["url"]
 
 
 # ── Отмена прогона ───────────────────────────────────────────────────────────
@@ -538,13 +538,10 @@ async def test_ingestion_cancel_stops(db, monkeypatch, tmp_path):
         await s.commit(); hid = h.id
 
     class FakeClient:
-        async def get_device_time(self):
-            return dt.datetime(2026, 7, 2, 3, 49, 0)
-        async def search_playback(self, ch, s0, e0, *, substream=True):
-            return [{"start": dt.datetime(2026, 7, 2, 2), "end": dt.datetime(2026, 7, 2, 3, 49),
-                     "uri": "rtsp://10.0.0.5/Streaming/tracks/102/?starttime=X&endtime=Y"}]
-        def authed_rtsp(self, uri):
-            return uri
+        async def search_activity(self, ch, a, b, *, mode="all"):
+            return [ArchiveSegment(dt.datetime(2026, 6, 15, 8), dt.datetime(2026, 6, 15, 8, 10))]
+        def rtsp_playback_url(self, tid, a, b, *, rtsp_port=554):
+            return f"rtsp://f/{tid}"
 
     monkeypatch.setattr(checkin_ingest, "build_recorder_client", lambda rec, password=None: FakeClient())
 
@@ -554,7 +551,8 @@ async def test_ingestion_cancel_stops(db, monkeypatch, tmp_path):
 
     monkeypatch.setattr(checkin_ingest, "_ffmpeg_download", fake_dl)
 
-    await checkin_ingest.run_test_clip(10, [hid])
+    # не-тестовый прогон (RTSP/ffmpeg-путь): за прошлый день, окно ночи валидно
+    await checkin_ingest.run_ingestion(dt.date(2026, 6, 15), [hid], "manual")
     from app.models import CheckinIngestRun, IngestRunStatus
     async with SessionLocal() as s:
         run = (await s.execute(__import__("sqlalchemy").select(CheckinIngestRun))).scalars().first()

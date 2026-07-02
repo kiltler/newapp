@@ -308,9 +308,9 @@ def _closed_segment(segs: list[dict], min_age: dt.timedelta = dt.timedelta(minut
 
 
 async def _test_clip_jobs(client, ch, search_start, search_end, minutes) -> list[tuple]:
-    """Для тест-клипа: спрашиваем у устройства реально записанные сегменты
-    субпотока и берём ПОСЛЕДНИЕ N минут по РОДНОМУ playbackURI (верный trackid и
-    время самого регистратора → без догадок про TZ/трек)."""
+    """Для тест-клипа: спрашиваем у устройства записанные сегменты субпотока и
+    берём последние N минут ЗАКРЫТОГО сегмента. Возвращает [(seg, win_start, win_end)],
+    где seg — полный сегмент устройства (его качаем по HTTP, потом режем ffmpeg'ом)."""
     sub = main = 0
     try:
         segs = await client.search_playback(ch.channel_id, search_start, search_end, substream=True)
@@ -321,25 +321,113 @@ async def _test_clip_jobs(client, ch, search_start, search_end, minutes) -> list
     except NVRError as exc:
         log.warning("кан.%s: playback-поиск недоступен: %s", ch.channel_id, exc)
         return []
-    log.info("тест-клип кан.%s: сегментов субпотока=%d, основного=%d (окно %s..%s)",
-             ch.channel_id, sub, main,
-             search_start.strftime("%d.%m %H:%M"), search_end.strftime("%d.%m %H:%M"))
-    if not segs:
+    log.info("тест-клип кан.%s: сегментов субпотока=%d, основного=%d", ch.channel_id, sub, main)
+    seg = _closed_segment(segs)
+    if seg is None:
         return []
-    # Берём ЗАКРЫТЫЙ сегмент (открытый/пишущийся файл Hikvision не отдаёт).
-    latest = _closed_segment(segs)
-    if latest is None:
-        return []
-    seg_start, seg_end = latest["start"], latest["end"]
-    # Закрытый файл проигрывается целиком — берём последние `minutes` до его конца.
-    win_end = seg_end
-    win_start = max(win_end - dt.timedelta(minutes=minutes), seg_start)
-    uri = latest.get("uri") or ""
-    uri = client.authed_rtsp(_rewrite_uri_window(uri, win_start, win_end)) if uri else None
-    log.info("тест-клип кан.%s: последние %d мин %s..%s → %s", ch.channel_id, minutes,
-             win_start.strftime("%H:%M:%S"), win_end.strftime("%H:%M:%S"),
-             _mask(uri) if uri else "(URL соберём сами)")
-    return [(ArchiveSegment(win_start, win_end), uri)]
+    win_end = seg["end"]
+    win_start = max(win_end - dt.timedelta(minutes=minutes), seg["start"])
+    log.info("тест-клип кан.%s: сегмент %s..%s, окно %s..%s", ch.channel_id,
+             seg["start"].strftime("%H:%M:%S"), seg["end"].strftime("%H:%M:%S"),
+             win_start.strftime("%H:%M:%S"), win_end.strftime("%H:%M:%S"))
+    return [(seg, win_start, win_end)]
+
+
+async def _ffmpeg_trim(src: str, dst: str, offset_s: float, duration_s: float) -> tuple[bool, str]:
+    """Вырезает из локального файла окно [offset, offset+duration] → mp4 (видео copy,
+    аудио → AAC). -ss перед -i = быстрый поиск по ключевому кадру."""
+    cmd = [
+        settings.ffmpeg_bin, "-y", "-nostdin",
+        "-ss", f"{max(offset_s, 0):.3f}",
+        "-i", src,
+        "-t", f"{max(duration_s, 1):.0f}",
+        "-map", "0:v:0?", "-map", "0:a:0?", "-c:v", "copy", "-c:a", "aac",
+        dst,
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+    except FileNotFoundError:
+        return False, "ffmpeg не найден"
+    try:
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+    except asyncio.TimeoutError:
+        proc.kill()
+        return False, "таймаут обрезки"
+    if proc.returncode != 0:
+        tail = (stderr or b"").decode("utf-8", "replace").strip().splitlines()[-2:]
+        return False, "ffmpeg: " + " | ".join(tail)
+    if not os.path.exists(dst) or os.path.getsize(dst) == 0:
+        return False, "пустой результат обрезки"
+    return True, ""
+
+
+async def _ingest_http_clip(
+    session, client, recorder, hotel_id, ch, seg: dict,
+    win_start: dt.datetime, win_end: dt.datetime, run_id: int | None, label: str,
+) -> tuple[str, str]:
+    """Скачивает сегмент по HTTP (ISAPI) и вырезает окно ffmpeg'ом. Идемпотентно."""
+    existing = (
+        await session.execute(
+            select(CheckinClip).where(
+                CheckinClip.recorder_id == recorder.id,
+                CheckinClip.channel_id == ch.channel_id,
+                CheckinClip.start_ts == win_start,
+                CheckinClip.end_ts == win_end,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing and existing.status == ClipStatus.OK and existing.path and os.path.exists(existing.path):
+        return "skip", ""
+
+    out_seg = ArchiveSegment(win_start, win_end)
+    out_path = clip_path(recorder, hotel_id, ch.channel_id, out_seg)
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    tmp = out_path + ".full"
+
+    clip = existing or CheckinClip(
+        hotel_id=hotel_id, recorder_id=recorder.id, channel_id=ch.channel_id, role=ch.role,
+        day=win_start.date(), start_ts=win_start, end_ts=win_end, path=out_path,
+    )
+    clip.path, clip.status, clip.error = out_path, ClipStatus.PENDING, None
+    if existing is None:
+        session.add(clip)
+    await session.commit()
+
+    uri = seg.get("uri") or ""
+    if not uri:
+        clip.status, clip.error = ClipStatus.ERROR, "нет playbackURI сегмента"
+        await session.commit()
+        return "error", clip.error
+
+    await _patch_run(run_id, current=f"{label}: качаю сегмент по HTTP…")
+    ok, nbytes, err = await client.download_segment(uri, tmp, max_bytes=800 * 1024 * 1024)
+    if not ok or nbytes == 0:
+        clip.status, clip.error = ClipStatus.ERROR, f"HTTP-скачивание: {err}"
+        await session.commit()
+        _safe_remove(tmp)
+        return "error", clip.error
+
+    await _patch_run(run_id, current=f"{label}: обрезаю клип из {nbytes // 1048576} МБ…")
+    offset = max((win_start - seg["start"]).total_seconds(), 0)
+    duration = (win_end - win_start).total_seconds()
+    ok2, err2 = await _ffmpeg_trim(tmp, out_path, offset, duration)
+    _safe_remove(tmp)
+
+    if ok2:
+        clip.status, clip.size_bytes, clip.error = ClipStatus.OK, os.path.getsize(out_path), None
+    else:
+        clip.status, clip.error = ClipStatus.ERROR, f"обрезка: {err2}"
+        log.warning("рег.%s кан.%s: обрезка: %s", recorder.id, ch.channel_id, err2)
+    await session.commit()
+    return ("ok", "") if ok2 else ("error", clip.error)
+
+
+def _safe_remove(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
 
 
 def clip_path(recorder: CheckinRecorder, hotel_id: int, channel_id: int, seg: ArchiveSegment) -> str:
@@ -492,15 +580,30 @@ async def ingest_recorder(
                     break
                 await _patch_run(run_id, current=f"{label}: канал {ch.channel_id} ({idx}/{len(channels)}), скачано {stats['downloaded']}")
                 if test_mode:
+                    # HTTP-скачивание сегмента + обрезка ffmpeg (RTSP на DVR может не отдавать).
                     jobs = await _test_clip_jobs(client, ch, search_start, search_end, test_minutes)
                     if not jobs:
                         stats["errors"] += 1
                         await _patch_run(run_id, incs={"errors": 1}, rec_id=recorder_id,
                                          rec_incs={"errors": 1, "channels_done": 1},
-                                         error_sample=f"кан.{ch.channel_id}: нет записанного субпотока за последние 18ч "
-                                                      "(включена ли запись субпотока на этом канале?)")
+                                         error_sample=f"кан.{ch.channel_id}: нет записи в архиве за последние сутки")
                         continue
-                elif use_whole:
+                    for seg_dict, ws, we in jobs:
+                        res, err = await _ingest_http_clip(
+                            session, client, recorder, recorder.hotel_id, ch, seg_dict, ws, we, run_id, label)
+                        if res == "ok":
+                            stats["downloaded"] += 1
+                            await _patch_run(run_id, incs={"downloaded": 1}, rec_id=recorder_id, rec_incs={"downloaded": 1})
+                        elif res == "skip":
+                            stats["skipped"] += 1
+                            await _patch_run(run_id, incs={"skipped": 1}, rec_id=recorder_id, rec_incs={"skipped": 1})
+                        else:
+                            stats["errors"] += 1
+                            await _patch_run(run_id, incs={"errors": 1}, rec_id=recorder_id,
+                                             rec_incs={"errors": 1}, error_sample=f"кан.{ch.channel_id}: {err}")
+                    await _patch_run(run_id, rec_id=recorder_id, rec_incs={"channels_done": 1})
+                    continue
+                if use_whole:
                     jobs = [(ArchiveSegment(win_start, win_end), None)]
                 else:
                     try:
