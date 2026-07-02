@@ -275,14 +275,15 @@ async def _ffmpeg_download(
 
 
 def _rewrite_uri_window(uri: str, start: dt.datetime, end: dt.datetime) -> str:
-    """Подменяет starttime/endtime в playbackURI устройства на нужное окно."""
+    """Берём путь трека из playbackURI устройства и ставим своё окно (playback-by-time).
+
+    Лишние параметры (name/size — привязаны к конкретному файлу-сегменту) убираем:
+    для проигрывания произвольного отрезка нужен только starttime/endtime.
+    """
+    base = uri.split("?", 1)[0]
     st = start.strftime("%Y%m%dT%H%M%SZ")
     en = end.strftime("%Y%m%dT%H%M%SZ")
-    if "starttime=" in uri:
-        uri = re.sub(r"starttime=[^&]*", "starttime=" + st, uri)
-    if "endtime=" in uri:
-        uri = re.sub(r"endtime=[^&]*", "endtime=" + en, uri)
-    return uri
+    return f"{base}?starttime={st}&endtime={en}"
 
 
 def _mask(url: str) -> str:

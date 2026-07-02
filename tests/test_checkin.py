@@ -614,8 +614,7 @@ def test_authed_rtsp_injects_credentials():
 
 
 def test_rewrite_uri_window():
-    uri = "rtsp://h/Streaming/tracks/6002/?starttime=20200601T020000Z&endtime=20200601T030000Z&name=n"
+    uri = "rtsp://h/Streaming/tracks/6001/?starttime=20200601T020000Z&endtime=20200601T030000Z&name=n&size=9"
     out = checkin_ingest._rewrite_uri_window(uri, dt.datetime(2026, 7, 2, 3, 46), dt.datetime(2026, 7, 2, 3, 49))
-    assert "starttime=20260702T034600Z" in out
-    assert "endtime=20260702T034900Z" in out
-    assert "name=n" in out
+    assert out == "rtsp://h/Streaming/tracks/6001/?starttime=20260702T034600Z&endtime=20260702T034900Z"
+    assert "name=" not in out and "size=" not in out  # лишние параметры убраны
