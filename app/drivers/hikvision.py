@@ -194,7 +194,7 @@ class HikvisionClient(NVRClient):
         for _ in range(50):  # ограничение пагинации
             body = (
                 '<?xml version="1.0" encoding="utf-8"?>'
-                "<CMSearchDescription>"
+                "<CMSearchDescription version=\"1.0\" xmlns=\"http://www.hikvision.com/ver20/XMLSchema\">"
                 f"<searchID>{search_id}</searchID>"
                 f"<trackList><trackID>{track_id}</trackID></trackList>"
                 "<timeSpanList><timeSpan>"
@@ -342,7 +342,7 @@ class HikvisionClient(NVRClient):
         for _ in range(50):
             body = (
                 '<?xml version="1.0" encoding="utf-8"?>'
-                "<CMSearchDescription>"
+                "<CMSearchDescription version=\"1.0\" xmlns=\"http://www.hikvision.com/ver20/XMLSchema\">"
                 f"<searchID>{search_id}</searchID>"
                 f"<trackList><trackID>{track_id}</trackID></trackList>"
                 "<timeSpanList><timeSpan>"
@@ -392,7 +392,7 @@ class HikvisionClient(NVRClient):
         for _ in range(50):
             body = (
                 '<?xml version="1.0" encoding="utf-8"?>'
-                "<CMSearchDescription>"
+                "<CMSearchDescription version=\"1.0\" xmlns=\"http://www.hikvision.com/ver20/XMLSchema\">"
                 f"<searchID>{search_id}</searchID>"
                 f"<trackList><trackID>{track_id}</trackID></trackList>"
                 "<timeSpanList><timeSpan>"
