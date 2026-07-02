@@ -49,7 +49,7 @@ _register_filters(templates)
 router = APIRouter(tags=["checkin"])
 
 # Метка сборки — видно в UI, сразу понятно, задеплоен ли новый код.
-CHECKIN_BUILD = "2026-07-02-httpdl"
+CHECKIN_BUILD = "2026-07-02-httpdl2"
 
 
 def _clip_url(path: str) -> str:
@@ -302,8 +302,10 @@ async def recorder_diag(rec_id: int, session: AsyncSession = Depends(get_session
                 e[f"{lbl}_error"] = str(exc)
         out["channels"].append(e)
 
-    # ── ПРОБНОЕ СКАЧИВАНИЕ: реально дёргаем ffmpeg 3 способами на 15с из уже
-    #    записанного куска (начало последнего сегмента) — видно, что качается.
+    # ── ПРОБНОЕ СКАЧИВАНИЕ по HTTP (ISAPI /ContentMgmt/download, порт 80).
+    #    RTSP на этом DVR не отдаёт архив — не тратим время на его пробы.
+    import asyncio as _asyncio
+
     probe: dict = {}
     try:
         ch0 = rec.channels[0].channel_id if rec.channels else None
@@ -311,38 +313,25 @@ async def recorder_diag(rec_id: int, session: AsyncSession = Depends(get_session
         if ch0 is not None:
             subs = await client.search_playback(ch0, start, end, substream=True)
             seg = checkin_ingest._closed_segment(subs) if subs else None  # закрытый сегмент!
-        if seg:
-            w1 = seg["end"] - dt.timedelta(seconds=5)     # у конца ЗАКРЫТОГО файла = точно доступно
+        if seg and seg.get("uri"):
+            w1 = seg["end"] - dt.timedelta(seconds=5)
             w0 = w1 - dt.timedelta(seconds=15)
             probe["channel"] = ch0
             probe["segment_used"] = f"{seg['start'].isoformat()}..{seg['end'].isoformat()}"
             probe["window"] = f"{w0.isoformat()}..{w1.isoformat()}"
-            targets = {
-                "main_6001_by_time": client.rtsp_playback_url(ch0 * 100 + 1, w0, w1, rtsp_port=rec.rtsp_port),
-                "sub_6002_by_time": client.rtsp_playback_url(ch0 * 100 + 2, w0, w1, rtsp_port=rec.rtsp_port),
-            }
-            if seg.get("uri"):
-                targets["sub_playbackuri_name"] = client.authed_rtsp(
-                    checkin_ingest._rewrite_uri_window(seg["uri"], w0, w1))
-            for key, url in targets.items():
-                tmp = os.path.join(settings.clips_dir, f"probe_{rec.id}_{key}.mp4")
-                ok, err = await checkin_ingest._ffmpeg_download(url, tmp, 15)
-                probe[key] = {"ok": ok, "bytes": (os.path.getsize(tmp) if os.path.exists(tmp) else 0),
-                              "error": err[:200]}
-                try:
-                    os.remove(tmp)
-                except OSError:
-                    pass
-            # 4-й способ — HTTP-скачивание через ISAPI (порт 80, обход RTSP):
-            if seg.get("uri"):
-                dl_uri = checkin_ingest._rewrite_uri_window(seg["uri"], w0, w1)
-                tmp = os.path.join(settings.clips_dir, f"probe_{rec.id}_http.bin")
-                ok, nbytes, err = await client.download_segment(dl_uri, tmp)
-                probe["http_download_isapi"] = {"ok": ok, "bytes": nbytes, "error": err[:200]}
-                try:
-                    os.remove(tmp)
-                except OSError:
-                    pass
+            dl_uri = checkin_ingest._rewrite_uri_window(seg["uri"], w0, w1)
+            tmp = os.path.join(settings.clips_dir, f"probe_{rec.id}_http.bin")
+            try:
+                ok, nbytes, err = await _asyncio.wait_for(
+                    client.download_segment(dl_uri, tmp), timeout=30)
+            except _asyncio.TimeoutError:
+                ok, nbytes, err = False, 0, "таймаут HTTP-скачивания 30с"
+            probe["http_download_isapi"] = {"ok": ok, "bytes": nbytes, "error": err[:300]}
+            probe["uri_used"] = dl_uri  # playbackURI устройства без пароля
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
         else:
             probe["note"] = "нет сегментов субпотока для пробы"
     except Exception as exc:  # noqa: BLE001
