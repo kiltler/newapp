@@ -375,9 +375,14 @@ async def _has_playable_duration(path: str) -> bool:
 
 
 async def _window_jobs(client, ch, win_start: dt.datetime, win_end: dt.datetime) -> list[tuple]:
-    """Сегменты записи, попадающие в окно [win_start, win_end] → [(seg, cs, ce)],
-    обрезанные по окну. «Живой край» (последние 15 мин) исключаем."""
-    lo, hi = win_start - dt.timedelta(hours=1), win_end + dt.timedelta(hours=1)
+    """Сегменты записи, попадающие в окно [win_start, win_end] → [(seg, cs, ce)].
+
+    Поиск делаем ШИРОКИМ (интерпретация времени запроса устройством ненадёжна из-за
+    часовых поясов), а фильтруем по времени самих сегментов — они приходят в
+    локальном времени регистратора, том же, что и win_start/win_end. «Живой край»
+    (последние 15 мин) исключаем.
+    """
+    lo, hi = win_start - dt.timedelta(hours=36), win_end + dt.timedelta(hours=36)
     try:
         segs = await client.search_playback(ch.channel_id, lo, hi, substream=True)
         if not segs:
@@ -395,6 +400,9 @@ async def _window_jobs(client, ch, win_start: dt.datetime, win_end: dt.datetime)
         ce = min(seg["end"], safe_end)
         if (ce - cs).total_seconds() >= 10:
             jobs.append((seg, cs, ce))
+    log.info("кан.%s: окно %s..%s → %d клип(ов) из %d сегментов",
+             ch.channel_id, win_start.strftime("%d.%m %H:%M"), win_end.strftime("%d.%m %H:%M"),
+             len(jobs), len(segs))
     return jobs[: settings.checkin_max_segments]
 
 
@@ -639,11 +647,26 @@ async def ingest_recorder(
                 search_start = search_end - dt.timedelta(hours=54)
                 await _patch_run(run_id, rec_id=recorder_id,
                                  current=f"{label}: ищу свежую запись в архиве…")
+            elif use_whole:
+                # День (За вчера/сегодня): окно в терминах ВРЕМЕНИ РЕГИСТРАТОРА,
+                # иначе TZ-сдвиг сервера обрежет день до пары часов.
+                win_start, win_end = night_window(recorder, day)
+                try:
+                    dev_now = await client.get_device_time()
+                except Exception:  # noqa: BLE001  (NVRError или драйвер без метода)
+                    dev_now = dt.datetime.now()
+                if win_end > dev_now:  # текущий день ещё не закрыт
+                    win_end = dev_now
+                if win_end <= win_start:
+                    await _patch_run(run_id, rec_id=recorder_id, rec_sets={"status": "done"},
+                                     current=f"{label}: окно ещё не наступило")
+                    return stats
+                await _patch_run(run_id, rec_id=recorder_id,
+                                 current=f"{label}: время регистратора {dev_now.strftime('%d.%m %H:%M')}, качаю день")
             elif window is not None:
                 win_start, win_end = window
             else:
                 win_start, win_end = night_window(recorder, day)
-                # Для сегодняшнего/текущего дня окно ещё не закрыто — берём до «сейчас».
                 now = dt.datetime.now()
                 if win_end > now:
                     win_end = now
