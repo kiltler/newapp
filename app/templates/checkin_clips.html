@@ -8,9 +8,20 @@
     <a class="bus-btn secondary" href="/checkin/notifications">🔔 Уведомления{% if unread %} <span class="badge err">{{ unread }}</span>{% endif %}</a>
     <a class="bus-btn secondary" href="/checkin/settings">⚙ Настройки</a>
     <button class="secondary" onclick="runTestClip()">🧪 Тест-клип (3 мин)</button>
-    <button class="secondary" onclick="runIngest()">▶ За вчера</button>
-    <button onclick="runIngestToday()">▶ За сегодня</button>
   </div>
+</div>
+
+<!-- Выбор гостиницы и дня для скачивания -->
+<div class="bus-search" style="align-items:center">
+  <select id="dlHotel" class="loc-sel" style="min-width:200px">
+    <option value="">Все гостиницы</option>
+    {% for h in hotels %}<option value="{{ h.id }}" {{ 'selected' if f_hotel == h.id }}>{{ h.name }}</option>{% endfor %}
+  </select>
+  <input type="date" id="dlDay" style="max-width:180px">
+  <button onclick="runIngestPick()">▶ Скачать за выбранный день</button>
+  <span class="muted" style="font-size:12px">быстро:</span>
+  <button class="secondary" onclick="runIngest()">За вчера</button>
+  <button class="secondary" onclick="runIngestToday()">За сегодня</button>
 </div>
 
 <div id="ingestPanel" class="chart-card" style="display:none; margin-bottom:14px;">
@@ -167,6 +178,21 @@ document.addEventListener("keydown", (e) => {
 
 function todayISO(){ const t=new Date(); const p=n=>String(n).padStart(2,"0"); return t.getFullYear()+"-"+p(t.getMonth()+1)+"-"+p(t.getDate()); }
 function runIngestToday(){ runIngest(todayISO()); }
+
+// Скачать за выбранную гостиницу и день
+async function runIngestPick(){
+  const hid = document.getElementById("dlHotel").value;
+  const day = document.getElementById("dlDay").value;
+  if (!day){ alert("Выберите день"); return; }
+  const hotelName = hid ? document.getElementById("dlHotel").selectedOptions[0].text : "всех гостиниц";
+  if (!confirm(`Скачать клипы за ${day} (${hotelName})?`)) return;
+  const body = {day};
+  if (hid) body.hotel_id = +hid;
+  const r = await fetch("/api/checkin/ingest/run", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+  const d = await r.json();
+  if (d.running) alert("Ingestion уже выполняется — смотрите прогресс ниже.");
+  pollStatus();
+}
 
 async function delClip(id){
   if (!confirm("Удалить клип (файл и запись)? Обычно — после того как отсмотрели.")) return;
