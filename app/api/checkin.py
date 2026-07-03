@@ -9,8 +9,10 @@ import datetime as dt
 import os
 from pathlib import Path
 
+import shutil
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
@@ -49,13 +51,13 @@ _register_filters(templates)
 router = APIRouter(tags=["checkin"])
 
 # Метка сборки — видно в UI, сразу понятно, задеплоен ли новый код.
-CHECKIN_BUILD = "2026-07-03-reencode"
+CHECKIN_BUILD = "2026-07-03-storage"
 
 
 def _clip_url(path: str) -> str:
     """Файловый путь клипа → веб-URL под /clips."""
     try:
-        rel = os.path.relpath(path, settings.clips_dir)
+        rel = os.path.relpath(path, checkin_ingest.active_clips_dir())
     except ValueError:
         rel = os.path.basename(path)
     return "/clips/" + rel.replace(os.sep, "/")
@@ -431,7 +433,8 @@ async def run_ingest_now(
         return {"ok": False, "running": True, "message": "Ingestion уже выполняется"}
     day = data.day or (dt.date.today() - dt.timedelta(days=1))
     hotel_ids = [data.hotel_id] if data.hotel_id else None
-    background.add_task(checkin_ingest.run_ingestion, day, hotel_ids, "manual")
+    # whole=True → HTTP-скачивание сегментов окна дня (RTSP на DVR не отдаёт).
+    background.add_task(checkin_ingest.run_ingestion, day, hotel_ids, "manual", whole=True)
     return {"ok": True, "day": day.isoformat(), "message": "Ingestion запущен в фоне"}
 
 
@@ -503,6 +506,98 @@ async def ingest_status(session: AsyncSession = Depends(get_session)):
 
 
 # ── Центр уведомлений ────────────────────────────────────────────────────────
+def _clips_root() -> str:
+    return os.path.realpath(checkin_ingest.active_clips_dir())
+
+
+@router.get("/clips/{subpath:path}")
+async def serve_clip(subpath: str):
+    """Отдаёт локальный клип из настраиваемой папки (Range поддерживается —
+    перемотка работает). Защита от выхода за пределы каталога."""
+    root = _clips_root()
+    full = os.path.realpath(os.path.join(root, subpath))
+    if full != root and not full.startswith(root + os.sep):
+        raise HTTPException(403, "Недопустимый путь")
+    if not os.path.isfile(full):
+        raise HTTPException(404, "Файл не найден")
+    return FileResponse(full)
+
+
+def _list_mounts() -> list[dict]:
+    """Смонтированные диски (кандидаты для хранения) со свободным местом."""
+    skip = {"proc", "sysfs", "cgroup", "cgroup2", "tmpfs", "devtmpfs", "devpts",
+            "mqueue", "overlay", "squashfs", "fusectl", "debugfs", "tracefs", "bpf",
+            "pstore", "securityfs", "configfs", "autofs", "binfmt_misc", "hugetlbfs", "nsfs"}
+    out, seen = [], set()
+    try:
+        with open("/proc/mounts") as fh:
+            for line in fh:
+                parts = line.split()
+                if len(parts) < 3:
+                    continue
+                mp, fstype = parts[1], parts[2]
+                if fstype in skip or mp in seen:
+                    continue
+                seen.add(mp)
+                try:
+                    du = shutil.disk_usage(mp)
+                except OSError:
+                    continue
+                out.append({"mount": mp, "fstype": fstype, "total": du.total, "free": du.free})
+    except OSError:
+        pass
+    return sorted(out, key=lambda m: m["mount"])
+
+
+@router.get("/api/checkin/storage")
+async def storage_info(session: AsyncSession = Depends(get_session)):
+    root = checkin_ingest.active_clips_dir()
+    info: dict = {"dir": root, "default_dir": settings.clips_dir}
+    try:
+        os.makedirs(root, exist_ok=True)
+        du = shutil.disk_usage(root)
+        info["total"], info["used"], info["free"] = du.total, du.used, du.free
+    except OSError as exc:
+        info["error"] = str(exc)
+    info["clips_count"] = (await session.execute(select(func.count()).select_from(CheckinClip))).scalar_one()
+    info["clips_bytes"] = int(
+        (await session.execute(select(func.coalesce(func.sum(CheckinClip.size_bytes), 0)))).scalar_one() or 0)
+    info["mounts"] = _list_mounts()
+    return info
+
+
+@router.post("/api/checkin/storage")
+async def set_storage(data: schemas.StorageIn, session: AsyncSession = Depends(get_session)):
+    path = data.path.strip()
+    try:
+        os.makedirs(path, exist_ok=True)
+        probe = os.path.join(path, ".wtest")
+        with open(probe, "w"):
+            pass
+        os.remove(probe)
+    except OSError as exc:
+        raise HTTPException(422, f"Каталог недоступен для записи: {exc}")
+    await appsettings.set_value(session, "checkin_clips_dir", path)
+    checkin_ingest.set_clips_dir(path)
+    return {"ok": True, "dir": path}
+
+
+@router.post("/api/checkin/clips/{clip_id}/delete")
+async def delete_clip(clip_id: int, session: AsyncSession = Depends(get_session)):
+    """Удаляет клип (файл + запись) — для отсмотренных записей."""
+    clip = await session.get(CheckinClip, clip_id)
+    if clip is None:
+        raise HTTPException(404, "Клип не найден")
+    if clip.path and os.path.exists(clip.path):
+        try:
+            os.remove(clip.path)
+        except OSError:
+            pass
+    await session.execute(delete(CheckinClip).where(CheckinClip.id == clip_id))
+    await session.commit()
+    return {"ok": True}
+
+
 @router.post("/api/checkin/notifications/{note_id}/status")
 async def set_notification_status(
     note_id: int, data: schemas.NotificationStatusIn, session: AsyncSession = Depends(get_session)

@@ -649,3 +649,70 @@ async def test_recorder_diag_endpoint(db, monkeypatch):
     assert ch0["sub_matches"] == 0
     assert ch0["main_matches"] == 1
     assert ch0["main_trackid_returned"] == "6001"
+
+
+# ── Хранилище / удаление / HTTP-день ─────────────────────────────────────────
+async def test_storage_info_and_set(db, tmp_path):
+    async with _client() as c:
+        d = (await c.get("/api/checkin/storage")).json()
+        assert "dir" in d and "mounts" in d and "clips_count" in d
+        r = await c.post("/api/checkin/storage", json={"path": str(tmp_path)})
+        assert r.json()["ok"]
+    assert checkin_ingest.active_clips_dir() == str(tmp_path)
+    checkin_ingest.set_clips_dir(None)  # сброс, чтобы не влиять на другие тесты
+
+
+async def test_delete_clip(db, tmp_path):
+    from app.models import CheckinClip as _Clip
+    f = tmp_path / "clip.mp4"
+    f.write_bytes(b"video")
+    async with SessionLocal() as s:
+        h = CheckinHotel(name="Х"); s.add(h); await s.flush()
+        clip = _Clip(hotel_id=h.id, recorder_id=1, channel_id=60, day=dt.date(2026, 7, 2),
+                     start_ts=dt.datetime(2026, 7, 2, 1), end_ts=dt.datetime(2026, 7, 2, 1, 3),
+                     path=str(f), status="ok", size_bytes=5)
+        s.add(clip); await s.commit(); cid = clip.id
+    async with _client() as c:
+        assert (await c.post(f"/api/checkin/clips/{cid}/delete")).json()["ok"]
+    assert not f.exists()  # файл удалён
+    async with SessionLocal() as s:
+        assert (await s.execute(__import__("sqlalchemy").select(CheckinClip))).scalars().first() is None
+
+
+async def test_day_whole_http_download(db, monkeypatch, tmp_path):
+    monkeypatch.setattr(checkin_ingest.settings, "clips_dir", str(tmp_path))
+    checkin_ingest.set_clips_dir(None)
+    async with SessionLocal() as s:
+        h = CheckinHotel(name="День"); s.add(h); await s.flush()
+        rec = CheckinRecorder(hotel_id=h.id, host="10.0.0.5", model_type="ds7616ni_e2",
+                              night_start="07:00", night_end="24:00")
+        s.add(rec); await s.flush()
+        s.add(CheckinChannel(recorder_id=rec.id, channel_id=60, role="reception", substream_trackid=6002))
+        await s.commit(); hid = h.id
+
+    seg = {"start": dt.datetime(2026, 6, 15, 8), "end": dt.datetime(2026, 6, 15, 12),
+           "uri": "rtsp://10.0.0.5/Streaming/tracks/6001/?starttime=X&endtime=Y&name=F&size=9"}
+
+    class FakeClient:
+        async def search_playback(self, ch, s0, e0, *, substream=True):
+            return [seg]
+        async def download_segment(self, uri, out_path, max_bytes=None):
+            with open(out_path, "wb") as fh:
+                fh.write(b"X" * 1000)
+            return True, 1000, ""
+
+    monkeypatch.setattr(checkin_ingest, "build_recorder_client", lambda rec, password=None: FakeClient())
+
+    async def fake_trim(src, dst, offset_s, duration_s):
+        with open(dst, "wb") as fh:
+            fh.write(b"CLIP")
+        return True, ""
+
+    monkeypatch.setattr(checkin_ingest, "_ffmpeg_trim", fake_trim)
+
+    summary = await checkin_ingest.run_ingestion(dt.date(2026, 6, 15), [hid], "manual", whole=True)
+    assert summary["downloaded"] == 1
+    async with SessionLocal() as s:
+        clip = (await s.execute(__import__("sqlalchemy").select(CheckinClip))).scalars().first()
+        assert clip.status == ClipStatus.OK
+        assert clip.start_ts == dt.datetime(2026, 6, 15, 8)   # обрезано по началу окна (07:00 → сегмент 08:00)

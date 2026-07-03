@@ -83,10 +83,13 @@
         {% elif c.status == 'pending' %}<span class="badge warn">качается</span>
         {% else %}<span class="badge err" title="{{ c.error }}">ошибка</span>{% endif %}
       </td>
-      <td>{% if c.url %}<button class="mini" onclick='playClip(this)'
+      <td style="white-space:nowrap">
+        {% if c.url %}<button class="mini" onclick='playClip(this)'
             data-url="{{ c.url }}" data-id="{{ c.id }}" data-hotel="{{ c.hotel }}"
             data-ch="{{ c.channel_id }}" data-day="{{ c.day }}" data-start="{{ c.start.isoformat() }}"
-            data-label="{{ c.hotel }} · кан.{{ c.channel_id }} · {{ c.start.strftime('%H:%M:%S') }}">▶ Смотреть</button>{% endif %}</td>
+            data-label="{{ c.hotel }} · кан.{{ c.channel_id }} · {{ c.start.strftime('%H:%M:%S') }}">▶ Смотреть</button>{% endif %}
+        <button class="mini danger" title="Удалить (отсмотрено)" onclick="delClip({{ c.id }})">🗑</button>
+      </td>
     </tr>
   {% else %}
     <tr><td colspan="7" class="muted">Клипов нет. Настройте регистраторы и запустите ingestion.</td></tr>
@@ -164,6 +167,12 @@ document.addEventListener("keydown", (e) => {
 
 function todayISO(){ const t=new Date(); const p=n=>String(n).padStart(2,"0"); return t.getFullYear()+"-"+p(t.getMonth()+1)+"-"+p(t.getDate()); }
 function runIngestToday(){ runIngest(todayISO()); }
+
+async function delClip(id){
+  if (!confirm("Удалить клип (файл и запись)? Обычно — после того как отсмотрели.")) return;
+  const r = await fetch(`/api/checkin/clips/${id}/delete`, {method:"POST"});
+  if (r.ok) location.reload(); else alert("Ошибка удаления");
+}
 
 async function runTestClip(){
   if (!confirm("Скачать тест-клип за последние 3 минуты (для проверки, что запись субпотока идёт и всё качается)?")) return;

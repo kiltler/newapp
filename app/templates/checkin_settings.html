@@ -20,6 +20,19 @@
   <p class="muted" style="font-size:12px">Применяется без перезапуска. Джоб качает клипы за прошедшие сутки.</p>
 </div>
 
+<!-- Хранилище -->
+<div class="chart-card" style="margin-bottom:16px">
+  <h3 style="margin-top:0">💽 Хранилище клипов</h3>
+  <div id="storageInfo" class="muted">загрузка…</div>
+  <div class="pbar" style="margin-top:8px; max-width:520px"><div class="pbar-fill" id="diskBar" style="width:0%; background:linear-gradient(90deg,var(--accent),var(--accent-2))"></div></div>
+  <div class="collect-controls" style="margin-top:10px">
+    <input id="clipsPath" placeholder="/clips (или свой диск, напр. /mnt/video)" style="flex:1; min-width:240px">
+    <button onclick="saveStorage()">Сохранить папку</button>
+  </div>
+  <div id="mounts" style="margin-top:8px; font-size:13px"></div>
+  <p class="muted" style="font-size:12px">Отдельный диск нужно смонтировать в контейнер (том в docker-compose, напр. <code>- /mnt/video:/mnt/video</code>), затем указать путь здесь. Уже скачанные клипы останутся в прежней папке.</p>
+</div>
+
 <!-- Добавить гостиницу -->
 <div class="bus-search">
   <input id="newHotel" placeholder="Название гостиницы" maxlength="255">
@@ -139,6 +152,35 @@ async function postJSON(url, body){
   if (!r.ok){ alert(d.detail || ("Ошибка "+r.status)); return null; }
   return d;
 }
+
+// ── Хранилище ──
+const fmtGB = b => (b/1073741824).toFixed(1) + " ГБ";
+async function loadStorage(){
+  try {
+    const d = await (await fetch("/api/checkin/storage")).json();
+    document.getElementById("clipsPath").value = d.dir || "";
+    const usedPct = d.total ? Math.round(d.used / d.total * 100) : 0;
+    document.getElementById("diskBar").style.width = usedPct + "%";
+    let s = `Папка: <b>${d.dir}</b><br>`;
+    if (d.total){
+      s += `Диск: занято ${fmtGB(d.used)} из ${fmtGB(d.total)} (свободно <b>${fmtGB(d.free)}</b>, ${usedPct}%)<br>`;
+    } else if (d.error){ s += `<span style="color:var(--err)">${d.error}</span><br>`; }
+    s += `Клипов в базе: <b>${d.clips_count}</b>, объём ${fmtGB(d.clips_bytes)}`;
+    document.getElementById("storageInfo").innerHTML = s;
+    const m = document.getElementById("mounts");
+    if (d.mounts && d.mounts.length){
+      m.innerHTML = '<div class="muted" style="font-size:12px">Смонтированные диски (нажмите, чтобы подставить путь):</div>' +
+        d.mounts.map(x => `<button class="mini" style="margin:2px" onclick="document.getElementById('clipsPath').value='${x.mount}'">${x.mount} · своб. ${fmtGB(x.free)} (${x.fstype})</button>`).join("");
+    } else { m.innerHTML = ""; }
+  } catch(e){ document.getElementById("storageInfo").textContent = "не удалось получить сведения о диске"; }
+}
+async function saveStorage(){
+  const path = document.getElementById("clipsPath").value.trim();
+  if (!path){ alert("Укажите путь"); return; }
+  const d = await postJSON("/api/checkin/storage", {path});
+  if (d){ alert("Папка клипов: " + d.dir); loadStorage(); }
+}
+loadStorage();
 
 // ── Расписание ──
 async function saveSchedule(){

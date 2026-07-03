@@ -333,24 +333,14 @@ async def _test_clip_jobs(client, ch, search_start, search_end, minutes) -> list
     return [(seg, win_start, win_end)]
 
 
-async def _ffmpeg_trim(src: str, dst: str, offset_s: float, duration_s: float) -> tuple[bool, str]:
-    """Вырезает окно [offset, offset+duration] в чистый браузеро-совместимый MP4.
-
-    Hikvision отдаёт поток с «кривым» таймингом → при -c copy MP4 выходит без
-    длительности/индекса (браузер показывает первый кадр, но не играет). Поэтому
-    видео ПЕРЕКОДИРУЕМ в H.264 (yuv420p) + faststart — гарантированно играбельно.
-    """
+async def _run_ffmpeg_trim(src, dst, offset_s, duration_s, reencode: bool) -> tuple[bool, str]:
+    vcodec = (["-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p"]
+              if reencode else ["-c:v", "copy"])
     cmd = [
-        settings.ffmpeg_bin, "-y", "-nostdin",
-        "-fflags", "+genpts",
-        "-ss", f"{max(offset_s, 0):.3f}",
-        "-i", src,
-        "-t", f"{max(duration_s, 1):.0f}",
-        "-map", "0:v:0?", "-map", "0:a:0?",
-        "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
-        "-c:a", "aac",
-        "-movflags", "+faststart",
-        dst,
+        settings.ffmpeg_bin, "-y", "-nostdin", "-fflags", "+genpts",
+        "-ss", f"{max(offset_s, 0):.3f}", "-i", src, "-t", f"{max(duration_s, 1):.0f}",
+        "-map", "0:v:0?", "-map", "0:a:0?", *vcodec, "-c:a", "aac",
+        "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", dst,
     ]
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -358,7 +348,7 @@ async def _ffmpeg_trim(src: str, dst: str, offset_s: float, duration_s: float) -
     except FileNotFoundError:
         return False, "ffmpeg не найден"
     try:
-        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=900)
     except asyncio.TimeoutError:
         proc.kill()
         return False, "таймаут обрезки"
@@ -368,6 +358,57 @@ async def _ffmpeg_trim(src: str, dst: str, offset_s: float, duration_s: float) -
     if not os.path.exists(dst) or os.path.getsize(dst) == 0:
         return False, "пустой результат обрезки"
     return True, ""
+
+
+async def _has_playable_duration(path: str) -> bool:
+    """Проверяет через ffprobe, что у файла есть валидная длительность (иначе
+    браузер покажет 0:00 и не сыграет)."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=nk=1:nw=1", path,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=20)
+        return float((out or b"").decode().strip() or 0) > 0.1
+    except Exception:  # noqa: BLE001
+        return False
+
+
+async def _window_jobs(client, ch, win_start: dt.datetime, win_end: dt.datetime) -> list[tuple]:
+    """Сегменты записи, попадающие в окно [win_start, win_end] → [(seg, cs, ce)],
+    обрезанные по окну. «Живой край» (последние 15 мин) исключаем."""
+    lo, hi = win_start - dt.timedelta(hours=1), win_end + dt.timedelta(hours=1)
+    try:
+        segs = await client.search_playback(ch.channel_id, lo, hi, substream=True)
+        if not segs:
+            segs = await client.search_playback(ch.channel_id, lo, hi, substream=False)
+    except NVRError as exc:
+        log.warning("кан.%s: playback-поиск недоступен: %s", ch.channel_id, exc)
+        return []
+    if not segs:
+        return []
+    ref = max(s["end"] for s in segs)
+    safe_end = min(win_end, ref - dt.timedelta(minutes=15))  # не трогаем пишущийся файл
+    jobs = []
+    for seg in sorted(segs, key=lambda s: s["start"]):
+        cs = max(seg["start"], win_start)
+        ce = min(seg["end"], safe_end)
+        if (ce - cs).total_seconds() >= 10:
+            jobs.append((seg, cs, ce))
+    return jobs[: settings.checkin_max_segments]
+
+
+async def _ffmpeg_trim(src: str, dst: str, offset_s: float, duration_s: float) -> tuple[bool, str]:
+    """Вырезает окно [offset, offset+duration] в играбельный MP4.
+
+    Сначала быстрый путь (-c:v copy + фикс тайминга). Если результат
+    неиграбельный (0:00 — у Hikvision кривой тайминг), перекодируем в H.264.
+    """
+    ok, err = await _run_ffmpeg_trim(src, dst, offset_s, duration_s, reencode=False)
+    if ok and await _has_playable_duration(dst):
+        return True, ""
+    ok, err = await _run_ffmpeg_trim(src, dst, offset_s, duration_s, reencode=True)
+    return ok, err
 
 
 async def _ingest_http_clip(
@@ -438,10 +479,37 @@ def _safe_remove(path: str) -> None:
         pass
 
 
+# Папка для клипов: переопределяется из UI (AppSetting), иначе из env CLIPS_DIR.
+_clips_dir_override: str | None = None
+
+
+def active_clips_dir() -> str:
+    return _clips_dir_override or settings.clips_dir
+
+
+def set_clips_dir(path: str | None) -> None:
+    global _clips_dir_override
+    _clips_dir_override = (path.strip() or None) if path else None
+
+
+async def load_clips_dir() -> None:
+    """Загружает выбранную из UI папку клипов (AppSetting) при старте."""
+    from app.models import AppSetting
+
+    async with SessionLocal() as s:
+        row = await s.get(AppSetting, "checkin_clips_dir")
+    set_clips_dir(row.value if row and row.value else None)
+    try:
+        os.makedirs(active_clips_dir(), exist_ok=True)
+    except OSError:
+        pass
+    log.info("Папка клипов: %s", active_clips_dir())
+
+
 def clip_path(recorder: CheckinRecorder, hotel_id: int, channel_id: int, seg: ArchiveSegment) -> str:
     day = seg.start.strftime("%Y-%m-%d")
     fname = f"{seg.start.strftime('%H%M%S')}-{seg.end.strftime('%H%M%S')}.mp4"
-    return os.path.join(settings.clips_dir, str(hotel_id), day, str(channel_id), fname)
+    return os.path.join(active_clips_dir(), str(hotel_id), day, str(channel_id), fname)
 
 
 async def _ingest_segment(
@@ -612,18 +680,33 @@ async def ingest_recorder(
                     await _patch_run(run_id, rec_id=recorder_id, rec_incs={"channels_done": 1})
                     continue
                 if use_whole:
-                    jobs = [(ArchiveSegment(win_start, win_end), None)]
-                else:
-                    try:
-                        segs = await find_activity(client, recorder, ch.channel_id, win_start, win_end)
-                    except NVRError as exc:
-                        stats["errors"] += 1
-                        await _patch_run(run_id, incs={"errors": 1}, rec_id=recorder_id,
-                                         rec_incs={"errors": 1, "channels_done": 1},
-                                         error_sample=f"кан.{ch.channel_id}: поиск: {exc}")
-                        log.warning("рег.%s кан.%s: поиск сорвался: %s", recorder.id, ch.channel_id, exc)
-                        continue
-                    jobs = [(s, None) for s in segs]
+                    # За вчера/сегодня: HTTP-скачивание сегментов окна + обрезка.
+                    hjobs = await _window_jobs(client, ch, win_start, win_end)
+                    for seg_dict, cs, ce in hjobs:
+                        res, err = await _ingest_http_clip(
+                            session, client, recorder, recorder.hotel_id, ch, seg_dict, cs, ce, run_id, label)
+                        if res == "ok":
+                            stats["downloaded"] += 1
+                            await _patch_run(run_id, incs={"downloaded": 1}, rec_id=recorder_id, rec_incs={"downloaded": 1})
+                        elif res == "skip":
+                            stats["skipped"] += 1
+                            await _patch_run(run_id, incs={"skipped": 1}, rec_id=recorder_id, rec_incs={"skipped": 1})
+                        else:
+                            stats["errors"] += 1
+                            await _patch_run(run_id, incs={"errors": 1}, rec_id=recorder_id,
+                                             rec_incs={"errors": 1}, error_sample=f"кан.{ch.channel_id}: {err}")
+                    await _patch_run(run_id, rec_id=recorder_id, rec_incs={"channels_done": 1})
+                    continue
+                try:
+                    segs = await find_activity(client, recorder, ch.channel_id, win_start, win_end)
+                except NVRError as exc:
+                    stats["errors"] += 1
+                    await _patch_run(run_id, incs={"errors": 1}, rec_id=recorder_id,
+                                     rec_incs={"errors": 1, "channels_done": 1},
+                                     error_sample=f"кан.{ch.channel_id}: поиск: {exc}")
+                    log.warning("рег.%s кан.%s: поиск сорвался: %s", recorder.id, ch.channel_id, exc)
+                    continue
+                jobs = [(s, None) for s in segs]
                 for seg, uri in jobs:
                     res, err = await _ingest_segment(
                         session, client, recorder, recorder.hotel_id, ch, seg,

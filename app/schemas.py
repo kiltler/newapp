@@ -374,3 +374,7 @@ class CheckinLogIn(BaseModel):
 class TestClipIn(BaseModel):
     minutes: int = Field(default=10, ge=1, le=60)
     hotel_id: int | None = None
+
+
+class StorageIn(BaseModel):
+    path: str = Field(min_length=1, max_length=1024)

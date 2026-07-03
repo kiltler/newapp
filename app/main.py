@@ -35,6 +35,7 @@ async def lifespan(app: FastAPI):
     await init_db()
     from app.services import checkin_ingest
     await checkin_ingest.abort_orphan_runs()  # чистим зомби-прогоны после рестарта
+    await checkin_ingest.load_clips_dir()      # папка клипов из настроек
     start_scheduler()
     await configure_checkin_job()
     bot_task = asyncio.create_task(bot.run_bot())
@@ -98,11 +99,8 @@ static_dir = BASE_DIR / "static"
 static_dir.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
-# Локальные клипы модуля «Заселения» (за авторизацией; StaticFiles поддерживает
-# Range → перемотка/скраб видео работает). Каталог берётся из настроек.
-clips_dir = Path(settings.clips_dir)
-clips_dir.mkdir(parents=True, exist_ok=True)
-app.mount("/clips", StaticFiles(directory=str(clips_dir)), name="clips")
+# Клипы модуля «Заселения» отдаёт динамический роут checkin.serve_clip
+# (папка настраивается из UI без рестарта; Range поддерживается FileResponse).
 
 # Встроенный mock-сервер NVR (только для разработки)
 if settings.mock_mode:
