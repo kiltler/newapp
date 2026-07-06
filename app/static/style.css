@@ -167,7 +167,7 @@ table.calendar th.day { color: var(--muted); }
 .tl-swatch.tl-gap { background: var(--err); }
 .tl-swatch.tl-nodata { background: repeating-linear-gradient(45deg, #2a2f3d 0 5px, #232733 5px 10px); }
 
-/* Разбор полётов (рабочий список проблем) */
+/* Доска проблем (рабочий список проблем) */
 .wl-head h1 { margin-bottom: 2px; }
 .wl-head p { margin-top: 0; }
 .wl-bulk { margin: 14px 0 6px; }
