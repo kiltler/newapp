@@ -32,5 +32,9 @@ def localtime(value, fmt: str = "%d.%m %H:%M") -> str:
 
 
 def register(templates) -> None:
-    """Подключить фильтры к окружению Jinja данного Jinja2Templates."""
+    """Подключить фильтры и глобальные переменные к окружению Jinja."""
+    from app import __version__
+
     templates.env.filters["localtime"] = localtime
+    # Версия приложения доступна во всех шаблонах как {{ app_version }}.
+    templates.env.globals["app_version"] = __version__

@@ -58,6 +58,9 @@ body:has(.bus-scope) {
   backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--line); }
 .logo { font-weight: 800; font-size: 16px; letter-spacing: -.01em; color: var(--text); }
+.logo .ver { font-weight: 600; font-size: 11px; letter-spacing: 0; color: var(--muted);
+  background: rgba(31,182,166,.14); border: 1px solid rgba(31,182,166,.35);
+  padding: 1px 6px; border-radius: 999px; vertical-align: middle; margin-left: 4px; }
 .topbar nav { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
 .topbar nav a { margin: 0; padding: 7px 12px; border-radius: 9px; color: var(--muted);
   font-size: 13.5px; font-weight: 600; transition: color .15s, background .15s; }

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>{% block title %}NVR Monitor{% endblock %}</title>
-    <link rel="stylesheet" href="/static/style.css?v=11">
+    <link rel="stylesheet" href="/static/style.css?v=12">
     <link rel="manifest" href="/manifest.webmanifest">
     <meta name="theme-color" content="#1FB6A6">
     <meta name="mobile-web-app-capable" content="yes">
@@ -16,7 +16,7 @@
 </head>
 <body>
 <header class="topbar">
-    <a href="/" class="logo">📹 NVR Monitor</a>
+    <a href="/" class="logo">📹 NVR Monitor <span class="ver" title="Версия приложения">v{{ app_version }}</span></a>
     {% set _role = request.session.get('role') %}
     <nav>
         {% if _role != 'bus' %}
