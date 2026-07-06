@@ -116,6 +116,24 @@
   <span class="cal cal-unknown"></span> нет данных
 </div>
 
+<h2>Таймлайн архива по каналам</h2>
+<div class="tl-controls">
+  <label>День: <select id="tl-day"></select></label>
+  <span class="muted" id="tl-empty" style="display:none">Нет данных за этот день — нажмите «Проверить архив».</span>
+</div>
+<div class="tl-wrap">
+  <div class="tl-scroll">
+    <div id="tl-ruler" class="tl-ruler"></div>
+    <div id="tl-rows" class="tl-rows"></div>
+  </div>
+</div>
+<div class="legend">
+  <span class="tl-swatch tl-rec"></span> запись
+  <span class="tl-swatch tl-gap"></span> дыра
+  <span class="tl-swatch tl-nodata"></span> нет данных
+  <span class="muted">· наведите на красный участок — покажет интервал</span>
+</div>
+
 <h2>События устройства</h2>
 <table class="grid">
   <thead><tr><th>Время</th><th>Тип</th><th>Уровень</th><th>Сообщение</th></tr></thead>
@@ -144,6 +162,77 @@
 
 <script>
 const DEVICE_ID = {{ device.id }};
+
+// ── Таймлайн архива по каналам (час-за-часом, из данных календаря) ──────────
+const TL_CAL = {{ calendar | tojson }};
+const TL_CHANNELS = [{% for c in device.channels|sort(attribute='channel_id') %}{id: {{ c.channel_id }}, name: {{ (c.name or '') | tojson }}},{% endfor %}];
+
+function tlToMin(hhmm) {
+  const [h, m] = hhmm.split(":").map(Number);
+  let v = h * 60 + m;
+  if (v >= 1439) v = 1440;  // «23:59» → конец суток, чтобы не оставался просвет
+  return v;
+}
+
+function tlDaysWithData() {
+  const set = new Set();
+  for (const chId in (TL_CAL.channels || {})) {
+    for (const day in TL_CAL.channels[chId]) set.add(day);
+  }
+  return [...set].sort();  // ISO-даты сортируются как строки
+}
+
+function tlRenderRuler() {
+  const ruler = document.getElementById("tl-ruler");
+  let html = '<div class="tl-label"></div><div class="tl-track">';
+  for (let h = 0; h <= 24; h += 3) {
+    const tx = h === 0 ? "0" : (h === 24 ? "-100%" : "-50%");
+    html += `<span class="tl-tick" style="left:${h / 24 * 100}%;transform:translateX(${tx})">${String(h).padStart(2, "0")}</span>`;
+  }
+  html += "</div>";
+  ruler.innerHTML = html;
+}
+
+function tlRenderRows(day) {
+  const rows = document.getElementById("tl-rows");
+  const chMap = TL_CAL.channels || {};
+  rows.innerHTML = TL_CHANNELS.map(ch => {
+    const cell = (chMap[ch.id] || {})[day];
+    const label = `${ch.id}${ch.name ? " · " + ch.name.replace(/</g, "&lt;") : ""}`;
+    let bar;
+    if (!cell || cell.status === "unavailable" || cell.status === "unknown") {
+      bar = '<div class="tl-bar tl-nodata"></div>';
+    } else {
+      const gaps = (cell.gaps || []).map(g => {
+        const s = tlToMin(g[0]), e = tlToMin(g[1]);
+        const left = s / 1440 * 100, width = Math.max((e - s) / 1440 * 100, 0.4);
+        return `<div class="tl-gap-seg" style="left:${left}%;width:${width}%" title="Нет записи ${g[0]}–${g[1]}"></div>`;
+      }).join("");
+      bar = `<div class="tl-bar tl-rec">${gaps}</div>`;
+    }
+    const meta = cell
+      ? `<span class="tl-meta">${cell.recorded_minutes != null ? Math.round(cell.recorded_minutes / 60 * 10) / 10 + " ч" : ""}${cell.gaps && cell.gaps.length ? " · дыр: " + cell.gaps.length : ""}</span>`
+      : "";
+    return `<div class="tl-row"><div class="tl-label" title="${label}">${label}${meta}</div><div class="tl-track">${bar}</div></div>`;
+  }).join("");
+}
+
+function tlInit() {
+  const sel = document.getElementById("tl-day");
+  const empty = document.getElementById("tl-empty");
+  const days = tlDaysWithData();
+  if (!days.length) {
+    sel.style.display = "none";
+    empty.style.display = "";
+    return;
+  }
+  tlRenderRuler();
+  sel.innerHTML = days.map(d => `<option value="${d}">${d.slice(8, 10)}.${d.slice(5, 7)}.${d.slice(0, 4)}</option>`).join("");
+  sel.value = days[days.length - 1];  // по умолчанию — самый свежий день
+  sel.onchange = () => tlRenderRows(sel.value);
+  tlRenderRows(sel.value);
+}
+tlInit();
 async function loadNotes() {
   const notes = await fetch(`/api/devices/${DEVICE_ID}/notes`).then(r => r.json());
   const body = document.getElementById("notes-body");

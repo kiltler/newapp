@@ -3,7 +3,7 @@ import httpx
 
 from app.database import SessionLocal
 from app.main import app
-from app.models import ApiType, Device
+from app.models import ApiType, ArchiveCoverage, ArchiveState, Channel, Device
 
 
 def _client() -> httpx.AsyncClient:
@@ -54,6 +54,35 @@ async def test_plan_markers(db):
         r = await c.delete(f"/api/plan/markers/{mid}")
         assert r.status_code == 200
         assert (await c.get("/api/plan/markers")).json() == []
+
+
+async def test_archive_timeline_on_device_page(db):
+    """Таймлайн архива подставляет данные покрытия (дыры) в страницу объекта."""
+    import datetime as dt
+
+    async with SessionLocal() as s:
+        d = Device(name="ТЛ", host="127.0.0.1", http_port=80, username="admin",
+                   api_type=ApiType.HIKVISION, capabilities={"archive": True})
+        s.add(d)
+        await s.flush()
+        s.add(Channel(device_id=d.id, channel_id=1, name="Вход"))
+        day = dt.date.today() - dt.timedelta(days=1)
+        s.add(ArchiveCoverage(
+            device_id=d.id, channel_id=1, day=day, status=ArchiveState.PARTIAL,
+            recorded_minutes=1320, largest_gap_minutes=120, gaps=[["02:00", "04:00"]],
+        ))
+        await s.commit()
+        did = d.id
+
+    async with _client() as c:
+        r = await c.get(f"/devices/{did}")
+        assert r.status_code == 200
+        body = r.text
+        # секция и данные покрытия должны попасть в страницу
+        assert "Таймлайн архива" in body
+        assert "TL_CAL" in body
+        assert '"02:00", "04:00"' in body  # интервал дыры прокинут в шаблон
+        assert day.isoformat() in body     # день с данными есть в селекторе
 
 
 async def test_pages_render(db):
