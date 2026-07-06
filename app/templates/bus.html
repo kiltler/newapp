@@ -32,6 +32,9 @@
     <button class="bus-btn big" onclick="openSwap()">🔄 Заменить диск</button>
     {% if installed %}<button class="bus-btn" onclick="removeDisk()">Снять без замены</button>
     <button class="bus-btn danger" onclick="replaceFaulty()">⚠️ Замена по неисправности</button>{% endif %}
+    <button class="bus-btn" onclick="toggleSwapAlert()">
+      {% if bus.swap_alert_enabled %}🔔 Напоминание о замене: вкл{% else %}🔕 Напоминание о замене: выкл{% endif %}
+    </button>
   </div>
 
   <h2>Закреплённые диски</h2>
@@ -155,6 +158,12 @@ async function restore(id){ if(!confirm("Вернуть диск в строй (
 async function faulty(id){
   const note = prompt("Что с диском? (заметка о неисправности):"); if (note===null) return;
   const r = await fetch(`/api/disks/${id}/faulty`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({note})});
+  r.ok?location.reload():alert(await r.text());
+}
+async function toggleSwapAlert(){
+  const on = {{ 'true' if bus.swap_alert_enabled else 'false' }};
+  const r = await fetch(`/api/buses/${BUS_ID}`,{method:"PUT",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({ swap_alert_enabled: !on })});
   r.ok?location.reload():alert(await r.text());
 }
 async function editProblem(){

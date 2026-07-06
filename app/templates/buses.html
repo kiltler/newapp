@@ -37,6 +37,7 @@
   <section class="bus-summary">
     <div class="bus-tile"><span class="num">{{ summary.buses }}</span><span>автобусов</span></div>
     <div class="bus-tile {{ 'bad' if summary.no_disk else '' }}"><span class="num">{{ summary.no_disk }}</span><span>без диска</span></div>
+    {% if summary.overdue %}<div class="bus-tile warn"><span class="num">{{ summary.overdue }}</span><span>пора менять диск</span></div>{% endif %}
     <div class="bus-tile"><span class="num">{{ summary.disk_ready }}</span><span>дисков в резерве</span></div>
     <a class="bus-tile {{ 'warn' if summary.disk_review else '' }}" href="/buses/review" style="text-decoration:none;color:inherit"><span class="num">{{ summary.disk_review }}</span><span>на просмотре →</span></a>
     <div class="bus-tile {{ 'bad' if summary.disk_faulty else '' }}"><span class="num">{{ summary.disk_faulty }}</span><span>неисправных</span></div>
@@ -66,8 +67,10 @@
     <details class="bus-settings">
       <summary class="bus-btn" style="list-style:none">⚙ Пороги</summary>
       <div class="bus-settings-body">
+        <label>Менять диск через, дней <input id="set-swap" type="number" min="1" value="{{ swap_days }}"></label>
         <label>Просмотр диска в течение, дней <input id="set-review" type="number" min="1" value="{{ review_days }}"></label>
         <button class="bus-btn" onclick="saveThresholds()">Сохранить</button>
+        <p class="muted" style="font-size:12px;margin:6px 0 0">Напоминание «пора менять» включается отдельно на странице каждого автобуса.</p>
       </div>
     </details>
   </div>
@@ -95,9 +98,10 @@ async function addBus() {
   if (r.ok) location.reload(); else alert("Ошибка: " + (await r.text()));
 }
 async function saveThresholds() {
+  const swap_days = parseInt(document.getElementById("set-swap").value, 10);
   const review_days = parseInt(document.getElementById("set-review").value, 10);
   const r = await fetch("/api/buses/settings", { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ review_days }) });
+    body: JSON.stringify({ swap_days, review_days }) });
   if (r.ok) location.reload(); else alert("Ошибка: " + (await r.text()));
 }
 </script>

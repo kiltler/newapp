@@ -170,6 +170,7 @@ class BusUpdate(BaseModel):
     location: str | None = None
     problem_note: str | None = None
     has_problem: bool | None = None
+    swap_alert_enabled: bool | None = None
     collect_weekday: int | None = None
 
 

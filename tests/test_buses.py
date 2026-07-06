@@ -201,13 +201,47 @@ async def test_settings_and_grouping(db):
         await c.post("/api/buses", json={"bus_number": "А2", "route": "5"})
         await c.post("/api/buses", json={"bus_number": "Б1", "route": "10"})
         # пороги сохраняются и применяются
-        r = await c.post("/api/buses/settings", json={"review_days": 3})
+        r = await c.post("/api/buses/settings", json={"swap_days": 21, "review_days": 3})
         assert r.status_code == 200
         page = (await c.get("/buses")).text
-        assert 'value="3"' in page  # порог просмотра подставился в форму
+        assert 'value="21"' in page and 'value="3"' in page  # подставились в форму
         # группировка по маршрутам
         grouped = (await c.get("/buses?sort=group")).text
         assert "Маршрут 5" in grouped and "Маршрут 10" in grouped
+
+
+async def test_swap_alert_opt_in(db):
+    """Напоминание «пора менять» выключено по умолчанию и включается по автобусу."""
+    import datetime as dt
+
+    async with _client() as c:
+        await c.post("/api/buses/settings", json={"swap_days": 14, "review_days": 7})
+        bus = (await c.post("/api/buses", json={"bus_number": "Т1"})).json()["id"]
+        d = (await c.post("/api/disks", json={"label": "Т-1", "assigned_bus_id": bus})).json()["id"]
+        await c.post(f"/api/buses/{bus}/swap", json={"installed_disk_id": d})
+
+        # состарим установку так, чтобы порог был превышен
+        async with SessionLocal() as s:
+            b = (await s.execute(select(Bus).where(Bus.id == bus))).scalar_one()
+            b.installed_since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=40)
+            await s.commit()
+
+        # по умолчанию напоминание выключено — оранжевого статуса нет
+        info = next(x for x in (await c.get("/api/buses")).json() if x["id"] == bus)
+        assert info["swap_alert_enabled"] is False
+        assert info["color"] != "orange"
+
+        # включаем напоминание для этого автобуса
+        r = await c.put(f"/api/buses/{bus}", json={"swap_alert_enabled": True})
+        assert r.status_code == 200
+        info = next(x for x in (await c.get("/api/buses")).json() if x["id"] == bus)
+        assert info["swap_alert_enabled"] is True
+        assert info["color"] == "orange" and "пора менять" in info["reason"]
+
+        # выключаем — снова тихо
+        await c.put(f"/api/buses/{bus}", json={"swap_alert_enabled": False})
+        info = next(x for x in (await c.get("/api/buses")).json() if x["id"] == bus)
+        assert info["color"] != "orange"
 
 
 async def test_route_sort_order(db):

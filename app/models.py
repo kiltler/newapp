@@ -322,6 +322,9 @@ class Bus(Base):
     collect_weekday: Mapped[int | None] = mapped_column(Integer, default=None)  # день недели сбора 0=Пн
     problem_note: Mapped[str | None] = mapped_column(Text, default=None)
     has_problem: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Напоминание «пора менять диск» — по умолчанию выключено, включается вручную
+    # для каждого автобуса (кнопкой на странице автобуса).
+    swap_alert_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow

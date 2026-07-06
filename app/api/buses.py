@@ -69,6 +69,12 @@ def bus_status(bus: Bus, disks: list[Disk], swap_days: int = 14) -> tuple[str, s
         return "red", "регистратор без диска"
     if bus.has_problem:
         return "red", "отмечена проблема"
+    # Напоминание о замене диска — только если включено для этого автобуса.
+    if bus.swap_alert_enabled:
+        since = _aware(bus.installed_since)
+        if since is not None and (utcnow() - since).days >= swap_days:
+            days = (utcnow() - since).days
+            return "orange", f"диск стоит {days} дн. — пора менять"
     # Резерв = закреплённый за автобусом готовый диск (кроме установленного).
     others = [d for d in disks if d.assigned_bus_id == bus.id and d.id != bus.installed_disk_id]
     if any(d.status == DiskStatus.READY for d in others):
@@ -130,6 +136,7 @@ async def list_buses(session: AsyncSession = Depends(get_session)):
         out.append({
             "id": b.id, "bus_number": b.bus_number, "route": b.route,
             "dvr_model": b.dvr_model, "has_problem": b.has_problem,
+            "swap_alert_enabled": b.swap_alert_enabled,
             "installed_disk": (f"{cur.label} ({cur.type})" if cur else None),
             "installed_since": b.installed_since.isoformat() if b.installed_since else None,
             "color": color, "reason": reason,
@@ -702,6 +709,11 @@ async def buses_page(request: Request, q: str = "", sort: str = "status",
     summary = {
         "buses": len(buses),
         "no_disk": sum(1 for b in buses if b.installed_disk_id is None),
+        "overdue": sum(
+            1 for b in buses
+            if b.swap_alert_enabled and b.installed_since
+            and (now - _aware(b.installed_since)).days >= swap_days
+        ),
         "disk_ready": sum(1 for d in disks if d.status == DiskStatus.READY),
         "disk_review": sum(1 for d in disks if d.status in (DiskStatus.REMOVED_REVIEW, DiskStatus.REVIEWED)),
         "disk_faulty": sum(1 for d in disks if d.status == DiskStatus.FAULTY),
@@ -848,6 +860,11 @@ async def bus_stats(request: Request, days: int = 30, session: AsyncSession = De
     park = {
         "buses": len(buses),
         "no_disk": sum(1 for b in buses.values() if b.installed_disk_id is None),
+        "overdue": sum(
+            1 for b in buses.values()
+            if b.swap_alert_enabled and _aware(b.installed_since)
+            and (now - _aware(b.installed_since)).days >= swap_days
+        ),
     }
     disk_stats = {
         "total": len(disks),
