@@ -21,7 +21,6 @@
   <button onclick="runIngestPick()">▶ Скачать за выбранный день</button>
   <span class="muted" style="font-size:12px">быстро:</span>
   <button class="secondary" onclick="runIngest()">За вчера</button>
-  <button class="secondary" onclick="runIngestToday()">За сегодня</button>
 </div>
 
 <div id="ingestPanel" class="chart-card" style="display:none; margin-bottom:14px;">
@@ -175,9 +174,6 @@ document.addEventListener("keydown", (e) => {
     setSpeed(SPEEDS[i]); e.preventDefault();
   }
 });
-
-function todayISO(){ const t=new Date(); const p=n=>String(n).padStart(2,"0"); return t.getFullYear()+"-"+p(t.getMonth()+1)+"-"+p(t.getDate()); }
-function runIngestToday(){ runIngest(todayISO()); }
 
 // Скачать за выбранную гостиницу и день
 async function runIngestPick(){

@@ -25,7 +25,6 @@
   <section class="bus-summary">
     <div class="bus-tile"><span class="num">{{ park.buses }}</span><span>автобусов</span></div>
     <div class="bus-tile {{ 'err' if park.no_disk else '' }}"><span class="num">{{ park.no_disk }}</span><span>без диска</span></div>
-    <div class="bus-tile {{ 'warn' if park.overdue else '' }}"><span class="num">{{ park.overdue }}</span><span>пора менять</span></div>
   </section>
 
   <h2>Диски</h2>

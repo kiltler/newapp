@@ -65,15 +65,10 @@ def _aware(d: dt.datetime | None) -> dt.datetime | None:
 
 def bus_status(bus: Bus, disks: list[Disk], swap_days: int = 14) -> tuple[str, str]:
     """Возвращает (цвет, причина): red/orange/yellow/green."""
-    now = utcnow()
     if bus.installed_disk_id is None:
         return "red", "регистратор без диска"
     if bus.has_problem:
         return "red", "отмечена проблема"
-    since = _aware(bus.installed_since)
-    if since is not None and (now - since).days >= swap_days:
-        days = (now - since).days
-        return "orange", f"диск стоит {days} дн. — пора менять"
     # Резерв = закреплённый за автобусом готовый диск (кроме установленного).
     others = [d for d in disks if d.assigned_bus_id == bus.id and d.id != bus.installed_disk_id]
     if any(d.status == DiskStatus.READY for d in others):
@@ -707,10 +702,6 @@ async def buses_page(request: Request, q: str = "", sort: str = "status",
     summary = {
         "buses": len(buses),
         "no_disk": sum(1 for b in buses if b.installed_disk_id is None),
-        "overdue": sum(
-            1 for b in buses if b.installed_since
-            and (now - b.installed_since).days >= swap_days
-        ),
         "disk_ready": sum(1 for d in disks if d.status == DiskStatus.READY),
         "disk_review": sum(1 for d in disks if d.status in (DiskStatus.REMOVED_REVIEW, DiskStatus.REVIEWED)),
         "disk_faulty": sum(1 for d in disks if d.status == DiskStatus.FAULTY),
@@ -857,10 +848,6 @@ async def bus_stats(request: Request, days: int = 30, session: AsyncSession = De
     park = {
         "buses": len(buses),
         "no_disk": sum(1 for b in buses.values() if b.installed_disk_id is None),
-        "overdue": sum(
-            1 for b in buses.values()
-            if _aware(b.installed_since) and (now - _aware(b.installed_since)).days >= swap_days
-        ),
     }
     disk_stats = {
         "total": len(disks),
