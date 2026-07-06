@@ -12,7 +12,7 @@ from app.database import get_session
 from app.drivers import build_client, detect_api_type
 from app.drivers.base import NVRError
 from app.models import ApiType, Channel, Device, Note
-from app.services import archive, audit, poller, quality
+from app.services import archive, audit, bulkops, poller, quality
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["devices"])
@@ -341,6 +341,28 @@ async def bulk_sync_time(
             pass
     await audit.log_action(session, request, "bulk_sync_time", detail=f"{done}/{len(ids)}")
     return {"ok": True, "synced": done, "total": len(ids)}
+
+
+@router.post("/bulk/run")
+async def bulk_run(
+    action: str, request: Request, group_id: int | None = None,
+    session: AsyncSession = Depends(get_session),
+):
+    """Запуск массовой операции в фоне (poll/sync_time/archive_check/quality_check/depth)."""
+    try:
+        started = bulkops.start(action, group_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    if not started:
+        raise HTTPException(409, "Массовая операция уже выполняется")
+    await audit.log_action(session, request, "bulk_run", detail=action)
+    return {"started": True}
+
+
+@router.get("/bulk/status")
+async def bulk_status():
+    """Прогресс текущей/последней массовой операции."""
+    return bulkops.status()
 
 
 @router.get("/audit")

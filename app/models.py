@@ -292,6 +292,22 @@ class AlertState(Base):
     context: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
+class IssueAck(Base):
+    """«Взял в работу» для рабочего списка проблем (разбор полётов).
+
+    Не связано с алертами: это ручная пометка дежурного по текущей проблеме,
+    идентифицируемой стабильным ключом ``issue_key`` (напр. ``dev:5:ch:3:offline``).
+    """
+
+    __tablename__ = "issue_acks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    issue_key: Mapped[str] = mapped_column(String(255), unique=True)
+    note: Mapped[str | None] = mapped_column(Text, default=None)
+    ack_by: Mapped[str | None] = mapped_column(String(64), default=None)
+    ack_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 # ── Модуль «Автобусы» (ручной офлайн-учёт дисковой ротации) ──────────────────
 class DiskStatus:
     INSTALLED = "installed"          # стоит в автобусе

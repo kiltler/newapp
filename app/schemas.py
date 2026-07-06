@@ -157,6 +157,11 @@ class MarkerMove(BaseModel):
 
 
 # ── Автобусы / диски ────────────────────────────────────────────────────────────
+class IssueAckIn(BaseModel):
+    key: str
+    note: str | None = None
+
+
 class BusCreate(BaseModel):
     bus_number: str
     route: str | None = None

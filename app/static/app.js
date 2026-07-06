@@ -101,20 +101,45 @@ async function toggleChannel(deviceId, channelId, btn) {
   if (r.ok) location.reload();
   else alert("Ошибка: " + (await r.text()));
 }
-async function bulkPoll(groupId) {
-  const q = groupId ? `?group_id=${groupId}` : "";
-  const r = await fetch(`/api/bulk/poll${q}`, { method: "POST" });
-  const j = await r.json();
-  alert(`Опрошено устройств: ${j.count}`);
-  location.reload();
+// ── Массовые операции с прогрессом (фоновый прогон, опрос статуса) ──────────
+async function bulkRun(action) {
+  const sel = document.getElementById("bulk-group");
+  const groupId = sel ? sel.value : "";
+  if (action === "sync_time" && !confirm("Синхронизировать время на выбранных регистраторах?")) return;
+  const q = new URLSearchParams({ action });
+  if (groupId) q.set("group_id", groupId);
+  const r = await fetch(`/api/bulk/run?${q}`, { method: "POST" });
+  if (r.status === 409) { alert("Массовая операция уже выполняется — дождитесь завершения."); return; }
+  if (!r.ok) { alert("Ошибка: " + (await r.text())); return; }
+  bulkPollStatus();
 }
-async function bulkSyncTime(groupId) {
-  if (!confirm("Синхронизировать время на выбранных регистраторах?")) return;
-  const q = groupId ? `?group_id=${groupId}` : "";
-  const r = await fetch(`/api/bulk/sync-time${q}`, { method: "POST" });
-  const j = await r.json();
-  alert(`Время синхронизировано: ${j.synced}/${j.total}`);
+
+let _bulkTimer = null;
+async function bulkPollStatus() {
+  const box = document.getElementById("bulk-progress");
+  const fill = document.getElementById("bulk-fill");
+  const text = document.getElementById("bulk-text");
+  const st = await fetch("/api/bulk/status").then(r => r.json()).catch(() => null);
+  if (!st) return;
+  if (box) box.style.display = "";
+  const pct = st.total ? Math.round(st.done / st.total * 100) : 0;
+  if (fill) fill.style.width = pct + "%";
+  if (text) {
+    text.textContent = st.running
+      ? `${st.label}: ${st.done}/${st.total}${st.current ? " · " + st.current : ""}`
+      : `${st.label || "Готово"}: ${st.ok} ок, ${st.failed} с ошибкой из ${st.total}`;
+  }
+  if (st.running) {
+    _bulkTimer = setTimeout(bulkPollStatus, 1000);
+  } else {
+    clearTimeout(_bulkTimer);
+    setTimeout(() => location.reload(), 1200);  // подтянуть свежие статусы
+  }
 }
+
+// Совместимость со старыми кнопками дашборда
+function bulkPoll() { bulkRun("poll"); }
+function bulkSyncTime() { bulkRun("sync_time"); }
 function diag(id) {
   const p = prompt(
     "Эндпоинт NVR для диагностики:",

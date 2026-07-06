@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Разбор полётов — NVR Monitor{% endblock %}
+{% block content %}
+<div class="wl-head">
+  <h1>🛠 Разбор полётов</h1>
+  <p class="muted">Все текущие проблемы по объектам в одном месте. Отметьте «взял в работу», чтобы коллеги видели, что задача не забыта.</p>
+</div>
+
+<section class="bus-summary">
+  <div class="bus-tile"><span class="num">{{ summary.total }}</span><span>всего проблем</span></div>
+  <div class="bus-tile {{ 'bad' if summary.critical else '' }}"><span class="num">{{ summary.critical }}</span><span>критичных</span></div>
+  <div class="bus-tile {{ 'warn' if summary.warning else '' }}"><span class="num">{{ summary.warning }}</span><span>предупреждений</span></div>
+  <div class="bus-tile"><span class="num">{{ summary.open }}</span><span>не разобрано</span></div>
+  <div class="bus-tile"><span class="num">{{ summary.taken }}</span><span>в работе</span></div>
+</section>
+
+<div class="wl-bulk">
+  <div class="wl-bulk-row">
+    <select id="bulk-group">
+      <option value="">Все объекты</option>
+      {% for gid, g in groups.items() %}<option value="{{ gid }}">{{ g.name }}</option>{% endfor %}
+    </select>
+    <button onclick="bulkRun('poll')">🔄 Опросить все</button>
+    <button onclick="bulkRun('sync_time')">🕐 Синхр. время</button>
+    <button onclick="bulkRun('archive_check')">🎞 Проверить архив</button>
+    <button onclick="bulkRun('quality_check')">📷 Проверить качество</button>
+  </div>
+  <div id="bulk-progress" class="wl-progress" style="display:none">
+    <div class="wl-progress-bar"><div id="bulk-fill" class="wl-progress-fill"></div></div>
+    <div class="wl-progress-text muted" id="bulk-text"></div>
+  </div>
+</div>
+
+<div class="wl-filters">
+  <label><input type="checkbox" id="f-crit" onchange="wlFilter()"> только критичные</label>
+  <label><input type="checkbox" id="f-open" onchange="wlFilter()"> скрыть взятые в работу</label>
+</div>
+
+{% if not issues %}
+  <div class="wl-empty">✅ Проблем нет — все объекты в норме.</div>
+{% else %}
+<div class="wl-list">
+  {% set kind_icon = {'unreachable':'🔌','channel':'📴','quality':'📷','drift':'🕐','archive':'🎞','hdd':'💽'} %}
+  {% for i in issues %}
+  <div class="wl-item sev-{{ i.severity }} {{ 'taken' if i.ack else '' }}"
+       data-sev="{{ i.severity }}" data-taken="{{ '1' if i.ack else '0' }}">
+    <span class="wl-sev"></span>
+    <div class="wl-main">
+      <div class="wl-title">
+        <span class="wl-icon">{{ kind_icon.get(i.kind, '⚠️') }}</span>
+        <a href="/devices/{{ i.device_id }}">{{ i.device_name }}</a>
+        <span class="wl-sep">·</span> {{ i.title }}
+      </div>
+      <div class="wl-meta">
+        {{ i.detail }}
+        {% if i.since %}<span class="wl-since" data-since="{{ i.since }}"></span>{% endif %}
+        {% if i.ack %}<span class="wl-ack">🛠 в работе: {{ i.ack.by }}{% if i.ack.note %} — «{{ i.ack.note }}»{% endif %}</span>{% endif %}
+      </div>
+    </div>
+    <div class="wl-actions">
+      {% if i.ack %}
+        <button class="mini" onclick="wlAck('{{ i.key }}', '{{ (i.ack.note or '') | replace("'", "\\'") }}')">изм.</button>
+        <button class="mini" onclick="wlUnack('{{ i.key }}')">снять</button>
+      {% else %}
+        <button class="mini" onclick="wlAck('{{ i.key }}', '')">взял в работу</button>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<script>
+// местное время для «с ...»
+document.querySelectorAll(".wl-since").forEach(el => {
+  const d = new Date(el.dataset.since);
+  if (!isNaN(d)) el.textContent = "· с " + d.toLocaleString("ru-RU", {day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
+});
+
+function wlFilter() {
+  const crit = document.getElementById("f-crit").checked;
+  const openOnly = document.getElementById("f-open").checked;
+  document.querySelectorAll(".wl-item").forEach(el => {
+    let show = true;
+    if (crit && el.dataset.sev !== "critical") show = false;
+    if (openOnly && el.dataset.taken === "1") show = false;
+    el.style.display = show ? "" : "none";
+  });
+}
+
+async function wlAck(key, note) {
+  const text = prompt("Заметка «взял в работу» (что делаете / статус):", note || "");
+  if (text === null) return;
+  const r = await fetch("/api/worklist/ack", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({key, note: text})
+  });
+  r.ok ? location.reload() : alert("Ошибка: " + await r.text());
+}
+async function wlUnack(key) {
+  const r = await fetch("/api/worklist/unack", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({key})
+  });
+  r.ok ? location.reload() : alert("Ошибка: " + await r.text());
+}
+</script>
+{% endblock %}

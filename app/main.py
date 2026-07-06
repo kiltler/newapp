@@ -15,6 +15,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.api import (
     auth, backup_api, buses, checkin, dashboard, devices, monitoring, plan, users_api,
+    worklist,
 )
 from app.config import settings
 from app.database import init_db
@@ -87,6 +88,7 @@ if not settings.admin_password:
 app.include_router(auth.router)
 app.include_router(devices.router)
 app.include_router(monitoring.router)
+app.include_router(worklist.router)
 app.include_router(plan.router)
 app.include_router(buses.router)
 app.include_router(checkin.router)
