@@ -483,10 +483,12 @@ async def test_test_clip_http_download_and_trim(db, monkeypatch, tmp_path):
     class FakeClient:
         async def search_playback(self, ch, s0, e0, *, substream=True):
             return [open_seg, closed_seg]
-        async def download_segment(self, uri, out_path, max_bytes=None):
+        async def download_segment(self, uri, out_path, max_bytes=None, progress=None):
             dl["uri"] = uri
             with open(out_path, "wb") as fh:
                 fh.write(b"X" * 2048)
+            if progress is not None:
+                await progress(2048, 2048)
             return True, 2048, ""
 
     monkeypatch.setattr(checkin_ingest, "build_recorder_client", lambda rec, password=None: FakeClient())
@@ -696,9 +698,11 @@ async def test_day_whole_http_download(db, monkeypatch, tmp_path):
     class FakeClient:
         async def search_playback(self, ch, s0, e0, *, substream=True):
             return [seg]
-        async def download_segment(self, uri, out_path, max_bytes=None):
+        async def download_segment(self, uri, out_path, max_bytes=None, progress=None):
             with open(out_path, "wb") as fh:
                 fh.write(b"X" * 1000)
+            if progress is not None:
+                await progress(1000, 1000)
             return True, 1000, ""
 
     monkeypatch.setattr(checkin_ingest, "build_recorder_client", lambda rec, password=None: FakeClient())
@@ -713,6 +717,13 @@ async def test_day_whole_http_download(db, monkeypatch, tmp_path):
     summary = await checkin_ingest.run_ingestion(dt.date(2026, 6, 15), [hid], "manual", whole=True)
     assert summary["downloaded"] == 1
     async with SessionLocal() as s:
-        clip = (await s.execute(__import__("sqlalchemy").select(CheckinClip))).scalars().first()
+        sa = __import__("sqlalchemy")
+        clip = (await s.execute(sa.select(CheckinClip))).scalars().first()
         assert clip.status == ClipStatus.OK
         assert clip.start_ts == dt.datetime(2026, 6, 15, 8)   # обрезано по началу окна (07:00 → сегмент 08:00)
+        # метрики загрузки записаны
+        assert clip.download_bytes == 1000
+        assert clip.download_ms is not None and clip.download_ms >= 0
+        from app.models import CheckinIngestRun
+        run = (await s.execute(sa.select(CheckinIngestRun))).scalars().first()
+        assert run.dl_bytes == 1000  # учтено в суммарной статистике прогона

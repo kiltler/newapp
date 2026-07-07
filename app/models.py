@@ -633,6 +633,9 @@ class CheckinClip(Base):
     end_ts: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
     path: Mapped[str] = mapped_column(Text, default="")
     size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    # Метрики загрузки: сколько скачано с устройства (сырые байты по сети) и за сколько.
+    download_bytes: Mapped[int | None] = mapped_column(Integer, default=None)
+    download_ms: Mapped[int | None] = mapped_column(Integer, default=None)
     status: Mapped[str] = mapped_column(String(16), default=ClipStatus.PENDING)
     error: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -713,3 +716,6 @@ class CheckinIngestRun(Base):
     current: Mapped[str] = mapped_column(Text, default="")
     error: Mapped[str | None] = mapped_column(Text, default=None)
     detail: Mapped[list] = mapped_column(JSON, default=list)  # по регистраторам
+    # Суммарно за прогон: сколько байт скачано и суммарное время загрузки (мс).
+    dl_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    dl_ms: Mapped[int] = mapped_column(Integer, default=0)

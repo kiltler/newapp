@@ -51,7 +51,7 @@ _register_filters(templates)
 router = APIRouter(tags=["checkin"])
 
 # Метка сборки — видно в UI, сразу понятно, задеплоен ли новый код.
-CHECKIN_BUILD = "2026-07-06-notoday"
+CHECKIN_BUILD = "2026-07-07-dlmetrics"
 
 
 def _clip_url(path: str) -> str:
@@ -96,6 +96,12 @@ async def checkin_clips(
             "status": c.status, "size_mb": round(c.size_bytes / 1048576, 1) if c.size_bytes else 0,
             "url": _clip_url(c.path) if c.status == ClipStatus.OK else None,
             "error": c.error,
+            "dl_seconds": round(c.download_ms / 1000, 1) if c.download_ms else None,
+            "dl_speed": (
+                round((c.download_bytes / 1048576) / (c.download_ms / 1000), 1)
+                if c.download_bytes and c.download_ms else None
+            ),
+            "dl_at": c.created_at,
         }
         for c in clips
     ]
@@ -494,6 +500,9 @@ async def ingest_status(session: AsyncSession = Depends(get_session)):
     pct = round(run.recorders_done / run.recorders_total * 100) if run.recorders_total else (
         100 if run.status != "running" else 0
     )
+    dl_ms = run.dl_ms or 0
+    dl_bytes = run.dl_bytes or 0
+    avg_speed_mb = round((dl_bytes / 1048576) / (dl_ms / 1000), 1) if dl_ms else 0
     return {
         "exists": True, "id": run.id, "status": run.status, "trigger": run.trigger,
         "day": run.day.isoformat() if run.day else None,
@@ -501,6 +510,8 @@ async def ingest_status(session: AsyncSession = Depends(get_session)):
         "downloaded": run.downloaded, "skipped": run.skipped, "errors": run.errors,
         "current": run.current, "error": run.error, "detail": run.detail or [],
         "percent": pct, "elapsed": elapsed,
+        "dl_mb": round(dl_bytes / 1048576, 1), "dl_seconds": round(dl_ms / 1000),
+        "avg_speed_mb": avg_speed_mb,
         "started_at": started.isoformat(), "finished": run.finished_at is not None,
     }
 

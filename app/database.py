@@ -66,6 +66,10 @@ _NEW_COLUMNS = [
     ("disks", "batch_id", "INTEGER"),
     ("disks", "warranty_until", "DATE"),
     ("assets", "assigned_bus_id", "INTEGER"),
+    ("checkin_clips", "download_bytes", "INTEGER"),
+    ("checkin_clips", "download_ms", "INTEGER"),
+    ("checkin_ingest_runs", "dl_bytes", "INTEGER DEFAULT 0"),
+    ("checkin_ingest_runs", "dl_ms", "INTEGER DEFAULT 0"),
 ]
 
 

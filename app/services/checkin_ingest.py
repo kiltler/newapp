@@ -16,6 +16,7 @@ import datetime as dt
 import logging
 import os
 import re
+import time
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -458,19 +459,43 @@ async def _ingest_http_clip(
         return "error", clip.error
 
     await _patch_run(run_id, current=f"{label}: качаю сегмент по HTTP…")
-    ok, nbytes, err = await client.download_segment(uri, tmp, max_bytes=800 * 1024 * 1024)
+
+    async def _on_progress(done: int, expected: int) -> None:
+        el = max(time.monotonic() - dl_start, 0.001)
+        speed = done / el  # байт/с
+        pct = f"{min(done * 100 // expected, 100)}% · " if expected else ""
+        await _patch_run(
+            run_id,
+            current=f"{label}: {pct}{done // 1048576} МБ · {speed / 1048576:.1f} МБ/с",
+        )
+
+    dl_start = time.monotonic()
+    ok, nbytes, err = await client.download_segment(
+        uri, tmp, max_bytes=800 * 1024 * 1024, progress=_on_progress,
+    )
+    dl_ms = int((time.monotonic() - dl_start) * 1000)
     if not ok or nbytes == 0:
         clip.status, clip.error = ClipStatus.ERROR, f"HTTP-скачивание: {err}"
+        clip.download_bytes, clip.download_ms = nbytes or 0, dl_ms
         await session.commit()
         _safe_remove(tmp)
         return "error", clip.error
 
-    await _patch_run(run_id, current=f"{label}: обрезаю клип из {nbytes // 1048576} МБ…")
+    # учтём загрузку в суммарной статистике прогона (для средней скорости)
+    await _patch_run(run_id, incs={"dl_bytes": nbytes, "dl_ms": dl_ms})
+
+    speed_mb = (nbytes / 1048576) / max(dl_ms / 1000, 0.001)
+    await _patch_run(
+        run_id,
+        current=f"{label}: обрезаю клип из {nbytes // 1048576} МБ "
+                f"(скачано за {dl_ms // 1000}с, {speed_mb:.1f} МБ/с)…",
+    )
     offset = max((win_start - seg["start"]).total_seconds(), 0)
     duration = (win_end - win_start).total_seconds()
     ok2, err2 = await _ffmpeg_trim(tmp, out_path, offset, duration)
     _safe_remove(tmp)
 
+    clip.download_bytes, clip.download_ms = nbytes, dl_ms
     if ok2:
         clip.status, clip.size_bytes, clip.error = ClipStatus.OK, os.path.getsize(out_path), None
     else:

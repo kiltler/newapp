@@ -79,7 +79,7 @@
 </div>
 
 <table class="grid">
-  <thead><tr><th>Гостиница</th><th>Дата</th><th>Канал</th><th>Интервал</th><th>Размер</th><th>Статус</th><th></th></tr></thead>
+  <thead><tr><th>Гостиница</th><th>Дата</th><th>Канал</th><th>Интервал</th><th>Размер</th><th>Загрузка</th><th>Статус</th><th></th></tr></thead>
   <tbody>
   {% for c in clips %}
     <tr>
@@ -88,6 +88,12 @@
       <td>{{ c.channel_id }} <span class="muted">· {{ c.role }}</span></td>
       <td>{{ c.start.strftime('%H:%M:%S') }}–{{ c.end.strftime('%H:%M:%S') }}</td>
       <td>{{ c.size_mb }} МБ</td>
+      <td style="white-space:nowrap">
+        {% if c.dl_seconds is not none %}
+          {{ c.dl_seconds }} с{% if c.dl_speed is not none %} · {{ c.dl_speed }} МБ/с{% endif %}
+          <div class="muted" style="font-size:11px">{{ c.dl_at | localtime('%d.%m %H:%M') }}</div>
+        {% else %}<span class="muted">—</span>{% endif %}
+      </td>
       <td>
         {% if c.status == 'ok' %}<span class="badge ok">готов</span>
         {% elif c.status == 'pending' %}<span class="badge warn">качается</span>
@@ -102,7 +108,7 @@
       </td>
     </tr>
   {% else %}
-    <tr><td colspan="7" class="muted">Клипов нет. Настройте регистраторы и запустите ingestion.</td></tr>
+    <tr><td colspan="8" class="muted">Клипов нет. Настройте регистраторы и запустите ingestion.</td></tr>
   {% endfor %}
   </tbody>
 </table>
@@ -233,10 +239,15 @@ function renderStatus(d){
   const bar = document.getElementById("ingBar");
   bar.style.width = d.percent + "%";
   bar.style.background = d.status === 'error' ? "var(--err)" : (d.errors ? "linear-gradient(90deg,var(--warn),var(--ok))" : "");
+  const dlInfo = (d.dl_mb > 0)
+    ? ` · 💾 <b>${d.dl_mb} МБ</b> за <b>${fmtElapsed(d.dl_seconds)}</b>` +
+      (d.avg_speed_mb ? ` · средн. <b>${d.avg_speed_mb} МБ/с</b>` : "")
+    : "";
   document.getElementById("ingSummary").innerHTML =
     `Регистраторы <b>${d.recorders_done}/${d.recorders_total}</b> · ` +
     `↓ скачано <b>${d.downloaded}</b> · ⤳ пропущено <b>${d.skipped}</b> · ` +
-    `<span style="color:${d.errors?'var(--err)':'inherit'}">✖ ошибок <b>${d.errors}</b></span>`;
+    `<span style="color:${d.errors?'var(--err)':'inherit'}">✖ ошибок <b>${d.errors}</b></span>` +
+    dlInfo;
   document.getElementById("ingCurrent").textContent = d.status === 'running' ? (d.current || "") : "";
 
   document.getElementById("ingRecorders").innerHTML = (d.detail || []).map(e => {

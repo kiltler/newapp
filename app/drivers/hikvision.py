@@ -430,13 +430,18 @@ class HikvisionClient(NVRClient):
         return out
 
     async def download_segment(
-        self, playback_uri: str, out_path: str, max_bytes: int | None = None
+        self, playback_uri: str, out_path: str, max_bytes: int | None = None,
+        progress=None,
     ) -> tuple[bool, int, str]:
         """Скачивает отрезок архива по HTTP через /ISAPI/ContentMgmt/download.
 
         Обход RTSP (порт 554): использует playbackURI устройства и HTTP-порт 80
         (там же, где работает ISAPI). max_bytes — остановиться после N байт
-        (для пробы). Возвращает (успех, байт, ошибка)."""
+        (для пробы). progress — async-колбэк (скачано_байт, ожидается_всего|0),
+        вызывается не чаще ~раз в секунду для живого процента/скорости.
+        Возвращает (успех, байт, ошибка)."""
+        import time
+
         esc = playback_uri.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         body = (
             '<?xml version="1.0" encoding="utf-8"?>'
@@ -454,13 +459,22 @@ class HikvisionClient(NVRClient):
                     if resp.status_code != 200:
                         text = (await resp.aread()).decode("utf-8", "replace")[:200]
                         return False, 0, f"HTTP {resp.status_code}: {text}"
+                    expected = int(resp.headers.get("content-length") or 0)
                     total = 0
+                    last_cb = time.monotonic()
                     with open(out_path, "wb") as fh:
                         async for chunk in resp.aiter_bytes(65536):
                             fh.write(chunk)
                             total += len(chunk)
+                            if progress is not None:
+                                now = time.monotonic()
+                                if now - last_cb >= 1.0:
+                                    await progress(total, expected)
+                                    last_cb = now
                             if max_bytes and total >= max_bytes:
                                 break  # достаточно для пробы
+            if progress is not None:
+                await progress(total, 0)
             return (total > 0), total, "" if total > 0 else "пустой ответ"
         except Exception as exc:  # noqa: BLE001
             return False, 0, f"{type(exc).__name__}: {exc}"
