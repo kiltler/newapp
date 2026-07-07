@@ -427,6 +427,150 @@ async def _ffmpeg_trim(src: str, dst: str, offset_s: float, duration_s: float) -
     return ok, err
 
 
+async def _run_ffmpeg_concat(list_path: str, dst: str, reencode: bool) -> tuple[bool, str]:
+    vcodec = (["-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-c:a", "aac"]
+              if reencode else ["-c", "copy"])
+    cmd = [
+        settings.ffmpeg_bin, "-y", "-nostdin", "-f", "concat", "-safe", "0",
+        "-i", list_path, *vcodec, "-movflags", "+faststart", dst,
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+    except FileNotFoundError:
+        return False, "ffmpeg не найден"
+    try:
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=3600)
+    except asyncio.TimeoutError:
+        proc.kill()
+        return False, "таймаут склейки"
+    if proc.returncode != 0:
+        tail = (stderr or b"").decode("utf-8", "replace").strip().splitlines()[-2:]
+        return False, "ffmpeg: " + " | ".join(tail)
+    if not os.path.exists(dst) or os.path.getsize(dst) == 0:
+        return False, "пустой результат склейки"
+    return True, ""
+
+
+async def _ffmpeg_concat(parts: list[str], dst: str) -> tuple[bool, str]:
+    """Склеивает готовые MP4-части в один файл.
+
+    Быстрый путь — concat-демуксер с -c copy (части уже H.264/AAC). Если
+    результат неиграбельный (разошлись параметры потоков) — перекодируем.
+    """
+    if len(parts) == 1:
+        os.replace(parts[0], dst)
+        return (True, "") if os.path.exists(dst) else (False, "часть исчезла")
+    list_path = dst + ".concat.txt"
+    with open(list_path, "w", encoding="utf-8") as fh:
+        for p in parts:
+            esc = os.path.abspath(p).replace("'", "'\\''")
+            fh.write(f"file '{esc}'\n")
+    ok, err = await _run_ffmpeg_concat(list_path, dst, reencode=False)
+    if ok and await _has_playable_duration(dst):
+        _safe_remove(list_path)
+        return True, ""
+    ok, err = await _run_ffmpeg_concat(list_path, dst, reencode=True)
+    _safe_remove(list_path)
+    return ok, err
+
+
+async def _ingest_http_day(
+    session, client, recorder, hotel_id, ch, jobs: list, run_id: int | None, label: str,
+) -> tuple[str, str]:
+    """Скачивает все сегменты дня по HTTP и склеивает в ОДИН клип на канал/день."""
+    jobs = sorted(jobs, key=lambda j: j[1])  # по времени начала окна (cs)
+    day_start, day_end = jobs[0][1], jobs[-1][2]
+
+    existing = (
+        await session.execute(
+            select(CheckinClip).where(
+                CheckinClip.recorder_id == recorder.id,
+                CheckinClip.channel_id == ch.channel_id,
+                CheckinClip.start_ts == day_start,
+                CheckinClip.end_ts == day_end,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing and existing.status == ClipStatus.OK and existing.path and os.path.exists(existing.path):
+        return "skip", ""
+
+    out_path = clip_path(recorder, hotel_id, ch.channel_id, ArchiveSegment(day_start, day_end))
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    clip = existing or CheckinClip(
+        hotel_id=hotel_id, recorder_id=recorder.id, channel_id=ch.channel_id, role=ch.role,
+        day=day_start.date(), start_ts=day_start, end_ts=day_end, path=out_path,
+    )
+    clip.path, clip.status, clip.error = out_path, ClipStatus.PENDING, None
+    if existing is None:
+        session.add(clip)
+    await session.commit()
+
+    cap = settings.checkin_max_clip_mb * 1024 * 1024
+    parts: list[str] = []
+    total_bytes = total_ms = part_errors = 0
+    for i, (seg, cs, ce) in enumerate(jobs):
+        if is_cancelled(run_id):
+            break
+        uri = seg.get("uri") or ""
+        if not uri:
+            part_errors += 1
+            continue
+        tmp, part_out = f"{out_path}.part{i}.full", f"{out_path}.part{i}.mp4"
+
+        async def _prog(done, expected, _i=i, _n=len(jobs)):
+            el = max(time.monotonic() - dl_start, 0.001)
+            pct = f"{min(done * 100 // expected, 100)}% · " if expected else ""
+            await _patch_run(
+                run_id,
+                current=f"{label}: кан.{ch.channel_id} часть {_i + 1}/{_n} · "
+                        f"{pct}{done // 1048576} МБ · {done / el / 1048576:.1f} МБ/с",
+            )
+
+        dl_start = time.monotonic()
+        ok, nbytes, err = await client.download_segment(uri, tmp, max_bytes=cap, progress=_prog)
+        dl_ms = int((time.monotonic() - dl_start) * 1000)
+        total_bytes += nbytes or 0
+        total_ms += dl_ms
+        await _patch_run(run_id, incs={"dl_bytes": nbytes or 0, "dl_ms": dl_ms})
+        if not ok or nbytes == 0:
+            part_errors += 1
+            _safe_remove(tmp)
+            log.warning("рег.%s кан.%s часть %d: %s", recorder.id, ch.channel_id, i, err)
+            continue
+
+        offset = max((cs - seg["start"]).total_seconds(), 0)
+        okt, errt = await _ffmpeg_trim(tmp, part_out, offset, (ce - cs).total_seconds())
+        _safe_remove(tmp)
+        if okt:
+            parts.append(part_out)
+        else:
+            part_errors += 1
+            _safe_remove(part_out)
+            log.warning("рег.%s кан.%s часть %d: обрезка: %s", recorder.id, ch.channel_id, i, errt)
+
+    clip.download_bytes, clip.download_ms = total_bytes, total_ms
+    if not parts:
+        clip.status, clip.error = ClipStatus.ERROR, "не удалось скачать ни одной части дня"
+        await session.commit()
+        return "error", clip.error
+
+    await _patch_run(run_id, current=f"{label}: кан.{ch.channel_id} склеиваю {len(parts)} частей…")
+    okc, errc = await _ffmpeg_concat(parts, out_path)
+    for p in parts:
+        _safe_remove(p)
+    if okc:
+        clip.status, clip.size_bytes, clip.error = ClipStatus.OK, os.path.getsize(out_path), None
+        if part_errors:
+            log.warning("рег.%s кан.%s: день склеен, но %d частей пропущено",
+                        recorder.id, ch.channel_id, part_errors)
+        await session.commit()
+        return "ok", ""
+    clip.status, clip.error = ClipStatus.ERROR, f"склейка: {errc}"
+    await session.commit()
+    return "error", clip.error
+
+
 async def _ingest_http_clip(
     session, client, recorder, hotel_id, ch, seg: dict,
     win_start: dt.datetime, win_end: dt.datetime, run_id: int | None, label: str,
@@ -744,19 +888,31 @@ async def ingest_recorder(
                 if use_whole:
                     # За вчера/сегодня: HTTP-скачивание сегментов окна + обрезка.
                     hjobs = await _window_jobs(client, ch, win_start, win_end)
-                    for seg_dict, cs, ce in hjobs:
-                        res, err = await _ingest_http_clip(
-                            session, client, recorder, recorder.hotel_id, ch, seg_dict, cs, ce, run_id, label)
+
+                    def _tally(res, err):
                         if res == "ok":
                             stats["downloaded"] += 1
-                            await _patch_run(run_id, incs={"downloaded": 1}, rec_id=recorder_id, rec_incs={"downloaded": 1})
-                        elif res == "skip":
+                            return {"downloaded": 1}, {"downloaded": 1}, None
+                        if res == "skip":
                             stats["skipped"] += 1
-                            await _patch_run(run_id, incs={"skipped": 1}, rec_id=recorder_id, rec_incs={"skipped": 1})
-                        else:
-                            stats["errors"] += 1
-                            await _patch_run(run_id, incs={"errors": 1}, rec_id=recorder_id,
-                                             rec_incs={"errors": 1}, error_sample=f"кан.{ch.channel_id}: {err}")
+                            return {"skipped": 1}, {"skipped": 1}, None
+                        stats["errors"] += 1
+                        return {"errors": 1}, {"errors": 1}, f"кан.{ch.channel_id}: {err}"
+
+                    if hjobs and settings.checkin_merge_day:
+                        # Склейка всех сегментов дня в ОДИН клип на канал.
+                        res, err = await _ingest_http_day(
+                            session, client, recorder, recorder.hotel_id, ch, hjobs, run_id, label)
+                        incs, rec_incs, sample = _tally(res, err)
+                        await _patch_run(run_id, incs=incs, rec_id=recorder_id,
+                                         rec_incs=rec_incs, error_sample=sample)
+                    else:
+                        for seg_dict, cs, ce in hjobs:
+                            res, err = await _ingest_http_clip(
+                                session, client, recorder, recorder.hotel_id, ch, seg_dict, cs, ce, run_id, label)
+                            incs, rec_incs, sample = _tally(res, err)
+                            await _patch_run(run_id, incs=incs, rec_id=recorder_id,
+                                             rec_incs=rec_incs, error_sample=sample)
                     await _patch_run(run_id, rec_id=recorder_id, rec_incs={"channels_done": 1})
                     continue
                 try:

@@ -771,3 +771,60 @@ async def test_day_whole_covers_full_24h(db, monkeypatch, tmp_path):
         clip = (await s.execute(__import__("sqlalchemy").select(CheckinClip))).scalars().first()
         assert clip.status == ClipStatus.OK
         assert clip.start_ts == dt.datetime(2026, 6, 15, 2)  # окно начинается с 00:00, сегмент с 02:00
+
+
+async def test_day_segments_merged_into_one_clip(db, monkeypatch, tmp_path):
+    """Несколько сегментов дня склеиваются в ОДИН клип на канал."""
+    monkeypatch.setattr(checkin_ingest.settings, "clips_dir", str(tmp_path))
+    monkeypatch.setattr(checkin_ingest.settings, "checkin_merge_day", True)
+    checkin_ingest.set_clips_dir(None)
+    async with SessionLocal() as s:
+        h = CheckinHotel(name="Склейка"); s.add(h); await s.flush()
+        rec = CheckinRecorder(hotel_id=h.id, host="10.0.0.7", model_type="ds7616ni_e2")
+        s.add(rec); await s.flush()
+        s.add(CheckinChannel(recorder_id=rec.id, channel_id=60, role="reception", substream_trackid=6002))
+        await s.commit(); hid = h.id
+
+    segs = [
+        {"start": dt.datetime(2026, 6, 15, 2), "end": dt.datetime(2026, 6, 15, 6),
+         "uri": "rtsp://10.0.0.7/a?size=1"},
+        {"start": dt.datetime(2026, 6, 15, 10), "end": dt.datetime(2026, 6, 15, 14),
+         "uri": "rtsp://10.0.0.7/b?size=1"},
+    ]
+
+    class FakeClient:
+        async def search_playback(self, ch, s0, e0, *, substream=True):
+            return segs
+        async def download_segment(self, uri, out_path, max_bytes=None, progress=None):
+            with open(out_path, "wb") as fh:
+                fh.write(b"X" * 500)
+            return True, 500, ""
+
+    monkeypatch.setattr(checkin_ingest, "build_recorder_client", lambda rec, password=None: FakeClient())
+
+    async def fake_trim(src, dst, offset_s, duration_s):
+        with open(dst, "wb") as fh:
+            fh.write(b"PART")
+        return True, ""
+
+    concat_calls = {}
+
+    async def fake_concat(parts, dst):
+        concat_calls["n"] = len(parts)
+        with open(dst, "wb") as fh:
+            fh.write(b"MERGED")
+        return True, ""
+
+    monkeypatch.setattr(checkin_ingest, "_ffmpeg_trim", fake_trim)
+    monkeypatch.setattr(checkin_ingest, "_ffmpeg_concat", fake_concat)
+
+    summary = await checkin_ingest.run_ingestion(dt.date(2026, 6, 15), [hid], "manual", whole=True)
+    assert summary["downloaded"] == 1  # один склеенный клип, а не два
+    assert concat_calls["n"] == 2      # обе части ушли в склейку
+    async with SessionLocal() as s:
+        clips = (await s.execute(__import__("sqlalchemy").select(CheckinClip))).scalars().all()
+        assert len(clips) == 1
+        assert clips[0].status == ClipStatus.OK
+        assert clips[0].start_ts == dt.datetime(2026, 6, 15, 2)   # с начала первого сегмента
+        assert clips[0].end_ts == dt.datetime(2026, 6, 15, 13, 45)  # до конца последнего минус «живой край»
+        assert clips[0].download_bytes == 1000  # 500 + 500

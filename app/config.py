@@ -81,6 +81,7 @@ class Settings(BaseSettings):
     checkin_merge_gap_sec: int = 60         # склеивать соседние сегменты ближе этого
     checkin_max_segments: int = 300         # предохранитель: клипов на канал за прогон
     checkin_max_clip_mb: int = 8000         # предохранитель на размер одного сегмента (МБ)
+    checkin_merge_day: bool = True          # склеивать сегменты дня в один клип на канал
 
     # Прочее
     log_level: str = "INFO"
