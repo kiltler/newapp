@@ -108,6 +108,13 @@ def _parse_hhmm(value: str, fallback: tuple[int, int]) -> tuple[int, int]:
         return fallback
 
 
+def full_day_window(day: dt.date) -> tuple[dt.datetime, dt.datetime]:
+    """Полные сутки [00:00, 24:00) — для ручной выгрузки «за день» (нужны все 24 ч)."""
+    start = dt.datetime.combine(day, dt.time.min)
+    end = dt.datetime.combine(day + dt.timedelta(days=1), dt.time.min)
+    return start, end
+
+
 def night_window(recorder: CheckinRecorder, day: dt.date) -> tuple[dt.datetime, dt.datetime]:
     """Границы ночного окна регистратора для указанной даты (локальное время).
 
@@ -471,7 +478,7 @@ async def _ingest_http_clip(
 
     dl_start = time.monotonic()
     ok, nbytes, err = await client.download_segment(
-        uri, tmp, max_bytes=800 * 1024 * 1024, progress=_on_progress,
+        uri, tmp, max_bytes=settings.checkin_max_clip_mb * 1024 * 1024, progress=_on_progress,
     )
     dl_ms = int((time.monotonic() - dl_start) * 1000)
     if not ok or nbytes == 0:
@@ -483,6 +490,12 @@ async def _ingest_http_clip(
 
     # учтём загрузку в суммарной статистике прогона (для средней скорости)
     await _patch_run(run_id, incs={"dl_bytes": nbytes, "dl_ms": dl_ms})
+
+    cap = settings.checkin_max_clip_mb * 1024 * 1024
+    if nbytes >= cap - 65536:  # упёрлись в предохранитель — клип, вероятно, обрезан
+        log.warning("рег.%s кан.%s: загрузка упёрлась в лимит %d МБ — клип может быть неполным "
+                    "(поднимите CHECKIN_MAX_CLIP_MB)", recorder.id, ch.channel_id,
+                    settings.checkin_max_clip_mb)
 
     speed_mb = (nbytes / 1048576) / max(dl_ms / 1000, 0.001)
     await _patch_run(
@@ -673,9 +686,10 @@ async def ingest_recorder(
                 await _patch_run(run_id, rec_id=recorder_id,
                                  current=f"{label}: ищу свежую запись в архиве…")
             elif use_whole:
-                # День (За вчера/сегодня): окно в терминах ВРЕМЕНИ РЕГИСТРАТОРА,
-                # иначе TZ-сдвиг сервера обрежет день до пары часов.
-                win_start, win_end = night_window(recorder, day)
+                # День (За вчера/сегодня): ПОЛНЫЕ сутки 00:00–24:00 в терминах
+                # ВРЕМЕНИ РЕГИСТРАТОРА (иначе TZ-сдвиг сервера обрежет день).
+                # Ночное окно тут не применяем — ручная выгрузка должна брать все 24 ч.
+                win_start, win_end = full_day_window(day)
                 try:
                     dev_now = await client.get_device_time()
                 except Exception:  # noqa: BLE001  (NVRError или драйвер без метода)

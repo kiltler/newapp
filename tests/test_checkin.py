@@ -727,3 +727,47 @@ async def test_day_whole_http_download(db, monkeypatch, tmp_path):
         from app.models import CheckinIngestRun
         run = (await s.execute(sa.select(CheckinIngestRun))).scalars().first()
         assert run.dl_bytes == 1000  # учтено в суммарной статистике прогона
+
+
+async def test_day_whole_covers_full_24h(db, monkeypatch, tmp_path):
+    """Ручная выгрузка за день берёт ПОЛНЫЕ сутки (00:00–24:00), а не ночное окно.
+
+    Запись до 07:00 (старое начало окна) раньше терялась — теперь попадает в клип.
+    """
+    monkeypatch.setattr(checkin_ingest.settings, "clips_dir", str(tmp_path))
+    checkin_ingest.set_clips_dir(None)
+    async with SessionLocal() as s:
+        h = CheckinHotel(name="Сутки"); s.add(h); await s.flush()
+        rec = CheckinRecorder(hotel_id=h.id, host="10.0.0.6", model_type="ds7616ni_e2",
+                              night_start="07:00", night_end="24:00")  # ночное окно нарочно узкое
+        s.add(rec); await s.flush()
+        s.add(CheckinChannel(recorder_id=rec.id, channel_id=60, role="reception", substream_trackid=6002))
+        await s.commit(); hid = h.id
+
+    # сегмент записи ДО 07:00 — при старом окне он бы выпал
+    seg = {"start": dt.datetime(2026, 6, 15, 2), "end": dt.datetime(2026, 6, 15, 6),
+           "uri": "rtsp://10.0.0.6/Streaming/tracks/6001/?starttime=X&endtime=Y&name=F&size=9"}
+
+    class FakeClient:
+        async def search_playback(self, ch, s0, e0, *, substream=True):
+            return [seg]
+        async def download_segment(self, uri, out_path, max_bytes=None, progress=None):
+            with open(out_path, "wb") as fh:
+                fh.write(b"X" * 1000)
+            return True, 1000, ""
+
+    monkeypatch.setattr(checkin_ingest, "build_recorder_client", lambda rec, password=None: FakeClient())
+
+    async def fake_trim(src, dst, offset_s, duration_s):
+        with open(dst, "wb") as fh:
+            fh.write(b"CLIP")
+        return True, ""
+
+    monkeypatch.setattr(checkin_ingest, "_ffmpeg_trim", fake_trim)
+
+    summary = await checkin_ingest.run_ingestion(dt.date(2026, 6, 15), [hid], "manual", whole=True)
+    assert summary["downloaded"] == 1  # ранняя запись скачана, а не пропущена
+    async with SessionLocal() as s:
+        clip = (await s.execute(__import__("sqlalchemy").select(CheckinClip))).scalars().first()
+        assert clip.status == ClipStatus.OK
+        assert clip.start_ts == dt.datetime(2026, 6, 15, 2)  # окно начинается с 00:00, сегмент с 02:00
