@@ -51,7 +51,7 @@ _register_filters(templates)
 router = APIRouter(tags=["checkin"])
 
 # Метка сборки — видно в UI, сразу понятно, задеплоен ли новый код.
-CHECKIN_BUILD = "2026-07-07-audio"
+CHECKIN_BUILD = "2026-07-09-audioprobe"
 
 
 def _clip_url(path: str) -> str:
@@ -314,41 +314,45 @@ async def recorder_diag(rec_id: int, session: AsyncSession = Depends(get_session
     #    RTSP на этом DVR не отдаёт архив — не тратим время на его пробы.
     import asyncio as _asyncio
 
-    probe: dict = {}
-    try:
-        ch0 = rec.channels[0].channel_id if rec.channels else None
-        seg = None
-        if ch0 is not None:
-            subs = await client.search_playback(ch0, start, end, substream=True)
-            seg = checkin_ingest._closed_segment(subs) if subs else None  # закрытый сегмент!
-        if seg and seg.get("uri"):
+    async def _probe_stream(ch0: int, sub: bool) -> dict:
+        """Качает ~5 МБ пробы sub/main и смотрит потоки (есть ли звук)."""
+        res: dict = {}
+        try:
+            segs = await client.search_playback(ch0, start, end, substream=sub)
+            seg = checkin_ingest._closed_segment(segs) if segs else None
+            if not (seg and seg.get("uri")):
+                return {"note": "нет закрытых сегментов для пробы"}
             w1 = seg["end"] - dt.timedelta(seconds=5)
             w0 = w1 - dt.timedelta(seconds=15)
-            probe["channel"] = ch0
-            probe["segment_used"] = f"{seg['start'].isoformat()}..{seg['end'].isoformat()}"
-            probe["window"] = f"{w0.isoformat()}..{w1.isoformat()}"
+            res["segment_used"] = f"{seg['start'].isoformat()}..{seg['end'].isoformat()}"
             dl_uri = checkin_ingest._rewrite_uri_window(seg["uri"], w0, w1)
-            tmp = os.path.join(settings.clips_dir, f"probe_{rec.id}_http.bin")
-            # Тянем максимум 5 МБ — только подтвердить, что данные идут по HTTP.
+            tmp = os.path.join(settings.clips_dir, f"probe_{rec.id}_{'sub' if sub else 'main'}.bin")
             try:
                 ok, nbytes, err = await _asyncio.wait_for(
                     client.download_segment(dl_uri, tmp, max_bytes=5 * 1024 * 1024), timeout=45)
             except _asyncio.TimeoutError:
                 nbytes = os.path.getsize(tmp) if os.path.exists(tmp) else 0
-                ok, err = (nbytes > 0), (f"таймаут 45с, но скачано {nbytes} байт" if nbytes else "таймаут 45с, 0 байт")
-            probe["http_download_isapi"] = {"ok": ok, "bytes": nbytes, "error": err[:300]}
-            probe["uri_used"] = dl_uri  # playbackURI устройства без пароля
-            # Проверяем скачанную пробу: есть ли в архиве субпотока звук?
+                ok, err = (nbytes > 0), (f"таймаут 45с, скачано {nbytes} байт")
+            res["http_download_isapi"] = {"ok": ok, "bytes": nbytes, "error": (err or "")[:300]}
+            res["uri_used"] = dl_uri
             if ok and nbytes > 0:
-                probe["streams"] = await checkin_ingest.probe_streams(tmp)
+                res["streams"] = await checkin_ingest.probe_streams(tmp)
             try:
                 os.remove(tmp)
             except OSError:
                 pass
-        else:
-            probe["note"] = "нет сегментов субпотока для пробы"
-    except Exception as exc:  # noqa: BLE001
-        probe["error"] = str(exc)
+        except Exception as exc:  # noqa: BLE001
+            res["error"] = str(exc)
+        return res
+
+    probe: dict = {}
+    ch0 = rec.channels[0].channel_id if rec.channels else None
+    if ch0 is None:
+        probe["note"] = "нет каналов для пробы"
+    else:
+        probe["channel"] = ch0
+        probe["sub"] = await _probe_stream(ch0, sub=True)    # субпоток (что качаем обычно)
+        probe["main"] = await _probe_stream(ch0, sub=False)  # основной — есть ли звук там
     out["probe_download"] = probe
     return out
 
