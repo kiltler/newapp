@@ -51,7 +51,7 @@ _register_filters(templates)
 router = APIRouter(tags=["checkin"])
 
 # Метка сборки — видно в UI, сразу понятно, задеплоен ли новый код.
-CHECKIN_BUILD = "2026-07-07-mergeday"
+CHECKIN_BUILD = "2026-07-07-audio"
 
 
 def _clip_url(path: str) -> str:
@@ -338,6 +338,9 @@ async def recorder_diag(rec_id: int, session: AsyncSession = Depends(get_session
                 ok, err = (nbytes > 0), (f"таймаут 45с, но скачано {nbytes} байт" if nbytes else "таймаут 45с, 0 байт")
             probe["http_download_isapi"] = {"ok": ok, "bytes": nbytes, "error": err[:300]}
             probe["uri_used"] = dl_uri  # playbackURI устройства без пароля
+            # Проверяем скачанную пробу: есть ли в архиве субпотока звук?
+            if ok and nbytes > 0:
+                probe["streams"] = await checkin_ingest.probe_streams(tmp)
             try:
                 os.remove(tmp)
             except OSError:

@@ -347,7 +347,9 @@ async def _run_ffmpeg_trim(src, dst, offset_s, duration_s, reencode: bool) -> tu
     cmd = [
         settings.ffmpeg_bin, "-y", "-nostdin", "-fflags", "+genpts",
         "-ss", f"{max(offset_s, 0):.3f}", "-i", src, "-t", f"{max(duration_s, 1):.0f}",
-        "-map", "0:v:0?", "-map", "0:a:0?", *vcodec, "-c:a", "aac",
+        # звук берём любой (0:a?), а не только первый — Hikvision кладёт его как придётся;
+        # всегда перекодируем в AAC (в архиве часто G.711), браузер играет.
+        "-map", "0:v:0?", "-map", "0:a?", *vcodec, "-c:a", "aac", "-ac", "1",
         "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", dst,
     ]
     try:
@@ -380,6 +382,32 @@ async def _has_playable_duration(path: str) -> bool:
         return float((out or b"").decode().strip() or 0) > 0.1
     except Exception:  # noqa: BLE001
         return False
+
+
+async def probe_streams(path: str) -> dict:
+    """ffprobe: какие потоки в файле — чтобы точно знать, есть ли в архиве звук."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffprobe", "-v", "error", "-show_entries", "stream=codec_type,codec_name",
+            "-of", "csv=p=0", path,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=20)
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc)}
+    video_codec = audio_codec = None
+    for line in (out or b"").decode("utf-8", "replace").splitlines():
+        toks = [t.strip() for t in line.split(",") if t.strip()]
+        if "video" in toks:
+            rest = [t for t in toks if t != "video"]
+            video_codec = rest[0] if rest else "?"
+        elif "audio" in toks:
+            rest = [t for t in toks if t != "audio"]
+            audio_codec = rest[0] if rest else "?"
+    return {
+        "video_codec": video_codec,
+        "audio_codec": audio_codec,
+        "has_audio": audio_codec is not None,
+    }
 
 
 async def _window_jobs(client, ch, win_start: dt.datetime, win_end: dt.datetime) -> list[tuple]:
