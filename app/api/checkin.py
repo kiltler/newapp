@@ -51,7 +51,7 @@ _register_filters(templates)
 router = APIRouter(tags=["checkin"])
 
 # Метка сборки — видно в UI, сразу понятно, задеплоен ли новый код.
-CHECKIN_BUILD = "2026-07-09-audioprobe"
+CHECKIN_BUILD = "2026-07-09-audioprobe2"
 
 
 def _clip_url(path: str) -> str:
@@ -315,16 +315,26 @@ async def recorder_diag(rec_id: int, session: AsyncSession = Depends(get_session
     import asyncio as _asyncio
 
     async def _probe_stream(ch0: int, sub: bool) -> dict:
-        """Качает ~5 МБ пробы sub/main и смотрит потоки (есть ли звук)."""
+        """Качает ~5 МБ пробы sub/main и смотрит потоки (есть ли звук).
+
+        Берём САМЫЙ СВЕЖИЙ сегмент и окно за ~90с до его конца — чтобы проверять
+        текущую запись (после смены настроек звука), а не старый закрытый файл.
+        """
         res: dict = {}
         try:
             segs = await client.search_playback(ch0, start, end, substream=sub)
-            seg = checkin_ingest._closed_segment(segs) if segs else None
-            if not (seg and seg.get("uri")):
-                return {"note": "нет закрытых сегментов для пробы"}
-            w1 = seg["end"] - dt.timedelta(seconds=5)
+            if not segs:
+                return {"note": "нет сегментов для пробы"}
+            seg = max(segs, key=lambda s: s["end"])  # самый свежий
+            if not seg.get("uri"):
+                return {"note": "у сегмента нет playbackURI"}
+            # отступаем 90с от конца, чтобы не попасть в незаписанный «живой край»
+            w1 = seg["end"] - dt.timedelta(seconds=90)
+            if w1 <= seg["start"]:
+                w1 = seg["end"] - dt.timedelta(seconds=5)
             w0 = w1 - dt.timedelta(seconds=15)
             res["segment_used"] = f"{seg['start'].isoformat()}..{seg['end'].isoformat()}"
+            res["probe_at"] = f"{w0.isoformat()}..{w1.isoformat()}"
             dl_uri = checkin_ingest._rewrite_uri_window(seg["uri"], w0, w1)
             tmp = os.path.join(settings.clips_dir, f"probe_{rec.id}_{'sub' if sub else 'main'}.bin")
             try:
