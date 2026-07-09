@@ -87,7 +87,10 @@
       <td>{{ c.day }}</td>
       <td>{{ c.channel_id }} <span class="muted">· {{ c.role }}</span></td>
       <td>{{ c.start.strftime('%H:%M:%S') }}–{{ c.end.strftime('%H:%M:%S') }}</td>
-      <td>{{ c.size_mb }} МБ</td>
+      <td style="white-space:nowrap">{{ c.size_mb }} МБ
+        {% if c.resolution %}<div style="font-size:11px" class="{{ 'badge warn' if c.heavy else 'muted' }}"
+          {% if c.heavy %}title="Основной поток (не субпоток) — будет подвисать; нажмите 🔧"{% endif %}>{{ c.resolution }}</div>{% endif %}
+      </td>
       <td style="white-space:nowrap">
         {% if c.dl_seconds is not none %}
           {{ c.dl_seconds }} с{% if c.dl_speed is not none %} · {{ c.dl_speed }} МБ/с{% endif %}

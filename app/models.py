@@ -639,6 +639,10 @@ class CheckinClip(Base):
     # Метрики загрузки: сколько скачано с устройства (сырые байты по сети) и за сколько.
     download_bytes: Mapped[int | None] = mapped_column(Integer, default=None)
     download_ms: Mapped[int | None] = mapped_column(Integer, default=None)
+    # Разрешение готового клипа — видно, какой поток реально приехал
+    # (352×288 = субпоток, 1280×720/1920×1080 = основной).
+    width: Mapped[int | None] = mapped_column(Integer, default=None)
+    height: Mapped[int | None] = mapped_column(Integer, default=None)
     status: Mapped[str] = mapped_column(String(16), default=ClipStatus.PENDING)
     error: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

@@ -52,7 +52,7 @@ _register_filters(templates)
 router = APIRouter(tags=["checkin"])
 
 # Метка сборки — видно в UI, сразу понятно, задеплоен ли новый код.
-CHECKIN_BUILD = "2026-07-10-substream-warn"
+CHECKIN_BUILD = "2026-07-10-clipres"
 
 
 def _clip_url(path: str) -> str:
@@ -95,6 +95,8 @@ async def checkin_clips(
             "day": c.day.isoformat() if c.day else "",
             "start": c.start_ts, "end": c.end_ts,
             "status": c.status, "size_mb": round(c.size_bytes / 1048576, 1) if c.size_bytes else 0,
+            "resolution": f"{c.width}×{c.height}" if c.width and c.height else None,
+            "heavy": bool(c.height and c.height > 520),  # основной поток — будет подвисать
             "url": _clip_url(c.path) if c.status == ClipStatus.OK else None,
             "error": c.error,
             "dl_seconds": round(c.download_ms / 1000, 1) if c.download_ms else None,

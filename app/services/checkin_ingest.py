@@ -430,6 +430,15 @@ async def probe_streams(path: str) -> dict:
     }
 
 
+async def _fill_clip_resolution(clip) -> None:
+    """Записывает в клип разрешение готового файла (какой поток реально приехал)."""
+    try:
+        info = await probe_streams(clip.path)
+        clip.width, clip.height = info.get("width"), info.get("height")
+    except Exception:  # noqa: BLE001  (нет ffprobe/файла — просто без разрешения)
+        pass
+
+
 async def _window_jobs(client, ch, win_start: dt.datetime, win_end: dt.datetime) -> list[tuple]:
     """Сегменты записи, попадающие в окно [win_start, win_end] → [(seg, cs, ce)].
 
@@ -586,6 +595,7 @@ async def reencode_clip_file(clip_id: int) -> None:
             os.replace(dst, src)
             clip.size_bytes = os.path.getsize(src)
             clip.error = None
+            await _fill_clip_resolution(clip)
         else:
             _safe_remove(dst)
             clip.error = f"перекодирование не удалось: {err}"
@@ -680,6 +690,7 @@ async def _ingest_http_day(
         _safe_remove(p)
     if okc:
         clip.status, clip.size_bytes, clip.error = ClipStatus.OK, os.path.getsize(out_path), None
+        await _fill_clip_resolution(clip)
         if part_errors:
             log.warning("рег.%s кан.%s: день склеен, но %d частей пропущено",
                         recorder.id, ch.channel_id, part_errors)
@@ -774,6 +785,7 @@ async def _ingest_http_clip(
     clip.download_bytes, clip.download_ms = nbytes, dl_ms
     if ok2:
         clip.status, clip.size_bytes, clip.error = ClipStatus.OK, os.path.getsize(out_path), None
+        await _fill_clip_resolution(clip)
     else:
         clip.status, clip.error = ClipStatus.ERROR, f"обрезка: {err2}"
         log.warning("рег.%s кан.%s: обрезка: %s", recorder.id, ch.channel_id, err2)
@@ -891,6 +903,7 @@ async def _ingest_segment(
         clip.status = ClipStatus.OK
         clip.size_bytes = os.path.getsize(out_path)
         clip.error = None
+        await _fill_clip_resolution(clip)
         # авто-обучение trackid (только когда собирали URL сами)
         if used_track and ch.substream_trackid != used_track:
             log.info("рег.%s кан.%s: рабочий trackid субпотока = %s (сохранён)",
