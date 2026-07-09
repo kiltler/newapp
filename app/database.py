@@ -70,6 +70,8 @@ _NEW_COLUMNS = [
     ("checkin_clips", "download_ms", "INTEGER"),
     ("checkin_ingest_runs", "dl_bytes", "INTEGER DEFAULT 0"),
     ("checkin_ingest_runs", "dl_ms", "INTEGER DEFAULT 0"),
+    ("checkin_recorders", "use_https", "BOOLEAN DEFAULT FALSE"),
+    ("checkin_recorders", "model_info", "VARCHAR(255)"),
 ]
 
 

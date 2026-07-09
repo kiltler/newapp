@@ -52,7 +52,7 @@ _register_filters(templates)
 router = APIRouter(tags=["checkin"])
 
 # Метка сборки — видно в UI, сразу понятно, задеплоен ли новый код.
-CHECKIN_BUILD = "2026-07-09-import"
+CHECKIN_BUILD = "2026-07-09-import2"
 
 
 def _clip_url(path: str) -> str:
@@ -135,7 +135,8 @@ async def checkin_settings(request: Request, session: AsyncSession = Depends(get
     # (рабочими) реквизитами, а не вводить заново.
     devices = (await session.execute(select(Device).order_by(Device.name))).scalars().all()
     dash_devices = [
-        {"id": d.id, "name": d.name, "host": d.host, "http_port": d.http_port}
+        {"id": d.id, "name": d.name, "host": d.host, "http_port": d.http_port,
+         "model": d.model}
         for d in devices
     ]
     return templates.TemplateResponse("checkin_settings.html", {
@@ -219,31 +220,46 @@ async def create_recorder(data: schemas.CheckinRecorderIn, session: AsyncSession
     return {"id": rec.id}
 
 
+def _model_type_from_device(model: str | None) -> str:
+    """Тип поведения регистратора по строке модели с устройства.
+
+    HiWatch (DS-H…) пробуем как H332 — поиск «человек» с фолбэком на motion
+    (фолбэк безопасен: устройство без аналитики просто ответит отказом);
+    остальное (в т.ч. Hikvision DS-7616NI-E2) — только motion-поиск.
+    """
+    m = (model or "").lower().replace(" ", "")
+    return RecorderModel.H332 if m.startswith("ds-h") else RecorderModel.E2
+
+
 @router.post("/api/checkin/recorders/import")
 async def import_recorder(data: schemas.RecorderImportIn, session: AsyncSession = Depends(get_session)):
     """Создаёт регистратор Заселений из устройства дашборда — с готовыми (рабочими)
-    реквизитами: host/порт/логин/пароль копируются как есть (один ключ шифрования)."""
-    if data.model_type not in RECORDER_MODEL_NAMES:
+    реквизитами: host/порт/https/логин/пароль копируются как есть (один ключ
+    шифрования), модель и имя подтягиваются с устройства."""
+    if data.model_type is not None and data.model_type not in RECORDER_MODEL_NAMES:
         raise HTTPException(422, "Неизвестный тип регистратора")
     if await session.get(CheckinHotel, data.hotel_id) is None:
         raise HTTPException(404, "Гостиница не найдена")
     dev = await session.get(Device, data.device_id)
     if dev is None:
         raise HTTPException(404, "Устройство дашборда не найдено")
+    model_type = data.model_type or _model_type_from_device(dev.model)
     rec = CheckinRecorder(
         hotel_id=data.hotel_id,
         name=(data.name.strip() or dev.name),
         host=dev.host,
         http_port=dev.http_port,
+        use_https=dev.use_https,
         username=dev.username,
         password_enc=dev.password_enc,  # тот же ключ шифрования — переносим как есть
-        model_type=data.model_type,
-        analytics_capable=_resolve_analytics(data.model_type, None),
+        model_type=model_type,
+        model_info=dev.model,
+        analytics_capable=_resolve_analytics(model_type, None),
         night_start=data.night_start, night_end=data.night_end,
     )
     session.add(rec)
     await session.commit()
-    return {"id": rec.id}
+    return {"id": rec.id, "model_type": model_type, "model_info": dev.model}
 
 
 @router.post("/api/checkin/recorders/{rec_id}")

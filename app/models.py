@@ -580,9 +580,12 @@ class CheckinRecorder(Base):
     host: Mapped[str] = mapped_column(String(255))
     http_port: Mapped[int] = mapped_column(Integer, default=80)
     rtsp_port: Mapped[int] = mapped_column(Integer, default=554)
+    use_https: Mapped[bool] = mapped_column(Boolean, default=False)
     username: Mapped[str] = mapped_column(String(255), default="admin")
     password_enc: Mapped[str] = mapped_column(Text, default="")
     model_type: Mapped[str] = mapped_column(String(32), default=RecorderModel.E2)
+    # Модель как строка с устройства (для справки в UI; model_type — поведение)
+    model_info: Mapped[str | None] = mapped_column(String(255), default=None)
     analytics_capable: Mapped[bool] = mapped_column(Boolean, default=False)
     night_start: Mapped[str] = mapped_column(String(5), default="07:00")  # HH:MM
     night_end: Mapped[str] = mapped_column(String(5), default="24:00")    # HH:MM (24:00 = конец суток)

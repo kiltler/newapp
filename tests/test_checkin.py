@@ -836,8 +836,9 @@ async def test_import_recorder_from_dashboard(db):
     from app.models import Device
 
     async with SessionLocal() as s:
-        dev = Device(name="DS-H116G", host="192.168.10.40", http_port=80, username="oper",
-                     api_type="hikvision", password_enc=encrypt("p@ss"))
+        dev = Device(name="Ресепшн-НВР", host="192.168.10.40", http_port=80, username="oper",
+                     api_type="hikvision", model="DS-H116G", use_https=False,
+                     password_enc=encrypt("p@ss"))
         s.add(dev)
         h = CheckinHotel(name="Импорт-гост")
         s.add(h)
@@ -846,15 +847,21 @@ async def test_import_recorder_from_dashboard(db):
         await s.commit()
 
     async with _client() as c:
+        # model_type не передаём — должен определиться сам по модели устройства
         r = await c.post("/api/checkin/recorders/import",
-                         json={"hotel_id": hid, "device_id": did, "model_type": "ds7616ni_e2"})
+                         json={"hotel_id": hid, "device_id": did})
         assert r.status_code == 200
-        rid = r.json()["id"]
+        body = r.json()
+        rid = body["id"]
+        assert body["model_type"] == "dsh332_2q"  # DS-H… → HiWatch-тип (аналитика с фолбэком)
+        assert body["model_info"] == "DS-H116G"
 
     async with SessionLocal() as s:
         rec = await s.get(CheckinRecorder, rid)
         assert rec.host == "192.168.10.40" and rec.username == "oper"
-        assert rec.name == "DS-H116G"           # имя подтянулось из устройства
+        assert rec.name == "Ресепшн-НВР"        # имя подтянулось из устройства
+        assert rec.model_info == "DS-H116G"      # модель подтянулась из устройства
+        assert rec.use_https is False
         assert decrypt(rec.password_enc) == "p@ss"  # пароль перенесён и расшифровывается
 
 

@@ -56,6 +56,7 @@ def build_recorder_client(recorder: CheckinRecorder, *, password: str | None = N
     return HikvisionClient(
         host=recorder.host,
         port=recorder.http_port,
+        use_https=bool(getattr(recorder, "use_https", False)),
         username=recorder.username,
         password=pwd,
         timeout=settings.default_http_timeout,

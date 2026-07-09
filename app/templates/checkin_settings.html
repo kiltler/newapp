@@ -53,6 +53,7 @@
   {# ── Регистраторы ── #}
   {% for r in h.recorders %}
   <div class="collect-row" style="margin-bottom:10px" data-rec="{{ r.id }}">
+    {% if r.model_info %}<div class="muted" style="font-size:12px; margin-bottom:6px">📟 {{ r.model_info }}{% if r.use_https %} · https{% endif %}</div>{% endif %}
     <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px">
       <label class="muted">Имя<input id="rname{{r.id}}" value="{{ r.name }}"></label>
       <label class="muted">Host/IP<input id="rhost{{r.id}}" value="{{ r.host }}"></label>
@@ -128,9 +129,10 @@
     <div class="collect-controls" style="margin-top:8px">
       <span class="muted" style="font-size:12px">Из дашборда (готовые реквизиты):</span>
       <select id="impdev{{h.id}}" class="loc-sel" style="min-width:200px">
-        {% for d in dash_devices %}<option value="{{ d.id }}">{{ d.name }} — {{ d.host }}:{{ d.http_port }}</option>{% endfor %}
+        {% for d in dash_devices %}<option value="{{ d.id }}">{{ d.name }} — {{ d.host }}:{{ d.http_port }}{% if d.model %} · {{ d.model }}{% endif %}</option>{% endfor %}
       </select>
       <select id="impmodel{{h.id}}" class="loc-sel">
+        <option value="">авто (модель из дашборда)</option>
         {% for mt, mn in model_names.items() %}<option value="{{ mt }}">{{ mn }}</option>{% endfor %}
       </select>
       <button class="mini" onclick="importRecorder({{h.id}})">↧ Импортировать</button>
@@ -241,7 +243,9 @@ async function addRecorder(hotelId){
 async function importRecorder(hotelId){
   const deviceId = v("impdev"+hotelId);
   if (!deviceId){ alert("Выберите устройство из дашборда"); return; }
-  const body = {hotel_id:hotelId, device_id:+deviceId, model_type:v("impmodel"+hotelId)};
+  const body = {hotel_id:hotelId, device_id:+deviceId};
+  const mt = v("impmodel"+hotelId);
+  if (mt) body.model_type = mt;  // пусто = автоопределение по модели устройства
   if (await postJSON("/api/checkin/recorders/import", body)) location.reload();
 }
 async function delRecorder(id){
