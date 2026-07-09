@@ -828,3 +828,40 @@ async def test_day_segments_merged_into_one_clip(db, monkeypatch, tmp_path):
         assert clips[0].start_ts == dt.datetime(2026, 6, 15, 2)   # с начала первого сегмента
         assert clips[0].end_ts == dt.datetime(2026, 6, 15, 13, 45)  # до конца последнего минус «живой край»
         assert clips[0].download_bytes == 1000  # 500 + 500
+
+
+async def test_import_recorder_from_dashboard(db):
+    """Импорт регистратора из устройства дашборда переносит рабочие реквизиты."""
+    from app.crypto import decrypt, encrypt
+    from app.models import Device
+
+    async with SessionLocal() as s:
+        dev = Device(name="DS-H116G", host="192.168.10.40", http_port=80, username="oper",
+                     api_type="hikvision", password_enc=encrypt("p@ss"))
+        s.add(dev)
+        h = CheckinHotel(name="Импорт-гост")
+        s.add(h)
+        await s.flush()
+        did, hid = dev.id, h.id
+        await s.commit()
+
+    async with _client() as c:
+        r = await c.post("/api/checkin/recorders/import",
+                         json={"hotel_id": hid, "device_id": did, "model_type": "ds7616ni_e2"})
+        assert r.status_code == 200
+        rid = r.json()["id"]
+
+    async with SessionLocal() as s:
+        rec = await s.get(CheckinRecorder, rid)
+        assert rec.host == "192.168.10.40" and rec.username == "oper"
+        assert rec.name == "DS-H116G"           # имя подтянулось из устройства
+        assert decrypt(rec.password_enc) == "p@ss"  # пароль перенесён и расшифровывается
+
+
+async def test_import_recorder_bad_device(db):
+    async with SessionLocal() as s:
+        h = CheckinHotel(name="Г"); s.add(h); await s.flush(); hid = h.id; await s.commit()
+    async with _client() as c:
+        r = await c.post("/api/checkin/recorders/import",
+                         json={"hotel_id": hid, "device_id": 999999, "model_type": "ds7616ni_e2"})
+        assert r.status_code == 404

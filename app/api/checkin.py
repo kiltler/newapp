@@ -36,6 +36,7 @@ from app.models import (
     CheckinRecorder,
     CheckinVerdict,
     ClipStatus,
+    Device,
     NotificationStatus,
     RecorderModel,
 )
@@ -51,7 +52,7 @@ _register_filters(templates)
 router = APIRouter(tags=["checkin"])
 
 # Метка сборки — видно в UI, сразу понятно, задеплоен ли новый код.
-CHECKIN_BUILD = "2026-07-09-audioprobe2"
+CHECKIN_BUILD = "2026-07-09-import"
 
 
 def _clip_url(path: str) -> str:
@@ -130,8 +131,15 @@ async def checkin_settings(request: Request, session: AsyncSession = Depends(get
     ).scalars().all()
     job_hour = await appsettings.get_int(session, "checkin_job_hour", 1)
     job_minute = await appsettings.get_int(session, "checkin_job_minute", 0)
+    # Устройства из дашборда — чтобы импортировать регистратор с готовыми
+    # (рабочими) реквизитами, а не вводить заново.
+    devices = (await session.execute(select(Device).order_by(Device.name))).scalars().all()
+    dash_devices = [
+        {"id": d.id, "name": d.name, "host": d.host, "http_port": d.http_port}
+        for d in devices
+    ]
     return templates.TemplateResponse("checkin_settings.html", {
-        "request": request, "hotels": hotels,
+        "request": request, "hotels": hotels, "dash_devices": dash_devices,
         "model_names": RECORDER_MODEL_NAMES, "role_names": CHANNEL_ROLE_NAMES,
         "analytics_default": RECORDER_ANALYTICS_DEFAULT,
         "job_hour": job_hour, "job_minute": job_minute, "build": CHECKIN_BUILD,
@@ -205,6 +213,33 @@ async def create_recorder(data: schemas.CheckinRecorderIn, session: AsyncSession
         model_type=data.model_type,
         analytics_capable=_resolve_analytics(data.model_type, data.analytics_capable),
         night_start=data.night_start, night_end=data.night_end, enabled=data.enabled,
+    )
+    session.add(rec)
+    await session.commit()
+    return {"id": rec.id}
+
+
+@router.post("/api/checkin/recorders/import")
+async def import_recorder(data: schemas.RecorderImportIn, session: AsyncSession = Depends(get_session)):
+    """Создаёт регистратор Заселений из устройства дашборда — с готовыми (рабочими)
+    реквизитами: host/порт/логин/пароль копируются как есть (один ключ шифрования)."""
+    if data.model_type not in RECORDER_MODEL_NAMES:
+        raise HTTPException(422, "Неизвестный тип регистратора")
+    if await session.get(CheckinHotel, data.hotel_id) is None:
+        raise HTTPException(404, "Гостиница не найдена")
+    dev = await session.get(Device, data.device_id)
+    if dev is None:
+        raise HTTPException(404, "Устройство дашборда не найдено")
+    rec = CheckinRecorder(
+        hotel_id=data.hotel_id,
+        name=(data.name.strip() or dev.name),
+        host=dev.host,
+        http_port=dev.http_port,
+        username=dev.username,
+        password_enc=dev.password_enc,  # тот же ключ шифрования — переносим как есть
+        model_type=data.model_type,
+        analytics_capable=_resolve_analytics(data.model_type, None),
+        night_start=data.night_start, night_end=data.night_end,
     )
     session.add(rec)
     await session.commit()

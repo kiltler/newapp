@@ -333,6 +333,15 @@ class CheckinRecorderIn(BaseModel):
     enabled: bool = True
 
 
+class RecorderImportIn(BaseModel):
+    hotel_id: int
+    device_id: int
+    name: str = ""
+    model_type: str = "ds7616ni_e2"
+    night_start: str = "07:00"
+    night_end: str = "24:00"
+
+
 class CheckinChannelIn(BaseModel):
     recorder_id: int
     channel_id: int = Field(ge=0, le=100000)

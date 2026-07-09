@@ -124,7 +124,20 @@
   {# ── Добавить регистратор ── #}
   <details>
     <summary style="cursor:pointer; color:var(--accent)">+ Регистратор</summary>
+    {% if dash_devices %}
     <div class="collect-controls" style="margin-top:8px">
+      <span class="muted" style="font-size:12px">Из дашборда (готовые реквизиты):</span>
+      <select id="impdev{{h.id}}" class="loc-sel" style="min-width:200px">
+        {% for d in dash_devices %}<option value="{{ d.id }}">{{ d.name }} — {{ d.host }}:{{ d.http_port }}</option>{% endfor %}
+      </select>
+      <select id="impmodel{{h.id}}" class="loc-sel">
+        {% for mt, mn in model_names.items() %}<option value="{{ mt }}">{{ mn }}</option>{% endfor %}
+      </select>
+      <button class="mini" onclick="importRecorder({{h.id}})">↧ Импортировать</button>
+    </div>
+    {% endif %}
+    <div class="collect-controls" style="margin-top:8px">
+      <span class="muted" style="font-size:12px">Или вручную:</span>
       <input id="nrhost{{h.id}}" placeholder="Host/IP" style="min-width:140px">
       <input id="nrname{{h.id}}" placeholder="Имя (напр. Вход)" style="min-width:120px">
       <select id="nrmodel{{h.id}}" class="loc-sel">
@@ -224,6 +237,12 @@ async function addRecorder(hotelId){
   const body = {hotel_id:hotelId, host, name:v("nrname"+hotelId), model_type:v("nrmodel"+hotelId),
                 username:v("nruser"+hotelId), password:v("nrpass"+hotelId)};
   if (await postJSON("/api/checkin/recorders", body)) location.reload();
+}
+async function importRecorder(hotelId){
+  const deviceId = v("impdev"+hotelId);
+  if (!deviceId){ alert("Выберите устройство из дашборда"); return; }
+  const body = {hotel_id:hotelId, device_id:+deviceId, model_type:v("impmodel"+hotelId)};
+  if (await postJSON("/api/checkin/recorders/import", body)) location.reload();
 }
 async function delRecorder(id){
   if (confirm("Удалить регистратор и его каналы?") && await postJSON("/api/checkin/recorders/"+id+"/delete")) location.reload();
