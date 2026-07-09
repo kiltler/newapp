@@ -917,3 +917,11 @@ async def test_clip_reencode_and_info_404(db):
     async with _client() as c:
         assert (await c.post("/api/checkin/clips/999999/reencode")).status_code == 404
         assert (await c.get("/api/checkin/clips/999999/info")).status_code == 404
+
+
+def test_reencode_scale_only_heavy_clips():
+    """Ужимаем до 480p только тяжёлые клипы (основной поток), VGA не трогаем."""
+    assert checkin_ingest._reencode_scale_args(1080) == ["-vf", "scale=-2:480"]
+    assert checkin_ingest._reencode_scale_args(720) == ["-vf", "scale=-2:480"]
+    assert checkin_ingest._reencode_scale_args(480) == []   # субпоток VGA — как есть
+    assert checkin_ingest._reencode_scale_args(None) == []  # высота неизвестна — не рискуем

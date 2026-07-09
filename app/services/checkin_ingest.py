@@ -523,15 +523,26 @@ async def _ffmpeg_concat(parts: list[str], dst: str) -> tuple[bool, str]:
     return ok, err
 
 
+def _reencode_scale_args(height: int | None) -> list[str]:
+    """Тяжёлые клипы (основной поток 1080p+) ужимаем до 480p — браузер играет
+    плавно на любой скорости; лёгкие (уже субпоток VGA) не трогаем."""
+    if height and height > 520:
+        return ["-vf", "scale=-2:480"]
+    return []
+
+
 async def _run_ffmpeg_reencode(src: str, dst: str) -> tuple[bool, str]:
     """Полное перекодирование клипа в H.264 с ровным таймингом кадров (CFR).
 
-    Чинит подвисания при просмотре: у -c:v copy из архива Hikvision метки
-    времени кадров бывают кривыми — файл «играбельный», но браузер спотыкается.
+    Чинит подвисания при просмотре: кривые метки времени кадров после -c:v copy
+    и слишком тяжёлое разрешение (основной поток вместо субпотока) — при
+    высоте >520 клип дополнительно ужимается до 480p.
     """
+    info = await probe_streams(src)
+    scale = _reencode_scale_args(info.get("height"))
     cmd = [
         settings.ffmpeg_bin, "-y", "-nostdin", "-fflags", "+genpts", "-i", src,
-        "-map", "0:v:0?", "-map", "0:a?",
+        "-map", "0:v:0?", "-map", "0:a?", *scale,
         "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-vsync", "cfr",
         "-c:a", "aac", "-ac", "1", "-movflags", "+faststart", dst,
     ]

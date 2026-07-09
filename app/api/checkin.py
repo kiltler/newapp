@@ -52,7 +52,7 @@ _register_filters(templates)
 router = APIRouter(tags=["checkin"])
 
 # Метка сборки — видно в UI, сразу понятно, задеплоен ли новый код.
-CHECKIN_BUILD = "2026-07-09-clipfix"
+CHECKIN_BUILD = "2026-07-10-substream-warn"
 
 
 def _clip_url(path: str) -> str:
@@ -359,6 +359,16 @@ async def recorder_diag(rec_id: int, session: AsyncSession = Depends(get_session
                     e[f"{lbl}_uri"] = uri
             except NVRError as exc:
                 e[f"{lbl}_error"] = str(exc)
+        # Устройство на запрос субпотока вернуло основной трек (…01) —
+        # значит, субпоток в архив не пишется: клипы будут тяжёлыми (FullHD).
+        sub_tid = str(e.get("sub_trackid_returned") or "")
+        if sub_tid.endswith("01"):
+            e["warning"] = (
+                "субпоток в архиве ОТСУТСТВУЕТ — устройство отдаёт основной поток. "
+                "Включите на NVR запись двойного потока (Запись → Параметры расписания → "
+                "Дополнительные установки → Тип потока: Двойной поток), иначе клипы "
+                "тяжёлые и подвисают при просмотре."
+            )
         out["channels"].append(e)
 
     # ── ПРОБНОЕ СКАЧИВАНИЕ по HTTP (ISAPI /ContentMgmt/download, порт 80).
