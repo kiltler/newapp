@@ -103,7 +103,9 @@
         {% if c.url %}<button class="mini" onclick='playClip(this)'
             data-url="{{ c.url }}" data-id="{{ c.id }}" data-hotel="{{ c.hotel }}"
             data-ch="{{ c.channel_id }}" data-day="{{ c.day }}" data-start="{{ c.start.isoformat() }}"
-            data-label="{{ c.hotel }} · кан.{{ c.channel_id }} · {{ c.start.strftime('%H:%M:%S') }}">▶ Смотреть</button>{% endif %}
+            data-label="{{ c.hotel }} · кан.{{ c.channel_id }} · {{ c.start.strftime('%H:%M:%S') }}">▶ Смотреть</button>
+        <button class="mini" title="Параметры файла (кодек/fps)" onclick="clipInfo({{ c.id }})">ℹ</button>
+        <button class="mini" title="Перекодировать — чинит подвисания при просмотре" onclick="reencodeClip({{ c.id }})">🔧</button>{% endif %}
         <button class="mini danger" title="Удалить (отсмотрено)" onclick="delClip({{ c.id }})">🗑</button>
       </td>
     </tr>
@@ -200,6 +202,22 @@ async function delClip(id){
   if (!confirm("Удалить клип (файл и запись)? Обычно — после того как отсмотрели.")) return;
   const r = await fetch(`/api/checkin/clips/${id}/delete`, {method:"POST"});
   if (r.ok) location.reload(); else alert("Ошибка удаления");
+}
+
+async function clipInfo(id){
+  const r = await fetch(`/api/checkin/clips/${id}/info`);
+  if (!r.ok){ alert("Не удалось прочитать файл: " + await r.text()); return; }
+  const d = await r.json(), s = d.streams || {};
+  const durH = s.duration_sec ? (s.duration_sec / 3600).toFixed(1) + " ч" : "?";
+  alert(`Видео: ${s.video_codec || "?"} · ${s.width || "?"}×${s.height || "?"} · ${s.fps ?? "?"} fps\n` +
+        `Звук: ${s.audio_codec || "нет"}\nДлительность: ${durH} · ${d.size_mb} МБ`);
+}
+
+async function reencodeClip(id){
+  if (!confirm("Перекодировать клип в H.264 с ровным таймингом кадров? Чинит подвисания при просмотре.\n\n" +
+      "Суточный клип обрабатывается в фоне (может занять час и больше) — на это время он будет со статусом «качается».")) return;
+  const r = await fetch(`/api/checkin/clips/${id}/reencode`, {method:"POST"});
+  if (r.ok) location.reload(); else alert("Ошибка: " + await r.text());
 }
 
 async function runTestClip(){

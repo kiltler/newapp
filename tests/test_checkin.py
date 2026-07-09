@@ -872,3 +872,48 @@ async def test_import_recorder_bad_device(db):
         r = await c.post("/api/checkin/recorders/import",
                          json={"hotel_id": hid, "device_id": 999999, "model_type": "ds7616ni_e2"})
         assert r.status_code == 404
+
+
+async def test_clip_reencode_repairs_file(db, monkeypatch, tmp_path):
+    """🔧 перекодирование: файл заменяется на месте, статус возвращается в OK."""
+    import asyncio
+
+    f = tmp_path / "stutter.mp4"
+    f.write_bytes(b"OLDDATA")
+    async with SessionLocal() as s:
+        h = CheckinHotel(name="Ф"); s.add(h); await s.flush()
+        rec = CheckinRecorder(hotel_id=h.id, host="10.0.0.9"); s.add(rec); await s.flush()
+        clip = CheckinClip(hotel_id=h.id, recorder_id=rec.id, channel_id=6, role="reception",
+                           day=dt.date(2026, 7, 9), start_ts=dt.datetime(2026, 7, 9),
+                           end_ts=dt.datetime(2026, 7, 10), path=str(f),
+                           size_bytes=7, status=ClipStatus.OK)
+        s.add(clip); await s.commit(); cid = clip.id
+
+    async def fake_reencode(src, dst):
+        with open(dst, "wb") as fh:
+            fh.write(b"REENCODED-CFR")
+        return True, ""
+
+    monkeypatch.setattr(checkin_ingest, "_run_ffmpeg_reencode", fake_reencode)
+
+    async with _client() as c:
+        r = await c.post(f"/api/checkin/clips/{cid}/reencode")
+        assert r.status_code == 200
+
+    # фоновая задача — дожидаемся завершения
+    for _ in range(100):
+        await asyncio.sleep(0.01)
+        async with SessionLocal() as s:
+            clip = await s.get(CheckinClip, cid)
+            if clip.status == ClipStatus.OK and clip.size_bytes == len(b"REENCODED-CFR"):
+                break
+    assert f.read_bytes() == b"REENCODED-CFR"  # файл заменён пережатым
+    async with SessionLocal() as s:
+        clip = await s.get(CheckinClip, cid)
+        assert clip.status == ClipStatus.OK and clip.error is None
+
+
+async def test_clip_reencode_and_info_404(db):
+    async with _client() as c:
+        assert (await c.post("/api/checkin/clips/999999/reencode")).status_code == 404
+        assert (await c.get("/api/checkin/clips/999999/info")).status_code == 404

@@ -386,28 +386,47 @@ async def _has_playable_duration(path: str) -> bool:
 
 
 async def probe_streams(path: str) -> dict:
-    """ffprobe: какие потоки в файле — чтобы точно знать, есть ли в архиве звук."""
+    """ffprobe: потоки файла (кодеки, разрешение, fps, длительность).
+
+    Используется и диагностикой звука (has_audio), и карточкой клипа —
+    чтобы сравнивать клипы разных регистраторов и находить причину подвисаний.
+    """
+    import json
+
     try:
         proc = await asyncio.create_subprocess_exec(
-            "ffprobe", "-v", "error", "-show_entries", "stream=codec_type,codec_name",
-            "-of", "csv=p=0", path,
+            "ffprobe", "-v", "error", "-print_format", "json",
+            "-show_streams", "-show_format", path,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
         out, _ = await asyncio.wait_for(proc.communicate(), timeout=20)
+        data = json.loads((out or b"{}").decode("utf-8", "replace"))
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)}
-    video_codec = audio_codec = None
-    for line in (out or b"").decode("utf-8", "replace").splitlines():
-        toks = [t.strip() for t in line.split(",") if t.strip()]
-        if "video" in toks:
-            rest = [t for t in toks if t != "video"]
-            video_codec = rest[0] if rest else "?"
-        elif "audio" in toks:
-            rest = [t for t in toks if t != "audio"]
-            audio_codec = rest[0] if rest else "?"
+
+    streams = data.get("streams") or []
+    video = next((s for s in streams if s.get("codec_type") == "video"), None)
+    audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
+
+    def _fps(s) -> float | None:
+        try:
+            num, den = (s.get("avg_frame_rate") or "0/1").split("/")
+            return round(int(num) / int(den), 1) if int(den) else None
+        except (ValueError, ZeroDivisionError):
+            return None
+
+    fmt = data.get("format") or {}
+    try:
+        duration = round(float(fmt.get("duration") or 0), 1) or None
+    except ValueError:
+        duration = None
     return {
-        "video_codec": video_codec,
-        "audio_codec": audio_codec,
-        "has_audio": audio_codec is not None,
+        "video_codec": video.get("codec_name") if video else None,
+        "audio_codec": audio.get("codec_name") if audio else None,
+        "has_audio": audio is not None,
+        "width": video.get("width") if video else None,
+        "height": video.get("height") if video else None,
+        "fps": _fps(video) if video else None,
+        "duration_sec": duration,
     }
 
 
@@ -502,6 +521,66 @@ async def _ffmpeg_concat(parts: list[str], dst: str) -> tuple[bool, str]:
     ok, err = await _run_ffmpeg_concat(list_path, dst, reencode=True)
     _safe_remove(list_path)
     return ok, err
+
+
+async def _run_ffmpeg_reencode(src: str, dst: str) -> tuple[bool, str]:
+    """Полное перекодирование клипа в H.264 с ровным таймингом кадров (CFR).
+
+    Чинит подвисания при просмотре: у -c:v copy из архива Hikvision метки
+    времени кадров бывают кривыми — файл «играбельный», но браузер спотыкается.
+    """
+    cmd = [
+        settings.ffmpeg_bin, "-y", "-nostdin", "-fflags", "+genpts", "-i", src,
+        "-map", "0:v:0?", "-map", "0:a?",
+        "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-vsync", "cfr",
+        "-c:a", "aac", "-ac", "1", "-movflags", "+faststart", dst,
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+    except FileNotFoundError:
+        return False, "ffmpeg не найден"
+    try:
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=6 * 3600)
+    except asyncio.TimeoutError:
+        proc.kill()
+        return False, "таймаут перекодирования"
+    if proc.returncode != 0:
+        tail = (stderr or b"").decode("utf-8", "replace").strip().splitlines()[-2:]
+        return False, "ffmpeg: " + " | ".join(tail)
+    if not os.path.exists(dst) or os.path.getsize(dst) == 0:
+        return False, "пустой результат"
+    return True, ""
+
+
+async def reencode_clip_file(clip_id: int) -> None:
+    """Фоновая починка клипа: пережать в H.264/CFR и заменить файл на месте.
+
+    Исходник не трогаем до успешного результата — при ошибке клип остаётся
+    как был (статус возвращается в OK, причина пишется в error).
+    """
+    async with SessionLocal() as s:
+        clip = await s.get(CheckinClip, clip_id)
+        if clip is None or not clip.path or not os.path.exists(clip.path):
+            return
+        src = clip.path
+    dst = src + ".reenc.mp4"
+    ok, err = await _run_ffmpeg_reencode(src, dst)
+    async with SessionLocal() as s:
+        clip = await s.get(CheckinClip, clip_id)
+        if clip is None:
+            _safe_remove(dst)
+            return
+        if ok:
+            os.replace(dst, src)
+            clip.size_bytes = os.path.getsize(src)
+            clip.error = None
+        else:
+            _safe_remove(dst)
+            clip.error = f"перекодирование не удалось: {err}"
+            log.warning("клип %s: %s", clip_id, clip.error)
+        clip.status = ClipStatus.OK  # исходник в любом случае цел
+        await s.commit()
 
 
 async def _ingest_http_day(

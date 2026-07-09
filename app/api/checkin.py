@@ -52,7 +52,7 @@ _register_filters(templates)
 router = APIRouter(tags=["checkin"])
 
 # Метка сборки — видно в UI, сразу понятно, задеплоен ли новый код.
-CHECKIN_BUILD = "2026-07-09-import2"
+CHECKIN_BUILD = "2026-07-09-clipfix"
 
 
 def _clip_url(path: str) -> str:
@@ -659,6 +659,39 @@ async def set_storage(data: schemas.StorageIn, session: AsyncSession = Depends(g
     await appsettings.set_value(session, "checkin_clips_dir", path)
     checkin_ingest.set_clips_dir(path)
     return {"ok": True, "dir": path}
+
+
+@router.get("/api/checkin/clips/{clip_id}/info")
+async def clip_info(clip_id: int, session: AsyncSession = Depends(get_session)):
+    """Технические параметры файла клипа (кодек/fps/разрешение) — для сравнения
+    клипов разных регистраторов при проблемах воспроизведения."""
+    clip = await session.get(CheckinClip, clip_id)
+    if clip is None:
+        raise HTTPException(404, "Клип не найден")
+    if not clip.path or not os.path.exists(clip.path):
+        raise HTTPException(404, "Файл клипа не найден на диске")
+    streams = await checkin_ingest.probe_streams(clip.path)
+    return {"streams": streams, "size_mb": round(os.path.getsize(clip.path) / 1048576, 1)}
+
+
+@router.post("/api/checkin/clips/{clip_id}/reencode")
+async def reencode_clip(clip_id: int, session: AsyncSession = Depends(get_session)):
+    """Починка подвисающего клипа: фоновое перекодирование в H.264 с ровным
+    таймингом (CFR). Файл заменяется на месте после успешного пережатия."""
+    import asyncio
+
+    clip = await session.get(CheckinClip, clip_id)
+    if clip is None:
+        raise HTTPException(404, "Клип не найден")
+    if not clip.path or not os.path.exists(clip.path):
+        raise HTTPException(404, "Файл клипа не найден на диске")
+    if clip.status == ClipStatus.PENDING:
+        raise HTTPException(409, "Клип уже обрабатывается")
+    clip.status = ClipStatus.PENDING
+    clip.error = None
+    await session.commit()
+    asyncio.create_task(checkin_ingest.reencode_clip_file(clip_id))
+    return {"ok": True}
 
 
 @router.post("/api/checkin/clips/{clip_id}/delete")
