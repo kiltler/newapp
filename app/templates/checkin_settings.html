@@ -17,7 +17,6 @@
     <button onclick="saveSchedule()">Сохранить расписание</button>
     <button class="secondary" onclick="runNow()">▶ Запустить сейчас (за вчера)</button>
   </div>
-  <p class="muted" style="font-size:12px">Применяется без перезапуска. Джоб качает клипы за прошедшие сутки.</p>
 </div>
 
 <!-- Хранилище -->
@@ -29,18 +28,12 @@
     <input id="clipsPath" placeholder="/clips (или свой диск, напр. /mnt/video)" style="flex:1; min-width:240px">
     <button onclick="saveStorage()">Сохранить папку</button>
   </div>
-  <div id="mounts" style="margin-top:8px; font-size:13px"></div>
-  <p class="muted" style="font-size:12px">Отдельный диск нужно смонтировать в контейнер (том в docker-compose, напр. <code>- /mnt/video:/mnt/video</code>), затем указать путь здесь. Уже скачанные клипы останутся в прежней папке.</p>
 </div>
 
 <!-- Интеграция 1С:Отель (per-hotel) — только владелец или право «onec» -->
 {% if request.session.get('is_owner') or 'onec' in request.session.get('caps', []) %}
 <div class="chart-card" style="margin-bottom:16px">
   <h3 style="margin-top:0">🧾 Интеграция 1С:Отель</h3>
-  <p class="muted" style="font-size:12.5px; margin-top:4px">
-    Раздельные базы — заполните URL и креды для каждой гостиницы. Одна база на несколько ГС —
-    URL/креды одинаковые, но задайте «Реквизит-разделитель» и «Значение объекта» у каждой гостиницы.
-  </p>
 
   <div id="onecStatus" style="margin-bottom:12px"></div>
   <div class="collect-controls" style="margin-bottom:12px">
@@ -240,11 +233,6 @@ async function loadStorage(){
     } else if (d.error){ s += `<span style="color:var(--err)">${d.error}</span><br>`; }
     s += `Клипов в базе: <b>${d.clips_count}</b>, объём ${fmtGB(d.clips_bytes)}`;
     document.getElementById("storageInfo").innerHTML = s;
-    const m = document.getElementById("mounts");
-    if (d.mounts && d.mounts.length){
-      m.innerHTML = '<div class="muted" style="font-size:12px">Смонтированные диски (нажмите, чтобы подставить путь):</div>' +
-        d.mounts.map(x => `<button class="mini" style="margin:2px" onclick="document.getElementById('clipsPath').value='${x.mount}'">${x.mount} · своб. ${fmtGB(x.free)} (${x.fstype})</button>`).join("");
-    } else { m.innerHTML = ""; }
   } catch(e){ document.getElementById("storageInfo").textContent = "не удалось получить сведения о диске"; }
 }
 async function saveStorage(){
