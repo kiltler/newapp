@@ -70,6 +70,19 @@ def start_scheduler() -> None:
         replace_existing=True,
     )
 
+    if settings.onec_enabled:
+        from app.services import onec_sync
+
+        scheduler.add_job(
+            onec_sync.scheduled_sync,
+            trigger=IntervalTrigger(minutes=settings.onec_sync_minutes),
+            id="onec_sync",
+            name="Синхронизация 1С:Отель + калибровка часов",
+            max_instances=1,
+            coalesce=True,
+            replace_existing=True,
+        )
+
     scheduler.start()
     log.info(
         "Планировщик запущен: опрос каждые %d мин, архив в %02d:%02d",

@@ -38,10 +38,12 @@ from app.models import (
     ClipStatus,
     Device,
     NotificationStatus,
+    OneCCheckin,
+    OneCConnection,
     RecorderModel,
 )
 from app.scheduler import reschedule_checkin_job
-from app.services import appsettings, checkin_ingest
+from app.services import appsettings, audit, checkin_ingest, onec_sync
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -52,7 +54,7 @@ _register_filters(templates)
 router = APIRouter(tags=["checkin"])
 
 # Метка сборки — видно в UI, сразу понятно, задеплоен ли новый код.
-CHECKIN_BUILD = "2026-07-10-floors"
+CHECKIN_BUILD = "2026-07-10-onec"
 
 
 def _clip_url(path: str) -> str:
@@ -704,6 +706,172 @@ async def reencode_clip(clip_id: int, session: AsyncSession = Depends(get_sessio
     await session.commit()
     asyncio.create_task(checkin_ingest.reencode_clip_file(clip_id))
     return {"ok": True}
+
+
+# ── Интеграция 1С:Отель (per-hotel) ─────────────────────────────────────────
+def _conn_defaults() -> dict:
+    """Дефолты новой формы подключения — из глобальных ONEC_DEFAULT_* (.env)."""
+    return {
+        "enabled": False, "base_url": "", "username": "", "has_password": False,
+        "onec_tz": settings.onec_default_tz,
+        "entity": settings.onec_default_entity,
+        "field_ref": settings.onec_default_field_ref,
+        "field_date": settings.onec_default_field_date,
+        "field_room": settings.onec_default_field_room,
+        "field_guest": settings.onec_default_field_guest,
+        "field_arrival": settings.onec_default_field_arrival or None,
+        "filter_posted": settings.onec_default_filter_posted,
+        "property_field": None, "property_value": None,
+        "room_floor_rule": settings.onec_default_room_floor_rule,
+        "backfill_days": settings.onec_default_backfill_days,
+        "mask_guest": settings.onec_default_mask_guest,
+    }
+
+
+@router.get("/api/checkin/onec/connection")
+async def get_onec_connection(hotel_id: int, session: AsyncSession = Depends(get_session)):
+    """Подключение 1С гостиницы для формы (пароль не отдаём — только признак)."""
+    if await session.get(CheckinHotel, hotel_id) is None:
+        raise HTTPException(404, "Гостиница не найдена")
+    conn = (
+        await session.execute(select(OneCConnection).where(OneCConnection.hotel_id == hotel_id))
+    ).scalar_one_or_none()
+    if conn is None:
+        return {"hotel_id": hotel_id, "exists": False, **_conn_defaults()}
+    return {
+        "hotel_id": hotel_id, "exists": True, "enabled": conn.enabled,
+        "base_url": conn.base_url, "username": conn.username,
+        "has_password": bool(conn.password_enc),
+        "onec_tz": conn.onec_tz, "entity": conn.entity,
+        "field_ref": conn.field_ref, "field_date": conn.field_date,
+        "field_room": conn.field_room, "field_guest": conn.field_guest,
+        "field_arrival": conn.field_arrival, "filter_posted": conn.filter_posted,
+        "property_field": conn.property_field, "property_value": conn.property_value,
+        "room_floor_rule": conn.room_floor_rule, "backfill_days": conn.backfill_days,
+        "mask_guest": conn.mask_guest,
+    }
+
+
+@router.post("/api/checkin/onec/connection")
+async def save_onec_connection(
+    data: schemas.OneCConnectionIn, request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Создать/обновить подключение 1С гостиницы (пароль пусто = не менять)."""
+    if await session.get(CheckinHotel, data.hotel_id) is None:
+        raise HTTPException(404, "Гостиница не найдена")
+    url = data.base_url.strip()
+    if data.enabled and not url.lower().startswith(("http://", "https://")):
+        raise HTTPException(422, "base_url должен начинаться с http:// или https://")
+    conn = (
+        await session.execute(select(OneCConnection).where(OneCConnection.hotel_id == data.hotel_id))
+    ).scalar_one_or_none()
+    if conn is None:
+        conn = OneCConnection(hotel_id=data.hotel_id)
+        session.add(conn)
+    conn.enabled = data.enabled
+    conn.base_url = url
+    conn.username = data.username.strip()
+    if data.password:
+        conn.password_enc = encrypt(data.password)
+    conn.onec_tz = data.onec_tz.strip() or "Asia/Khabarovsk"
+    conn.entity = data.entity.strip() or settings.onec_default_entity
+    conn.field_ref = data.field_ref.strip() or "Ref_Key"
+    conn.field_date = data.field_date.strip() or "Date"
+    conn.field_room = data.field_room.strip() or "Номер"
+    conn.field_guest = data.field_guest.strip() or "Гость"
+    conn.field_arrival = (data.field_arrival or "").strip() or None
+    conn.filter_posted = data.filter_posted
+    conn.property_field = (data.property_field or "").strip() or None
+    conn.property_value = (data.property_value or "").strip() or None
+    conn.room_floor_rule = data.room_floor_rule
+    conn.backfill_days = data.backfill_days
+    conn.mask_guest = data.mask_guest
+    await session.commit()
+    await audit.log_action(session, request, "onec_connection_save",
+                           target=f"гостиница {data.hotel_id}")
+    return {"ok": True, "id": conn.id}
+
+
+@router.post("/api/checkin/onec/test")
+async def test_onec_connection(data: schemas.OneCTestIn, session: AsyncSession = Depends(get_session)):
+    """Проба связи с 1С этой гостиницы: $top=1 к объекту (с фильтром-разделителем)."""
+    conn = (
+        await session.execute(select(OneCConnection).where(OneCConnection.hotel_id == data.hotel_id))
+    ).scalar_one_or_none()
+    if conn is None:
+        raise HTTPException(404, "Подключение 1С для гостиницы не настроено")
+    return await onec_sync.onec_backend_for(conn).probe()
+
+
+@router.post("/api/checkin/onec/sync")
+async def run_onec_sync(data: schemas.OneCSyncIn, session: AsyncSession = Depends(get_session)):
+    """Синхронизация заселений: одной гостиницы (hotel_id) или всех включённых."""
+    if data.hotel_id is not None:
+        return [await onec_sync.sync_hotel(session, data.hotel_id, full=data.full)]
+    return await onec_sync.sync_all(session, full=data.full)
+
+
+@router.get("/api/checkin/onec/status")
+async def onec_status(hotel_id: int | None = None, session: AsyncSession = Depends(get_session)):
+    """Статус интеграции по гостиницам: последний синк, заселений сегодня, часы."""
+    q = select(CheckinHotel).order_by(CheckinHotel.name)
+    if hotel_id is not None:
+        q = q.where(CheckinHotel.id == hotel_id)
+    hotels = (await session.execute(q)).scalars().all()
+    conns = {
+        c.hotel_id: c
+        for c in (await session.execute(select(OneCConnection))).scalars()
+    }
+    today = dt.datetime.now().date()
+    out = []
+    for h in hotels:
+        c = conns.get(h.id)
+        count_today = (
+            await session.execute(
+                select(func.count()).select_from(OneCCheckin).where(
+                    OneCCheckin.hotel_id == h.id,
+                    OneCCheckin.doc_time >= dt.datetime.combine(today, dt.time.min),
+                )
+            )
+        ).scalar_one()
+        recs = (
+            await session.execute(
+                select(CheckinRecorder).where(CheckinRecorder.hotel_id == h.id)
+            )
+        ).scalars().all()
+        out.append({
+            "hotel_id": h.id, "hotel_name": h.name,
+            "configured": c is not None, "enabled": bool(c and c.enabled),
+            "last_ok": c.last_ok if c else None,
+            "last_msg": c.last_msg if c else None,
+            "last_sync_at": c.last_sync_at.isoformat() if c and c.last_sync_at else None,
+            "last_doc_time": c.last_doc_time.isoformat() if c and c.last_doc_time else None,
+            "count_today": count_today,
+            "clocks": [
+                {"recorder_id": r.id, "name": r.name or r.host,
+                 "offset_sec": r.time_offset_sec,
+                 "warn": r.time_offset_sec is not None and abs(r.time_offset_sec) > settings.onec_clock_warn_sec,
+                 "measured_at": r.time_offset_at.isoformat() if r.time_offset_at else None}
+                for r in recs
+            ],
+        })
+    return out
+
+
+@router.post("/api/checkin/onec/calibrate")
+async def calibrate_clocks_now():
+    """Измерить смещение часов всех регистраторов сейчас."""
+    return await onec_sync.calibrate_clocks()
+
+
+@router.get("/api/checkin/clips/{clip_id}/markers")
+async def clip_markers(clip_id: int, session: AsyncSession = Depends(get_session)):
+    """Отметки заселений 1С на таймлайне клипа (только его гостиница)."""
+    clip = await session.get(CheckinClip, clip_id)
+    if clip is None:
+        raise HTTPException(404, "Клип не найден")
+    return await onec_sync.markers_for_clip(session, clip)
 
 
 @router.post("/api/checkin/clips/{clip_id}/delete")

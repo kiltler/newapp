@@ -83,6 +83,29 @@ class Settings(BaseSettings):
     checkin_max_clip_mb: int = 8000         # предохранитель на размер одного сегмента (МБ)
     checkin_merge_day: bool = True          # склеивать сегменты дня в один клип на канал
 
+    # ── Интеграция 1С:Отель (подмодуль «Заселения») ──
+    # Пояс камер (общий для всех ГС); время заселений храним наивным локальным (§6.2)
+    camera_tz: str = "Asia/Khabarovsk"
+    onec_enabled: bool = False          # общий рубильник; подключения настраиваются на гостиницу в UI
+    # Дефолты для новых подключений (подставляются в форму при создании)
+    onec_default_entity: str = "Document_Размещение"
+    onec_default_field_ref: str = "Ref_Key"
+    onec_default_field_date: str = "Date"
+    onec_default_field_room: str = "Номер"
+    onec_default_field_guest: str = "Гость"
+    onec_default_field_arrival: str = ""
+    onec_default_filter_posted: bool = True
+    onec_default_tz: str = "Asia/Khabarovsk"
+    onec_default_room_floor_rule: str = "first_digit"
+    onec_default_backfill_days: int = 3
+    onec_default_mask_guest: bool = True
+    # Синхронизация меток и часов (общее)
+    onec_sync_minutes: int = 20
+    onec_pre_roll_sec: int = 300        # гость появляется на камере ДО проводки документа
+    onec_post_roll_sec: int = 120
+    onec_marker_margin_sec: int = 120
+    onec_clock_warn_sec: int = 120      # |смещение часов регистратора| больше → предупреждение
+
     # Прочее
     log_level: str = "INFO"
     mock_mode: bool = False

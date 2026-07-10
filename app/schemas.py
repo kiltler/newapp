@@ -342,6 +342,37 @@ class RecorderImportIn(BaseModel):
     night_end: str = "24:00"
 
 
+class OneCConnectionIn(BaseModel):
+    """Сохранение подключения 1С:Отель для гостиницы (пароль пусто = не менять)."""
+    hotel_id: int
+    enabled: bool = False
+    base_url: str = ""
+    username: str = ""
+    password: str = ""
+    onec_tz: str = "Asia/Khabarovsk"
+    entity: str = "Document_Размещение"
+    field_ref: str = "Ref_Key"
+    field_date: str = "Date"
+    field_room: str = "Номер"
+    field_guest: str = "Гость"
+    field_arrival: str | None = None
+    filter_posted: bool = True
+    property_field: str | None = None
+    property_value: str | None = None
+    room_floor_rule: str = "first_digit"
+    backfill_days: int = Field(default=3, ge=1, le=90)
+    mask_guest: bool = True
+
+
+class OneCSyncIn(BaseModel):
+    hotel_id: int | None = None   # None = синхронизировать все включённые
+    full: bool = False
+
+
+class OneCTestIn(BaseModel):
+    hotel_id: int
+
+
 class CheckinChannelIn(BaseModel):
     recorder_id: int
     channel_id: int = Field(ge=0, le=100000)

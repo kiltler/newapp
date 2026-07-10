@@ -50,6 +50,16 @@
 
 <div id="playerBox" class="chart-card" style="display:none; margin-bottom:14px;">
   <video id="player" controls preload="metadata" style="width:100%; max-height:60vh; background:#000; border-radius:10px;"></video>
+
+  {# ── Отметки заселений из 1С на таймлайне ── #}
+  <div id="mkWrap" style="display:none; margin-top:8px">
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:4px">
+      <span class="muted" style="font-size:12px">Заселения 1С:</span>
+      <span id="mkClock" class="badge warn" style="display:none"></span>
+    </div>
+    <div id="mkBar" style="position:relative; height:14px; background:var(--track); border-radius:7px; cursor:pointer"></div>
+    <div id="mkList" style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px"></div>
+  </div>
   <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:10px;">
     <span class="muted" id="nowPlaying" style="margin-right:auto"></span>
     <span class="muted">Скорость:</span>
@@ -136,6 +146,52 @@ function playClip(btn){
   player.src = d.url; player.playbackRate = 1; spdShow.textContent = "x1";
   box.scrollIntoView({behavior:"smooth", block:"start"});
   player.play().catch(()=>{});
+  loadMarkers(+d.id);
+}
+
+// ── Отметки заселений 1С на таймлайне ──
+async function loadMarkers(clipId){
+  const wrap = document.getElementById("mkWrap");
+  wrap.style.display = "none";
+  try {
+    const d = await (await fetch(`/api/checkin/clips/${clipId}/markers`)).json();
+    renderMarkers(d);
+  } catch(e){ /* без 1С плеер работает как раньше */ }
+}
+
+function renderMarkers(d){
+  const wrap = document.getElementById("mkWrap");
+  const bar = document.getElementById("mkBar");
+  const list = document.getElementById("mkList");
+  const clock = document.getElementById("mkClock");
+  if (!d || !d.markers || !d.markers.length){ wrap.style.display = "none"; return; }
+  wrap.style.display = "block";
+
+  if (d.clock && d.clock.warn){
+    clock.style.display = "";
+    clock.textContent = `⏱ часы регистратора уехали на ${d.clock.offset_sec>0?"+":""}${d.clock.offset_sec}с — отметки могут смещаться`;
+  } else clock.style.display = "none";
+
+  const dur = d.duration_sec || 1;
+  const hhmm = iso => iso.slice(11,16);
+  bar.innerHTML = d.markers.map((m,i) => {
+    const left = m.window_start_sec / dur * 100;
+    const width = Math.max((m.window_end_sec - m.window_start_sec) / dur * 100, 0.5);
+    const tip = `🛏 ${m.room||"?"} · ${hhmm(m.doc_time)}${m.guest ? " · "+m.guest : ""}`;
+    return `<div data-seek="${m.window_start_sec}" title="${tip.replace(/"/g,"&quot;")}"
+      style="position:absolute; left:${left}%; width:${width}%; top:0; bottom:0;
+             background:var(--accent); opacity:.75; border-radius:4px"></div>`;
+  }).join("");
+  bar.onclick = e => {
+    const seg = e.target.closest("[data-seek]");
+    if (seg){ player.currentTime = +seg.dataset.seek; player.play().catch(()=>{}); return; }
+    const rect = bar.getBoundingClientRect();          // клик мимо метки — обычная перемотка
+    player.currentTime = (e.clientX - rect.left) / rect.width * dur;
+  };
+  list.innerHTML = d.markers.map(m =>
+    `<button class="mini" onclick="player.currentTime=${m.window_start_sec}; player.play().catch(()=>{})">
+       🛏 ${m.room || "?"} · ${hhmm(m.doc_time)}${m.guest ? " · " + m.guest : ""}</button>`
+  ).join("");
 }
 
 // Время события = время начала клипа + позиция в плеере → ЧЧ:ММ:СС

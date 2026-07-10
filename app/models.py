@@ -583,6 +583,9 @@ class CheckinHotel(Base):
     recorders: Mapped[list["CheckinRecorder"]] = relationship(
         back_populates="hotel", cascade="all, delete-orphan"
     )
+    onec: Mapped["OneCConnection | None"] = relationship(
+        back_populates="hotel", uselist=False, cascade="all, delete-orphan"
+    )
 
 
 class CheckinRecorder(Base):
@@ -605,6 +608,10 @@ class CheckinRecorder(Base):
     analytics_capable: Mapped[bool] = mapped_column(Boolean, default=False)
     night_start: Mapped[str] = mapped_column(String(5), default="07:00")  # HH:MM
     night_end: Mapped[str] = mapped_column(String(5), default="24:00")    # HH:MM (24:00 = конец суток)
+    # Калибровка часов: смещение часов регистратора относительно сервера (сек),
+    # offset = время_регистратора − время_сервера. Для формулы позиции метки 1С.
+    time_offset_sec: Mapped[int | None] = mapped_column(Integer, default=None)
+    time_offset_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     last_test_ok: Mapped[bool | None] = mapped_column(Boolean, default=None)
     last_test_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), default=None)
@@ -742,3 +749,84 @@ class CheckinIngestRun(Base):
     # Суммарно за прогон: сколько байт скачано и суммарное время загрузки (мс).
     dl_bytes: Mapped[int] = mapped_column(Integer, default=0)
     dl_ms: Mapped[int] = mapped_column(Integer, default=0)
+
+
+# ── Интеграция 1С:Отель (per-hotel, см. CLAUDE.md §12) ──────────────────────
+class OneCConnection(Base):
+    """Подключение к 1С:Отель — одна конфигурация на гостиницу.
+
+    Поддерживает два случая развёртывания:
+    - раздельные базы 1С: у каждой ГС свой base_url + креды;
+    - одна база на несколько ГС: URL/креды одинаковые, события разделяются
+      реквизитом-разделителем (property_field/property_value).
+    """
+
+    __tablename__ = "onec_connections"
+    __table_args__ = (UniqueConstraint("hotel_id", name="uq_onec_conn_hotel"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    hotel_id: Mapped[int] = mapped_column(ForeignKey("checkin_hotels.id", ondelete="CASCADE"))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Подключение (стандартный OData 1С)
+    base_url: Mapped[str] = mapped_column(Text, default="")   # http://<host>/<base>/odata/standard.odata
+    username: Mapped[str] = mapped_column(String(255), default="")
+    password_enc: Mapped[str] = mapped_column(Text, default="")  # Fernet, как у CheckinRecorder
+    onec_tz: Mapped[str] = mapped_column(String(64), default="Asia/Khabarovsk")
+
+    # Объект и реквизиты 1С (зависят от редакции — настраиваются, не хардкод)
+    entity: Mapped[str] = mapped_column(String(255), default="Document_Размещение")
+    field_ref: Mapped[str] = mapped_column(String(128), default="Ref_Key")
+    field_date: Mapped[str] = mapped_column(String(128), default="Date")
+    field_room: Mapped[str] = mapped_column(String(128), default="Номер")
+    field_guest: Mapped[str] = mapped_column(String(128), default="Гость")
+    field_arrival: Mapped[str | None] = mapped_column(String(128), default=None)
+    filter_posted: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # Разделитель для случая «одна база 1С на несколько ГС»
+    property_field: Mapped[str | None] = mapped_column(String(128), default=None)  # напр. Организация_Key
+    property_value: Mapped[str | None] = mapped_column(String(128), default=None)  # GUID/значение этой ГС
+
+    # Поведение
+    room_floor_rule: Mapped[str] = mapped_column(String(64), default="first_digit")
+    backfill_days: Mapped[int] = mapped_column(Integer, default=3)
+    mask_guest: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # Статус последней синхронизации
+    last_sync_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    last_ok: Mapped[bool | None] = mapped_column(Boolean, default=None)
+    last_msg: Mapped[str | None] = mapped_column(Text, default=None)
+    last_doc_time: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), default=None)  # наивное локальное
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    hotel: Mapped["CheckinHotel"] = relationship(back_populates="onec")
+
+
+class OneCCheckin(Base):
+    """Событие заселения из 1С:Отель (для отметок на таймлайне и сверки).
+
+    doc_time — НАИВНОЕ локальное время Хабаровска (§6.2, без конверсии в UTC).
+    Принадлежность гостинице обязательна: события ГС A не видны в клипах ГС B.
+    """
+
+    __tablename__ = "onec_checkins"
+    __table_args__ = (
+        UniqueConstraint("hotel_id", "onec_ref", name="uq_onec_hotel_ref"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    hotel_id: Mapped[int] = mapped_column(ForeignKey("checkin_hotels.id", ondelete="CASCADE"))
+    onec_ref: Mapped[str] = mapped_column(String(64))            # Ref_Key документа (GUID)
+    doc_time: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))  # наивное локальное
+    room: Mapped[str | None] = mapped_column(String(64), default=None)
+    floor: Mapped[int | None] = mapped_column(Integer, default=None)  # по правилу room_floor_rule
+    guest: Mapped[str | None] = mapped_column(String(255), default=None)
+    arrival_planned: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    matched_log_id: Mapped[int | None] = mapped_column(
+        ForeignKey("checkin_logs.id", ondelete="SET NULL"), default=None
+    )  # сопоставленный вердикт оператора (сверка)
+    raw: Mapped[dict] = mapped_column(JSON, default=dict)        # исходная запись 1С
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )

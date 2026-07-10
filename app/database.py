@@ -74,6 +74,8 @@ _NEW_COLUMNS = [
     ("checkin_recorders", "model_info", "VARCHAR(255)"),
     ("checkin_clips", "width", "INTEGER"),
     ("checkin_clips", "height", "INTEGER"),
+    ("checkin_recorders", "time_offset_sec", "INTEGER"),
+    ("checkin_recorders", "time_offset_at", "TIMESTAMP"),
 ]
 
 
