@@ -62,12 +62,23 @@ def nvr_hybrid() -> MockNVR:
 
 @pytest.fixture
 async def db():
-    """Чистая БД на каждый тест (пересоздаём таблицы)."""
-    from app.database import Base, engine
+    """Чистая БД на каждый тест (пересоздаём таблицы) + владелец-сессия.
+
+    Вход теперь всегда обязателен, поэтому эндпоинт-тесты идут авторизованными
+    как владелец «IOO» через тестовый seam app.main.TEST_SESSION_OVERRIDE.
+    Тест, проверяющий сам вход, отключает seam (`app.main.TEST_SESSION_OVERRIDE = None`).
+    """
+    import app.main as main_mod
+    from app.database import Base, SessionLocal, engine
+    from app.services import users
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
+    async with SessionLocal() as s:
+        owner = await users.create_user(s, "IOO", "ownerpass", is_owner=True)
+    main_mod.TEST_SESSION_OVERRIDE = {"auth": True, "user_id": owner.id}
     yield
+    main_mod.TEST_SESSION_OVERRIDE = None
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)

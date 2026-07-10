@@ -828,9 +828,9 @@ async def review_queue(request: Request, session: AsyncSession = Depends(get_ses
 @router.post("/api/buses/stats/reset")
 async def reset_stats(request: Request, session: AsyncSession = Depends(get_session)):
     """Обнулить статистику: очистить журнал замен и записи просмотров.
-    Доступно только администратору (роль не 'bus')."""
-    if request.session.get("role") == "bus":
-        raise HTTPException(403, "Обнуление статистики доступно только администратору")
+    Доступно владельцу или пользователю с полным доступом (право «monitoring»)."""
+    if not (request.session.get("is_owner") or "monitoring" in request.session.get("caps", [])):
+        raise HTTPException(403, "Обнуление статистики доступно администратору")
     swaps = len((await session.execute(select(SwapLog))).scalars().all())
     reviews = len((await session.execute(select(DiskReview))).scalars().all())
     await session.execute(delete(SwapLog))

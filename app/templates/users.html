@@ -1,43 +1,112 @@
 {% extends "base.html" %}
 {% block title %}Пользователи{% endblock %}
 {% block content %}
-<h1>Пользователи</h1>
-<p class="muted">Роль <b>«Смотрящий диски»</b> видит только вкладку «Автобусы» и вносит заметки по дискам. <b>«Админ»</b> — полный доступ.</p>
+<h1>👤 Пользователи и доступ</h1>
+<p class="muted">Владелец видит все вкладки и управляет учётками. Остальным выдаются конкретные вкладки — пользователь видит в меню и открывает только выданное.</p>
 
-<form id="user-form" class="bus-search" style="max-width:560px">
-  <input id="u-name" placeholder="Логин" required>
-  <input id="u-pass" type="text" placeholder="Пароль (мин. 4)" required>
-  <select id="u-role">
-    <option value="bus">Смотрящий диски (только Автобусы)</option>
-    <option value="admin">Админ (всё)</option>
-  </select>
-  <button type="submit" class="bus-btn">Создать</button>
-</form>
+<!-- Создание -->
+<div class="chart-card" style="margin-bottom:16px; max-width:760px">
+  <h3 style="margin-top:0">Новый пользователь</h3>
+  <div class="collect-controls">
+    <input id="u-name" placeholder="Логин" style="width:160px">
+    <input id="u-display" placeholder="Имя (необяз.)" style="width:180px">
+    <input id="u-pass" type="text" placeholder="Пароль (мин. 4)" style="width:160px">
+    <label class="muted"><input type="checkbox" id="u-owner" onchange="toggleOwnerCaps('u')"> Владелец (полный доступ)</label>
+  </div>
+  <div id="u-caps" style="display:grid; grid-template-columns:1fr 1fr; gap:4px 16px; margin-top:10px">
+    {% for c in capabilities %}
+    <label class="muted"><input type="checkbox" class="ucap" value="{{ c.key }}"> {{ c.label }}</label>
+    {% endfor %}
+  </div>
+  <div class="collect-controls" style="margin-top:10px">
+    <button class="bus-btn" onclick="createUser()">Создать</button>
+    <span id="u-msg" class="muted" style="font-size:13px"></span>
+  </div>
+</div>
 
-<table class="grid" style="max-width:560px">
-  <thead><tr><th>Логин</th><th>Роль</th><th></th></tr></thead>
+<!-- Список -->
+<table class="grid">
+  <thead><tr><th>Логин</th><th>Имя</th><th>Доступ</th><th>Статус</th><th>Последний вход</th><th></th></tr></thead>
   <tbody>
   {% for u in users %}
-    <tr>
-      <td><b>{{ u.username }}</b></td>
-      <td>{{ 'Смотрящий диски' if u.role == 'bus' else 'Админ' }}</td>
-      <td><button class="mini danger" onclick="delUser({{ u.id }})">удалить</button></td>
+    <tr data-uid="{{ u.id }}">
+      <td><b>{{ u.username }}</b>{% if u.is_owner %} <span class="badge ok">владелец</span>{% endif %}</td>
+      <td class="muted">{{ u.display_name or '—' }}</td>
+      <td>
+        {% if u.is_owner %}<span class="muted">все вкладки</span>
+        {% else %}{% for k in u.permissions %}<span class="badge muted" style="margin:1px">{{ cap_labels.get(k, k) }}</span>{% else %}<span class="muted">нет доступа</span>{% endfor %}{% endif %}
+      </td>
+      <td>{% if u.enabled %}<span class="badge ok">вкл.</span>{% else %}<span class="badge err">выкл.</span>{% endif %}</td>
+      <td class="muted">{{ u.last_login_at | localtime('%d.%m %H:%M') if u.last_login_at else '—' }}</td>
+      <td style="white-space:nowrap">
+        <button class="mini" onclick="editUser({{ u.id }})">изм.</button>
+        <button class="mini danger" onclick="delUser({{ u.id }}, {{ 'true' if u.is_owner else 'false' }})">удалить</button>
+      </td>
     </tr>
-  {% else %}<tr><td colspan="3" class="muted">Пользователей нет. Вход работает по ADMIN_PASSWORD из .env.</td></tr>{% endfor %}
+    <tr data-edit="{{ u.id }}" style="display:none"><td colspan="6">
+      <div class="collect-controls">
+        <input id="e-display{{ u.id }}" placeholder="Имя" value="{{ u.display_name or '' }}" style="width:180px">
+        <input id="e-pass{{ u.id }}" type="text" placeholder="Новый пароль (пусто = не менять)" style="width:220px">
+        <label class="muted"><input type="checkbox" id="e-enabled{{ u.id }}" {{ 'checked' if u.enabled }}> включён</label>
+        <label class="muted"><input type="checkbox" id="e-owner{{ u.id }}" {{ 'checked' if u.is_owner }} onchange="toggleOwnerCaps('e{{ u.id }}')"> владелец</label>
+      </div>
+      <div id="e-caps{{ u.id }}" style="display:{{ 'none' if u.is_owner else 'grid' }}; grid-template-columns:1fr 1fr; gap:4px 16px; margin-top:8px">
+        {% for c in capabilities %}
+        <label class="muted"><input type="checkbox" class="ecap{{ u.id }}" value="{{ c.key }}" {{ 'checked' if c.key in u.permissions }}> {{ c.label }}</label>
+        {% endfor %}
+      </div>
+      <div class="collect-controls" style="margin-top:8px">
+        <button class="mini" onclick="saveUser({{ u.id }})">💾 Сохранить</button>
+        <button class="mini" onclick="editUser({{ u.id }})">Отмена</button>
+        <span id="e-msg{{ u.id }}" class="muted" style="font-size:13px"></span>
+      </div>
+    </td></tr>
+  {% else %}<tr><td colspan="6" class="muted">Пользователей нет.</td></tr>{% endfor %}
   </tbody>
 </table>
 
 <script>
-document.getElementById("user-form").onsubmit = async (e) => {
-  e.preventDefault();
-  const body = { username: document.getElementById("u-name").value,
-    password: document.getElementById("u-pass").value, role: document.getElementById("u-role").value };
-  const r = await fetch("/api/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  if (r.ok) location.reload(); else alert("Ошибка: " + (await r.text()));
-};
-async function delUser(id) {
+function capsFrom(sel){ return [...document.querySelectorAll(sel)].filter(x=>x.checked).map(x=>x.value); }
+function toggleOwnerCaps(prefix){
+  const owner = document.getElementById(prefix==='u' ? 'u-owner' : 'e-owner'+prefix.slice(1)).checked;
+  const box = document.getElementById(prefix==='u' ? 'u-caps' : 'e-caps'+prefix.slice(1));
+  if (box) box.style.display = owner ? 'none' : 'grid';
+}
+
+async function createUser(){
+  const body = {
+    username: document.getElementById("u-name").value.trim(),
+    display_name: document.getElementById("u-display").value.trim() || null,
+    password: document.getElementById("u-pass").value,
+    is_owner: document.getElementById("u-owner").checked,
+    permissions: capsFrom(".ucap"),
+  };
+  const r = await fetch("/api/users", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+  if (r.ok) location.reload(); else document.getElementById("u-msg").textContent = "Ошибка: " + (await r.text());
+}
+
+function editUser(id){
+  const row = document.querySelector(`tr[data-edit="${id}"]`);
+  row.style.display = row.style.display === "none" ? "" : "none";
+}
+
+async function saveUser(id){
+  const body = {
+    display_name: document.getElementById("e-display"+id).value.trim() || null,
+    enabled: document.getElementById("e-enabled"+id).checked,
+    is_owner: document.getElementById("e-owner"+id).checked,
+    permissions: capsFrom(".ecap"+id),
+  };
+  const pass = document.getElementById("e-pass"+id).value;
+  if (pass) body.password = pass;
+  const r = await fetch(`/api/users/${id}`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+  if (r.ok) location.reload(); else document.getElementById("e-msg"+id).textContent = "Ошибка: " + (await r.text());
+}
+
+async function delUser(id, isOwner){
+  if (isOwner && !confirm("Это владелец. Точно удалить?")) return;
   if (!confirm("Удалить пользователя?")) return;
-  const r = await fetch(`/api/users/${id}`, { method: "DELETE" });
+  const r = await fetch(`/api/users/${id}`, {method:"DELETE"});
   if (r.ok) location.reload(); else alert("Ошибка: " + (await r.text()));
 }
 </script>

@@ -9,7 +9,7 @@
       <a class="bus-btn {{ 'secondary' if days != 7 else '' }}" href="/buses/stats?days=7">7 дн.</a>
       <a class="bus-btn {{ 'secondary' if days != 30 else '' }}" href="/buses/stats?days=30">30 дн.</a>
       <a class="bus-btn {{ 'secondary' if days != 90 else '' }}" href="/buses/stats?days=90">90 дн.</a>
-      {% if request.session.get('role') != 'bus' %}
+      {% if request.session.get('is_owner') or 'monitoring' in request.session.get('caps', []) %}
       <button class="bus-btn danger" onclick="resetStats()">🧹 Обнулить статистику</button>
       {% endif %}
     </div>

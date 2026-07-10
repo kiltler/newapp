@@ -17,22 +17,27 @@
 <body>
 <header class="topbar">
     <a href="/" class="logo">📹 NVR Monitor <span class="ver" title="Версия приложения">v{{ app_version }}</span></a>
-    {% set _role = request.session.get('role') %}
+    {% set _owner = request.session.get('is_owner') %}
+    {% set _caps = request.session.get('caps', []) %}
+    {% set _mon = _owner or 'monitoring' in _caps %}
     <nav>
-        {% if _role != 'bus' %}
+        {% if _mon %}
         <a href="/">Дашборд</a>
-        <a href="/worklist" class="nav-worklist">🛠 Доска проблем</a>
+        {% endif %}
+        {% if _owner or 'worklist' in _caps %}<a href="/worklist" class="nav-worklist">🛠 Доска проблем</a>{% endif %}
+        {% if _mon %}
         <a href="/tv">TV</a>
         <a href="/history">История</a>
         <a href="/plan">План</a>
         <a href="/firmware">Прошивки</a>
         <a href="/calc">Хранилище</a>
-        <a href="/audit">Аудит</a>
-        <a href="/checkin" class="nav-checkin">🏨 Заселения</a>
-        {% if _role in (none, 'admin') %}<a href="/users">Пользователи</a><a href="/backup">Бэкап</a>{% endif %}
         {% endif %}
-        <a href="/buses" class="nav-bus">🚌 Автобусы</a>
-        {% if _role != 'bus' %}
+        {% if _owner or 'audit' in _caps %}<a href="/audit">Аудит</a>{% endif %}
+        {% if _owner or 'checkin' in _caps %}<a href="/checkin" class="nav-checkin">🏨 Заселения</a>{% endif %}
+        {% if _owner %}<a href="/users">Пользователи</a>{% endif %}
+        {% if _owner or 'backup' in _caps %}<a href="/backup">Бэкап</a>{% endif %}
+        {% if _owner or 'buses' in _caps %}<a href="/buses" class="nav-bus">🚌 Автобусы</a>{% endif %}
+        {% if _mon %}
         <a href="#" id="add-device-btn">+ Устройство</a>
         <a href="#" id="bell" title="Системные уведомления">🔕</a>
         {% endif %}

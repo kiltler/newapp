@@ -76,6 +76,11 @@ _NEW_COLUMNS = [
     ("checkin_clips", "height", "INTEGER"),
     ("checkin_recorders", "time_offset_sec", "INTEGER"),
     ("checkin_recorders", "time_offset_at", "TIMESTAMP"),
+    ("users", "is_owner", "BOOLEAN DEFAULT FALSE"),
+    ("users", "permissions", "TEXT DEFAULT '[]'"),
+    ("users", "enabled", "BOOLEAN DEFAULT TRUE"),
+    ("users", "display_name", "VARCHAR(128)"),
+    ("users", "last_login_at", "TIMESTAMP"),
 ]
 
 
@@ -108,3 +113,54 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_lightweight_migrate)
+    await ensure_owner_and_migrate_roles()
+
+
+async def ensure_owner_and_migrate_roles() -> None:
+    """Разовая конвертация legacy-ролей в права + бутстрап владельца.
+
+    1. У пользователей с пустыми permissions выводим права из legacy-role:
+       admin → все ключи, bus → ["buses"] (чтобы никто не потерял доступ).
+    2. Владелец: логин из OWNER_USERNAME (по умолчанию IOO). Если есть —
+       делаем владельцем; если нет и задан OWNER_PASSWORD — создаём; иначе
+       предупреждаем в лог.
+    3. Если задан OWNER_PASSWORD и владелец уже есть — сбрасываем ему пароль
+       (единственный путь аварийного восстановления вместо env-админа).
+    """
+    import logging
+
+    from sqlalchemy import select
+
+    from app.config import settings
+    from app.models import User
+    from app.permissions import ALL_KEYS
+    from app.services import users as users_svc
+
+    log = logging.getLogger("nvrmon.owner")
+    async with SessionLocal() as session:
+        rows = list((await session.execute(select(User))).scalars())
+        for u in rows:
+            if not u.permissions:
+                u.permissions = list(ALL_KEYS) if u.role == "admin" else ["buses"]
+
+        owner_name = (settings.owner_username or "IOO").strip()
+        owner = next((u for u in rows if u.username == owner_name), None)
+        if owner is not None:
+            owner.is_owner = True
+            owner.enabled = True
+            if not owner.permissions:
+                owner.permissions = list(ALL_KEYS)
+            if settings.owner_password:
+                owner.password_hash = users_svc.hash_password(settings.owner_password)
+                log.warning("Пароль владельца «%s» сброшен из OWNER_PASSWORD — очистите переменную", owner_name)
+        elif settings.owner_password:
+            owner = User(
+                username=owner_name,
+                password_hash=users_svc.hash_password(settings.owner_password),
+                is_owner=True, enabled=True, permissions=list(ALL_KEYS),
+            )
+            session.add(owner)
+            log.warning("Создан владелец панели «%s» из OWNER_PASSWORD — очистите переменную", owner_name)
+        else:
+            log.warning("Владелец «%s» не найден. Задайте OWNER_PASSWORD для создания/сброса.", owner_name)
+        await session.commit()

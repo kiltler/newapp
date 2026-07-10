@@ -70,9 +70,10 @@ class Settings(BaseSettings):
     watchdog_url: str = ""
     watchdog_interval_minutes: int = 1
 
-    # Вход в панель (если admin_password пуст — вход отключён, панель открыта)
-    admin_username: str = "admin"
-    admin_password: str = ""
+    # Владелец панели (главный администратор). Вход — только по учёткам из БД,
+    # режима «открытой панели» больше нет.
+    owner_username: str = "IOO"   # логин владельца (бутстрап/промоут)
+    owner_password: str = ""      # ТОЛЬКО для первичного создания/аварийного сброса владельца
 
     # Модуль «Заселения» (ingestion субпотока)
     clips_dir: str = "clips"          # корень для скачанных клипов (в Docker монтируется /clips)

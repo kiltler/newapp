@@ -454,14 +454,24 @@ class AppSetting(Base):
 
 
 class User(Base):
-    """Учётная запись панели. role: admin (всё) | bus (только вкладка «Автобусы»)."""
+    """Учётная запись панели.
+
+    Доступ — через ``is_owner`` (владелец, видит всё) + ``permissions`` (список
+    ключей вкладок из ``app/permissions.py``). Поле ``role`` — legacy, в логике
+    больше не используется (оставлено, чтобы не ломать SQLite).
+    """
 
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String(64), unique=True)
     password_hash: Mapped[str] = mapped_column(Text)
-    role: Mapped[str] = mapped_column(String(16), default="bus")
+    role: Mapped[str] = mapped_column(String(16), default="bus")  # legacy, не используется
+    is_owner: Mapped[bool] = mapped_column(Boolean, default=False)  # владелец: полный контроль
+    permissions: Mapped[list] = mapped_column(JSON, default=list)   # список ключей вкладок
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)    # можно отключить вход без удаления
+    display_name: Mapped[str | None] = mapped_column(String(128), default=None)
+    last_login_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

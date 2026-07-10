@@ -52,24 +52,52 @@ app = FastAPI(title="NVR Monitor", version="0.1.0", lifespan=lifespan)
 
 # Открытые без авторизации пути (статика, страница входа, проверки, mock)
 _PUBLIC_PREFIXES = ("/static", "/login", "/logout", "/healthz", "/metrics", "/mock", "/docs", "/openapi.json", "/sw.js", "/offline", "/manifest.webmanifest")
-# Что разрешено роли «bus» (только модуль «Автобусы»)
-_BUS_PREFIXES = ("/buses", "/disks", "/assets", "/api/buses", "/api/disks", "/api/asset-batches", "/api/assets")
+
+
+# Тестовый seam: conftest подставляет сюда сессию владельца, чтобы существующие
+# эндпоинт-тесты шли авторизованными. В проде ВСЕГДА None — боевой вход не трогается.
+TEST_SESSION_OVERRIDE: dict | None = None
 
 
 @app.middleware("http")
 async def require_login(request: Request, call_next):
+    from app.database import SessionLocal
+    from app.permissions import path_allowed, start_page
+    from app.services import users as users_svc
+
+    if TEST_SESSION_OVERRIDE is not None:
+        request.session.update(TEST_SESSION_OVERRIDE)
+
     path = request.url.path
-    # Если пароль не задан — вход отключён (панель открыта).
-    if settings.admin_password and not path.startswith(_PUBLIC_PREFIXES):
-        if not request.session.get("auth"):
-            if path.startswith("/api"):
-                return JSONResponse({"detail": "Требуется вход"}, status_code=401)
-            return RedirectResponse("/login", status_code=303)
-        # Роль «bus» — доступ только к вкладке «Автобусы»
-        if request.session.get("role") == "bus" and not path.startswith(_BUS_PREFIXES):
-            if path.startswith("/api"):
-                return JSONResponse({"detail": "Недостаточно прав"}, status_code=403)
-            return RedirectResponse("/buses", status_code=303)
+    is_api = path.startswith("/api")
+    if path.startswith(_PUBLIC_PREFIXES):
+        return await call_next(request)
+
+    if not request.session.get("auth"):
+        if is_api:
+            return JSONResponse({"detail": "Требуется вход"}, status_code=401)
+        return RedirectResponse("/login", status_code=303)
+
+    # Актуализируем права из БД каждый запрос: изменения владельца применяются
+    # мгновенно, отключённый пользователь тут же вылетает.
+    user_id = request.session.get("user_id")
+    async with SessionLocal() as s:
+        user = await users_svc.get_user(s, user_id) if user_id else None
+    if user is None or not user.enabled:
+        request.session.clear()
+        if is_api:
+            return JSONResponse({"detail": "Сессия недействительна"}, status_code=401)
+        return RedirectResponse("/login", status_code=303)
+    request.session["is_owner"] = bool(user.is_owner)
+    request.session["caps"] = list(user.permissions or [])
+    request.session["user"] = user.username
+
+    if path == "/no-access":
+        return await call_next(request)
+    if not path_allowed(path, request.session["caps"], request.session["is_owner"]):
+        if is_api:
+            return JSONResponse({"detail": "Недостаточно прав"}, status_code=403)
+        return RedirectResponse(start_page(user.is_owner, user.permissions or []) or "/no-access", status_code=303)
     return await call_next(request)
 
 
@@ -81,9 +109,6 @@ app.add_middleware(
     session_cookie="nvrmon_session",
     max_age=60 * 60 * 24 * 7,
 )
-
-if not settings.admin_password:
-    log.warning("ADMIN_PASSWORD не задан — панель открыта без авторизации!")
 
 app.include_router(auth.router)
 app.include_router(devices.router)

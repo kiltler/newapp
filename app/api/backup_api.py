@@ -21,8 +21,8 @@ router = APIRouter(tags=["backup"])
 
 
 def _require_admin(request: Request) -> None:
-    if request.session.get("role") not in (None, "admin"):
-        raise HTTPException(403, "Только для администратора")
+    if not (request.session.get("is_owner") or "backup" in request.session.get("caps", [])):
+        raise HTTPException(403, "Нет доступа к бэкапу")
 
 
 @router.get("/backup", response_class=HTMLResponse)

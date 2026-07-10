@@ -288,7 +288,17 @@ class BusSettings(BaseModel):
 class UserCreate(BaseModel):
     username: str
     password: str
-    role: str = "bus"
+    display_name: str | None = None
+    permissions: list[str] = []
+    is_owner: bool = False
+
+
+class UserUpdate(BaseModel):
+    display_name: str | None = None
+    permissions: list[str] | None = None
+    enabled: bool | None = None
+    is_owner: bool | None = None
+    password: str | None = None   # непусто = сменить пароль
 
 
 class EventOut(BaseModel):
