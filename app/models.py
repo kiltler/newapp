@@ -531,9 +531,25 @@ RECORDER_MODEL_NAMES = {
 class ChannelRole:
     ENTRANCE = "entrance"
     RECEPTION = "reception"
+    # Этажи гостиницы (камеры коридоров)
+    FLOOR1 = "floor1"
+    FLOOR2 = "floor2"
+    FLOOR3 = "floor3"
+    FLOOR4 = "floor4"
+    FLOOR5 = "floor5"
+    FLOOR6 = "floor6"
 
 
-CHANNEL_ROLE_NAMES = {ChannelRole.ENTRANCE: "вход", ChannelRole.RECEPTION: "ресепшн"}
+CHANNEL_ROLE_NAMES = {
+    ChannelRole.ENTRANCE: "вход",
+    ChannelRole.RECEPTION: "ресепшн",
+    ChannelRole.FLOOR1: "этаж 1",
+    ChannelRole.FLOOR2: "этаж 2",
+    ChannelRole.FLOOR3: "этаж 3",
+    ChannelRole.FLOOR4: "этаж 4",
+    ChannelRole.FLOOR5: "этаж 5",
+    ChannelRole.FLOOR6: "этаж 6",
+}
 
 
 class ClipStatus:
