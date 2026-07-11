@@ -165,23 +165,67 @@ class ODataBackend:
                     return None
         return None
 
-    async def fetch_checkins(self, since: dt.datetime, *, page: int = 2000) -> list[dict]:
-        """Свежие заселения (не старше `since`). Стратегия под 1С, где отбор и
-        сортировка по полям запрещены: узнаём общее число документов и читаем
-        «хвост» базы (последние ~N — они самые свежие), окно режем на своей стороне.
+    async def _fetch_by_date_filter(self, http, url: str, since: dt.datetime) -> list[dict] | None:
+        """БЫСТРЫЙ путь: серверный фильтр по дате + ЯВНЫЙ $orderby по Ref_Key.
 
-        Большой ``$skip`` в 1С медленный, поэтому хвост тянем как можно меньшим
-        числом запросов (крупными страницами) и с щедрым таймаутом.
+        В этой 1С неявная автосортировка (AUTOORDER) при $filter падает с HTTP 500.
+        Явный $orderby по обычному полю (Ref_Key) её заменяет — и фильтр по дате
+        может заработать. Тогда сервер сам отдаёт только свежие документы (мало,
+        skip маленький, быстро). Возвращает None → путь недоступен, идём на хвост.
+        """
+        since_str = since.strftime("%Y-%m-%dT%H:%M:%S")
+        parts = [f"{self.field_query_date} ge datetime'{since_str}'"]
+        if self.conn.filter_posted:
+            parts.append("Posted eq true")
+        rows: list[dict] = []
+        skip = 0
+        for _ in range(self._MAX_PAGES):
+            params = {"$format": "json", "$top": "500", "$skip": str(skip),
+                      "$orderby": self.field_ref, "$filter": " and ".join(parts),
+                      "$expand": self.expand_room}
+            log.info("1С GET (быстрый путь) %s", str(httpx.URL(url, params=params)))
+            try:
+                resp = await http.get(url, params=params)
+            except httpx.HTTPError as exc:
+                log.info("1С: быстрый путь — сетевая ошибка %r → перехожу на чтение хвоста", exc)
+                return None
+            if resp.status_code != 200:
+                log.info("1С: быстрый путь недоступен (HTTP %s: %s) → перехожу на чтение хвоста",
+                         resp.status_code, resp.text[:150])
+                return None
+            batch = resp.json().get("value") or []
+            log.info("1С: быстрый путь — записей на странице = %d (skip=%d)", len(batch), skip)
+            for row in batch:
+                wd = self._window_date(row)
+                if wd is None or wd >= since:
+                    rows.append(row)
+            if len(batch) < 500:
+                break
+            skip += 500
+        log.info("1С: быстрый путь СРАБОТАЛ — %d заселений в окне (серверный фильтр по дате)", len(rows))
+        return rows
+
+    async def fetch_checkins(self, since: dt.datetime, *, page: int = 2000) -> list[dict]:
+        """Свежие заселения (не старше `since`).
+
+        Сначала пробуем быстрый серверный фильтр по дате (с явным $orderby, чтобы
+        обойти AUTOORDER-500). Если 1С его не принимает — фолбэк: узнаём общее
+        число документов и читаем «хвост» базы, окно режем на своей стороне
+        (большой $skip медленный — с щедрым таймаутом и крупными страницами).
         """
         url = f"{self.base_url}/{self.entity}"
-        log.info("1С: граница окна (наивное локальное) = %s; отбор/сортировка на стороне 1С не используются",
-                 since.isoformat())
+        log.info("1С: граница окна (наивное локальное) = %s", since.isoformat())
         tail = min(max((self.conn.lookback_days or 5) * 300, 1000), 5000)
         timeout = settings.onec_http_timeout
 
         rows: list[dict] = []
         pages = 0
         async with httpx.AsyncClient(auth=self.auth, timeout=timeout, verify=False) as http:
+            fast = await self._fetch_by_date_filter(http, url, since)
+            if fast is not None:
+                return fast
+
+            log.info("1С: фолбэк — читаю хвост базы (skip). Отбор/сортировка на стороне 1С недоступны")
             total = await self._count(http, url)
             log.info("1С: всего документов (odata.count) = %s", total)
             if total is not None:

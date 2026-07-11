@@ -180,11 +180,13 @@ async def test_fetch_tail_by_count_and_window(db):
 
     def handler(request: httpx.Request) -> httpx.Response:
         p = request.url.params
-        assert "datetime" not in p.get("$filter", "")   # без фильтра по дате
-        assert "$orderby" not in p                        # без сортировки
+        if "datetime" in p.get("$filter", ""):
+            # имитируем запрет фильтра по дате (AUTOORDER-500) → код уйдёт на хвост
+            return httpx.Response(500, text="Операция не разрешена в предложении WHERE ... AUTOORDER")
         if p.get("$inlinecount") == "allpages":
             seen["inlinecount"] = True
             return httpx.Response(200, json={"odata.count": str(len(all_rows)), "value": all_rows[:1]})
+        assert "$orderby" not in p                        # хвост — без сортировки
         top = int(p["$top"]); skip = int(p.get("$skip", "0"))
         return httpx.Response(200, json={"value": all_rows[skip:skip + top]})
 
@@ -205,6 +207,44 @@ async def test_fetch_tail_by_count_and_window(db):
     assert seen["inlinecount"]                    # число документов запрошено
     assert set(refs) == {"n0", "n1"}              # только свежие в окне
     assert not any(r.startswith("old") for r in refs)  # старьё 2016 отсечено на нашей стороне
+
+
+async def test_fetch_fast_path_server_date_filter(db):
+    """Если 1С принимает $filter по дате с явным $orderby=Ref_Key — используем
+    быстрый серверный путь (без чтения хвоста и без $inlinecount)."""
+    import httpx
+
+    now = dt.datetime.now()
+    fresh = [{"Ref_Key": f"n{i}", "CheckInDate": (now - dt.timedelta(hours=i)).strftime("%Y-%m-%dT%H:%M:%S"),
+              "Date": (now - dt.timedelta(hours=i)).strftime("%Y-%m-%dT%H:%M:%S"),
+              "GuestFullName": "Г", "Room": {"Description": "10", "Floor": "1"}} for i in range(3)]
+    seen = {"count_called": False, "orderby": None}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        p = request.url.params
+        if p.get("$inlinecount") == "allpages":
+            seen["count_called"] = True
+            return httpx.Response(200, json={"odata.count": "999999", "value": []})
+        # быстрый путь: есть фильтр по дате и явный $orderby=Ref_Key → отдаём свежие
+        assert "datetime" in p["$filter"]
+        seen["orderby"] = p.get("$orderby")
+        return httpx.Response(200, json={"value": fresh})
+
+    conn = OneCConnection(hotel_id=1, base_url="http://1c/odata", username="u")
+    backend = onec_sync.ODataBackend(conn)
+    orig = httpx.AsyncClient
+
+    def patched(*a, **kw):
+        kw["transport"] = httpx.MockTransport(handler)
+        kw.pop("verify", None)
+        return orig(*a, **kw)
+
+    import unittest.mock as um
+    with um.patch.object(httpx, "AsyncClient", patched):
+        rows = await backend.fetch_checkins(since=now - dt.timedelta(days=5))
+    assert {r["Ref_Key"] for r in rows} == {"n0", "n1", "n2"}
+    assert seen["orderby"] == "Ref_Key"     # явный orderby, обходящий AUTOORDER
+    assert seen["count_called"] is False    # быстрый путь → хвост/count не понадобились
 
 
 async def test_sync_isolation_between_hotels(db, monkeypatch):
