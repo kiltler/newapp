@@ -106,6 +106,7 @@ class Settings(BaseSettings):
     onec_default_mask_guest: bool = True
     # Синхронизация меток и часов (общее)
     onec_sync_minutes: int = 20
+    onec_http_timeout: float = 180.0    # в 1С большой $skip медленный — таймаут щедрый
     onec_pre_roll_sec: int = 300        # гость появляется на камере ДО проводки документа
     onec_post_roll_sec: int = 120
     onec_marker_margin_sec: int = 120

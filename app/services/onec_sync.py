@@ -148,7 +148,11 @@ class ODataBackend:
         flt = self._filters()
         if flt:
             params["$filter"] = flt
-        resp = await http.get(url, params=params)
+        try:
+            resp = await http.get(url, params=params)
+        except httpx.HTTPError as exc:
+            log.warning("1С $inlinecount — сетевая ошибка: %r", exc)
+            return None
         if resp.status_code != 200:
             log.warning("1С $inlinecount → HTTP %s: %s", resp.status_code, resp.text[:200])
             return None
@@ -161,35 +165,45 @@ class ODataBackend:
                     return None
         return None
 
-    async def fetch_checkins(self, since: dt.datetime, *, page: int = 500) -> list[dict]:
+    async def fetch_checkins(self, since: dt.datetime, *, page: int = 2000) -> list[dict]:
         """Свежие заселения (не старше `since`). Стратегия под 1С, где отбор и
         сортировка по полям запрещены: узнаём общее число документов и читаем
         «хвост» базы (последние ~N — они самые свежие), окно режем на своей стороне.
+
+        Большой ``$skip`` в 1С медленный, поэтому хвост тянем как можно меньшим
+        числом запросов (крупными страницами) и с щедрым таймаутом.
         """
         url = f"{self.base_url}/{self.entity}"
         log.info("1С: граница окна (наивное локальное) = %s; отбор/сортировка на стороне 1С не используются",
                  since.isoformat())
-        # Сколько записей «хвоста» тянуть: с запасом под окно (в среднем заселений
-        # в сутки немного). Масштабируем от lookback_days, с разумными границами.
         tail = min(max((self.conn.lookback_days or 5) * 300, 1000), 5000)
+        timeout = settings.onec_http_timeout
 
         rows: list[dict] = []
-        async with httpx.AsyncClient(auth=self.auth, timeout=30.0, verify=False) as http:
+        pages = 0
+        async with httpx.AsyncClient(auth=self.auth, timeout=timeout, verify=False) as http:
             total = await self._count(http, url)
             log.info("1С: всего документов (odata.count) = %s", total)
             if total is not None:
-                start = max(0, total - tail)
-                log.info("1С: читаю хвост базы с skip=%d (tail=%d, page=%d)", start, tail, page)
+                skip = max(0, total - tail)
+                log.info("1С: читаю хвост базы с skip=%d (tail=%d, крупными страницами по %d)", skip, tail, page)
             else:
-                start = 0
+                skip = 0
                 log.warning("1С: odata.count недоступен — листаю с начала (может быть медленно на большой базе)")
 
-            skip = start
-            pages = 0
             for pages in range(1, self._MAX_PAGES + 1):
-                params = self._params(page, skip)
+                top = page if total is None else min(page, total - skip)
+                if top <= 0:
+                    break
+                params = self._params(top, skip)
                 log.info("1С GET %s", str(httpx.URL(url, params=params)))
-                resp = await http.get(url, params=params)
+                try:
+                    resp = await http.get(url, params=params)
+                except httpx.HTTPError as exc:
+                    log.warning("1С: запрос (skip=%d) не выполнен: %r "
+                                "(большой $skip в 1С медленный — поднимите ONEC_HTTP_TIMEOUT или lookback_days)",
+                                skip, exc)
+                    raise RuntimeError(f"OData: {type(exc).__name__}: {exc}") from exc
                 log.info("1С ответ: HTTP %s (skip=%d)", resp.status_code, skip)
                 if resp.status_code != 200:
                     log.warning("1С тело ответа: %s", resp.text[:500])
@@ -207,10 +221,10 @@ class ODataBackend:
                         rows.append(row)
                         kept += 1
                 log.info("1С: со страницы в окно попало %d из %d (CheckInDate >= границы)", kept, len(batch))
-                if len(batch) < page:
-                    break  # конец базы
-                skip += page
-        log.info("1С: ИТОГ — %d заселений в окне последних %d дн. (прочитано страниц: %d)",
+                skip += len(batch)
+                if not batch or len(batch) < top or (total is not None and skip >= total):
+                    break  # конец базы / хвоста
+        log.info("1С: ИТОГ — %d заселений в окне последних %d дн. (запросов страниц: %d)",
                  len(rows), self.conn.lookback_days, pages)
         return rows
 
@@ -294,13 +308,14 @@ async def sync_hotel(session: AsyncSession, hotel_id: int, *, full: bool = False
     try:
         rows = await backend.fetch_checkins(since=since)
     except Exception as exc:  # noqa: BLE001  (сеть/учётка/кривой OData — фиксируем и живём)
+        detail = str(exc) or repr(exc)  # у таймаутов str() пустой — берём repr
         conn.last_sync_at = utcnow()
         conn.last_ok = False
-        conn.last_msg = str(exc)[:500]
-        await _notify_unreachable(session, hotel_id, hotel_name, str(exc))
+        conn.last_msg = detail[:500]
+        await _notify_unreachable(session, hotel_id, hotel_name, detail)
         await session.commit()
-        log.warning("1С «%s»: синхронизация не удалась: %s", hotel_name, exc)
-        return {**result, "error": str(exc)[:300]}
+        log.warning("1С «%s»: синхронизация не удалась: %s", hotel_name, detail)
+        return {**result, "error": detail[:300]}
 
     existing = {
         r.onec_ref: r
