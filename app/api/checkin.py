@@ -54,7 +54,7 @@ _register_filters(templates)
 router = APIRouter(tags=["checkin"])
 
 # Метка сборки — видно в UI, сразу понятно, задеплоен ли новый код.
-CHECKIN_BUILD = "2026-07-12-select"
+CHECKIN_BUILD = "2026-07-12-hsservice"
 
 
 def _clip_url(path: str) -> str:
@@ -712,7 +712,7 @@ async def reencode_clip(clip_id: int, session: AsyncSession = Depends(get_sessio
 def _conn_defaults() -> dict:
     """Дефолты новой формы подключения — из глобальных ONEC_DEFAULT_* (.env)."""
     return {
-        "enabled": False, "base_url": "", "username": "", "has_password": False,
+        "enabled": False, "base_url": "", "service_url": "", "username": "", "has_password": False,
         "onec_tz": settings.onec_default_tz,
         "entity": settings.onec_default_entity,
         "field_ref": settings.onec_default_field_ref,
@@ -743,7 +743,7 @@ async def get_onec_connection(hotel_id: int, session: AsyncSession = Depends(get
         return {"hotel_id": hotel_id, "exists": False, **_conn_defaults()}
     return {
         "hotel_id": hotel_id, "exists": True, "enabled": conn.enabled,
-        "base_url": conn.base_url, "username": conn.username,
+        "base_url": conn.base_url, "service_url": conn.service_url or "", "username": conn.username,
         "has_password": bool(conn.password_enc),
         "onec_tz": conn.onec_tz, "entity": conn.entity,
         "field_ref": conn.field_ref, "field_date": conn.field_date,
@@ -766,8 +766,11 @@ async def save_onec_connection(
     if await session.get(CheckinHotel, data.hotel_id) is None:
         raise HTTPException(404, "Гостиница не найдена")
     url = data.base_url.strip()
-    if data.enabled and not url.lower().startswith(("http://", "https://")):
-        raise HTTPException(422, "base_url должен начинаться с http:// или https://")
+    service_url = (data.service_url or "").strip()
+    # Достаточно любого из адресов; приоритет — у HTTP-сервиса (быстрый путь).
+    if data.enabled and not (url.lower().startswith(("http://", "https://"))
+                             or service_url.lower().startswith(("http://", "https://"))):
+        raise HTTPException(422, "Укажите OData URL или URL HTTP-сервиса (http:// или https://)")
     conn = (
         await session.execute(select(OneCConnection).where(OneCConnection.hotel_id == data.hotel_id))
     ).scalar_one_or_none()
@@ -776,6 +779,7 @@ async def save_onec_connection(
         session.add(conn)
     conn.enabled = data.enabled
     conn.base_url = url
+    conn.service_url = service_url or None
     conn.username = data.username.strip()
     if data.password:
         conn.password_enc = encrypt(data.password)

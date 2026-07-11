@@ -218,14 +218,46 @@ class ODataBackend:
         log.info("1С: быстрый путь СРАБОТАЛ — %d заселений в окне (серверный фильтр по дате)", len(rows))
         return rows
 
+    async def _fetch_from_service(self, since: dt.datetime) -> list[dict]:
+        """HTTP-сервис 1С отдаёт готовый JSON свежих заселений за период
+        [{ref, checkin, date, room, floor, guest}]. Приводим к форме OData-записи,
+        чтобы дальнейший разбор в sync_hotel был единым."""
+        base = self.conn.service_url.rstrip("?&")
+        sep = "&" if "?" in base else "?"
+        url = f"{base}{sep}since={since.strftime('%Y-%m-%dT%H:%M:%S')}"
+        log.info("1С HTTP-сервис GET %s", url)
+        async with httpx.AsyncClient(auth=self.auth, timeout=settings.onec_http_timeout, verify=False) as http:
+            resp = await http.get(url)
+        log.info("1С HTTP-сервис: HTTP %s", resp.status_code)
+        if resp.status_code != 200:
+            raise RuntimeError(f"HTTP-сервис {resp.status_code}: {resp.text[:200]}")
+        data = resp.json()
+        items = data.get("items") if isinstance(data, dict) else data  # массив или {items:[...]}
+        rows: list[dict] = []
+        for it in (items or []):
+            rows.append({
+                self.field_ref: it.get("ref"),
+                self.field_date: it.get("checkin"),
+                self.field_date_fallback: it.get("date"),
+                self.field_guest: it.get("guest"),
+                self.expand_room: {self.field_room_number: it.get("room"),
+                                   self.field_room_floor: it.get("floor")},
+            })
+        # окно всё равно режем у себя (сервис уже фильтрует, но подстрахуемся)
+        rows = [r for r in rows if (self._window_date(r) is None or self._window_date(r) >= since)]
+        log.info("1С HTTP-сервис: получено %d заселений в окне", len(rows))
+        return rows
+
     async def fetch_checkins(self, since: dt.datetime, *, page: int = 2000) -> list[dict]:
         """Свежие заселения (не старше `since`).
 
-        Сначала пробуем быстрый серверный фильтр по дате (с явным $orderby, чтобы
-        обойти AUTOORDER-500). Если 1С его не принимает — фолбэк: узнаём общее
-        число документов и читаем «хвост» базы, окно режем на своей стороне
-        (большой $skip медленный — с щедрым таймаутом и крупными страницами).
+        Если у подключения задан HTTP-сервис — берём оттуда (быстро, фильтр по
+        дате на стороне 1С). Иначе OData: сначала серверный фильтр по дате (с
+        явным $orderby, чтобы обойти AUTOORDER-500), затем фолбэк на «хвост» базы.
         """
+        if (self.conn.service_url or "").strip():
+            return await self._fetch_from_service(since)
+
         url = f"{self.base_url}/{self.entity}"
         log.info("1С: граница окна (наивное локальное) = %s", since.isoformat())
         tail = min(max((self.conn.lookback_days or 5) * 300, 1000), 5000)
@@ -292,7 +324,18 @@ class ODataBackend:
         return rows
 
     async def probe(self) -> dict:
-        """Проба связи: $top=1 (Date desc, $expand=Room) — видно свежую запись и разворот."""
+        """Проба связи. При заданном HTTP-сервисе — тянем свежие через него;
+        иначе OData $top=1 c $expand=Room."""
+        if (self.conn.service_url or "").strip():
+            since = dt.datetime.now(_tz(settings.camera_tz)).replace(tzinfo=None) - dt.timedelta(
+                days=max(self.conn.lookback_days or 5, 1))
+            try:
+                rows = await self._fetch_from_service(since)
+            except Exception as exc:  # noqa: BLE001
+                return {"ok": False, "mode": "service", "error": f"{type(exc).__name__}: {exc}"[:300]}
+            return {"ok": True, "mode": "service", "count": len(rows),
+                    "sample": rows[0] if rows else None}
+
         url = f"{self.base_url}/{self.entity}"
         params = self._params(top=1)
         try:

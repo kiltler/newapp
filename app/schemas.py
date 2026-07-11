@@ -357,6 +357,7 @@ class OneCConnectionIn(BaseModel):
     hotel_id: int
     enabled: bool = False
     base_url: str = ""
+    service_url: str | None = None
     username: str = ""
     password: str = ""
     onec_tz: str = "Asia/Khabarovsk"

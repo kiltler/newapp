@@ -392,3 +392,43 @@ async def test_connection_save_load_and_password_keep(db):
         # статус по гостиницам отвечает
         st = (await c.get("/api/checkin/onec/status")).json()
         assert any(x["hotel_id"] == hid and x["enabled"] for x in st)
+
+
+async def test_fetch_via_http_service(db):
+    """При заданном service_url заселения берутся из HTTP-сервиса 1С (готовый JSON)."""
+    import httpx
+
+    now = dt.datetime.now()
+    payload = [
+        {"ref": "g1", "checkin": (now - dt.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S"),
+         "date": (now - dt.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S"),
+         "room": "614", "floor": 6, "guest": "Иванов Иван"},
+        {"ref": "g2", "checkin": "2016-05-24T06:12:01", "date": "2016-05-24T06:12:01",
+         "room": "101", "floor": 1, "guest": "Старый"},  # вне окна — отсечётся у нас
+    ]
+    got = {"url": None}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        got["url"] = str(request.url)
+        return httpx.Response(200, json=payload)
+
+    conn = OneCConnection(hotel_id=1, service_url="http://1c/voronhot/hs/checkins/v1",
+                          username="u", lookback_days=5)
+    backend = onec_sync.ODataBackend(conn)
+    orig = httpx.AsyncClient
+
+    def patched(*a, **kw):
+        kw["transport"] = httpx.MockTransport(handler)
+        kw.pop("verify", None)
+        return orig(*a, **kw)
+
+    import unittest.mock as um
+    with um.patch.object(httpx, "AsyncClient", patched):
+        rows = await backend.fetch_checkins(since=now - dt.timedelta(days=5))
+    assert "since=" in got["url"]                       # период передан в сервис
+    # маппинг в форму OData-записи + разбор
+    assert len(rows) == 1                                # старьё 2016 отсечено
+    room, floor = backend.extract_room_floor(rows[0])
+    assert room == "614" and floor == 6
+    assert rows[0][backend.field_ref] == "g1"
+    assert rows[0][backend.field_date] == payload[0]["checkin"]

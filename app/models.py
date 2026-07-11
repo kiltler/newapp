@@ -780,6 +780,9 @@ class OneCConnection(Base):
 
     # Подключение (стандартный OData 1С)
     base_url: Mapped[str] = mapped_column(Text, default="")   # http://<host>/<base>/odata/standard.odata
+    # Приоритетный путь: URL HTTP-сервиса 1С, отдающего свежие заселения за период
+    # (обход ограничений OData на больших базах). Если задан — используется он.
+    service_url: Mapped[str | None] = mapped_column(Text, default=None)  # .../hs/checkins/v1
     username: Mapped[str] = mapped_column(String(255), default="")
     password_enc: Mapped[str] = mapped_column(Text, default="")  # Fernet, как у CheckinRecorder
     onec_tz: Mapped[str] = mapped_column(String(64), default="Asia/Khabarovsk")
