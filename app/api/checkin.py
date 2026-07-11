@@ -54,7 +54,7 @@ _register_filters(templates)
 router = APIRouter(tags=["checkin"])
 
 # Метка сборки — видно в UI, сразу понятно, задеплоен ли новый код.
-CHECKIN_BUILD = "2026-07-10-querydate"
+CHECKIN_BUILD = "2026-07-10-orderdesc"
 
 
 def _clip_url(path: str) -> str:

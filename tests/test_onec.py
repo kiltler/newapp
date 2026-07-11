@@ -60,29 +60,29 @@ def test_to_camera_local_naive():
     assert out2.tzinfo is None
 
 
-def test_odata_filter_building():
-    """$filter: дата + Posted + разделитель объекта (guid и строка)."""
+def test_odata_no_date_filter_orderby_desc():
+    """В запросе НЕТ фильтра по дате; сортировка Date desc; Posted + разделитель."""
     conn = OneCConnection(hotel_id=1, filter_posted=True,
                           property_field="Организация_Key",
                           property_value="a1b2c3d4-1111-2222-3333-444455556666")
     b = onec_sync.ODataBackend(conn)
-    flt = b._filters(dt.datetime(2026, 7, 10, 0, 0))
-    # $filter/$orderby — по служебной Date (отбираемой), НЕ по CheckInDate (ошибка WHERE)
-    assert "Date ge datetime'2026-07-10T00:00:00'" in flt
-    assert "CheckInDate" not in flt
-    assert b._params(dt.datetime(2026, 7, 10), top=5)["$orderby"] == "Date"
-    assert "Posted eq true" in flt
-    assert "Организация_Key eq guid'a1b2c3d4-1111-2222-3333-444455556666'" in flt
-    # не-GUID значение — строковое сравнение
+    params = b._params(top=500, skip=1000)
+    assert "datetime" not in params.get("$filter", "")   # никакой даты в $filter
+    assert "CheckInDate" not in params.get("$filter", "")
+    assert params["$orderby"] == "Date desc"             # свежие сверху по служебной дате
+    assert params["$top"] == "500" and params["$skip"] == "1000"
+    assert "Posted eq true" in params["$filter"]
+    assert "Организация_Key eq guid'a1b2c3d4-1111-2222-3333-444455556666'" in params["$filter"]
+    # только Posted выключен + строковый разделитель
     conn2 = OneCConnection(hotel_id=1, filter_posted=False,
                            property_field="Объект", property_value="Суворова 8")
-    assert onec_sync.ODataBackend(conn2)._filters(None) == "Объект eq 'Суворова 8'"
+    assert onec_sync.ODataBackend(conn2)._filters() == "Объект eq 'Суворова 8'"
 
 
 def test_odata_expand_room_and_extract():
     """$expand=Room всегда добавляется; из Room берутся Description и Floor(int)."""
     b = onec_sync.ODataBackend(OneCConnection(hotel_id=1))
-    params = b._params(None, top=10)
+    params = b._params(top=10)
     assert params.get("$expand") == "Room"
     assert b.extract_room_floor({"Room": {"Description": "614", "Floor": "6"}}) == ("614", 6)
     # пустой Room_Key → нет объекта Room → (None, None), но заселение сохранимо
@@ -164,21 +164,37 @@ async def test_marker_time_from_checkin_not_query_date(db, monkeypatch):
         assert ev.doc_time == dt.datetime(2026, 7, 9, 9, 5, 30)  # CheckInDate, не Date
 
 
-async def test_odata_query_rejects_checkin_filter(db):
-    """Мок OData: 500 на $filter по CheckInDate, 200 на $filter по служебной Date."""
+async def test_fetch_paginates_desc_and_stops_at_boundary(db):
+    """Мок OData: Date desc + $top/$skip; листаем только пока не ушли за окно.
+
+    База с историей 2016 + свежие; тянутся только записи в пределах lookback,
+    старые (2016) отсекаются, и листание прекращается (не читаем всю базу).
+    """
     import httpx
 
-    conn = OneCConnection(hotel_id=1, base_url="http://1c/odata", username="u",
-                          field_query_date="Date")
+    now = dt.datetime.now()
+    # свежие (в пределах окна) + одна старая 2016 (за границей)
+    fresh = [
+        {"Ref_Key": f"n{i}", "Date": (now - dt.timedelta(hours=i)).strftime("%Y-%m-%dT%H:%M:%S"),
+         "CheckInDate": (now - dt.timedelta(hours=i)).strftime("%Y-%m-%dT%H:%M:%S"),
+         "GuestFullName": "Г", "Room": {"Description": "10", "Floor": "1"}}
+        for i in range(3)
+    ]
+    old = {"Ref_Key": "old", "Date": "2016-05-24T06:12:01", "CheckInDate": "2016-05-24T06:12:01",
+           "GuestFullName": "Старый", "Room": {"Description": "614", "Floor": "6"}}
+    all_rows = fresh + [old] + [dict(old, Ref_Key=f"old{i}") for i in range(500)]  # много старья
+
+    pages_served = {"n": 0}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        flt = request.url.params.get("$filter", "")
-        if "CheckInDate" in flt:  # реальное ограничение конфигурации
-            return httpx.Response(500, text="Операция не разрешена в предложении WHERE")
-        return httpx.Response(200, json={"value": [_row("r1", "2026-07-09T12:00:00")]})
+        assert "datetime" not in request.url.params.get("$filter", "")  # без фильтра по дате
+        assert request.url.params["$orderby"].endswith(" desc")
+        pages_served["n"] += 1
+        top = int(request.url.params["$top"]); skip = int(request.url.params.get("$skip", "0"))
+        return httpx.Response(200, json={"value": all_rows[skip:skip + top]})
 
+    conn = OneCConnection(hotel_id=1, base_url="http://1c/odata", username="u")
     backend = onec_sync.ODataBackend(conn)
-    # подменяем клиент моком транспорта — реальной сети нет
     orig = httpx.AsyncClient
 
     def patched(*a, **kw):
@@ -187,9 +203,13 @@ async def test_odata_query_rejects_checkin_filter(db):
         return orig(*a, **kw)
 
     import unittest.mock as um
+    boundary = now - dt.timedelta(days=5)
     with um.patch.object(httpx, "AsyncClient", patched):
-        rows = await backend.fetch_checkins(since=dt.datetime(2026, 7, 5))
-    assert len(rows) == 1 and rows[0]["Ref_Key"] == "r1"  # запрос по Date прошёл
+        rows = await backend.fetch_checkins(since=boundary, page=2)
+    refs = [r["Ref_Key"] for r in rows]
+    assert refs == ["n0", "n1", "n2"]           # только свежие, старьё отсечено
+    assert "old" not in refs
+    assert pages_served["n"] <= 3               # остановились рано, не листали всю базу
 
 
 async def test_sync_isolation_between_hotels(db, monkeypatch):

@@ -105,13 +105,13 @@ class ODataBackend:
         self.field_room_number = conn.field_room_number or "Description"
         self.field_room_floor = conn.field_room_floor or "Floor"
 
-    def _filters(self, since: dt.datetime | None) -> str:
-        """$filter по СЛУЖЕБНОЙ дате (field_query_date) — она отбираема в OData,
-        в отличие от CheckInDate, который в части конфигураций даёт ошибку WHERE."""
+    _MAX_PAGES = 100  # предохранитель от бесконечного листания
+
+    def _filters(self) -> str:
+        """$filter БЕЗ даты (в этой 1С отбор по полям документа запрещён — HTTP 500).
+        Остаются только опциональный Posted и разделитель объекта."""
         c = self.conn
         parts: list[str] = []
-        if since is not None:
-            parts.append(f"{self.field_query_date} ge datetime'{since.strftime('%Y-%m-%dT%H:%M:%S')}'")
         if c.filter_posted:
             parts.append("Posted eq true")
         if c.property_field and c.property_value:
@@ -122,43 +122,50 @@ class ODataBackend:
                 parts.append(f"{c.property_field} eq '{val}'")
         return " and ".join(parts)
 
-    def _params(self, since: dt.datetime | None, top: int, skip: int = 0) -> dict:
-        # $orderby тоже по служебной дате (сортировка по CheckInDate недоступна там же)
-        params = {"$format": "json", "$top": str(top), "$orderby": self.field_query_date}
+    def _params(self, top: int, skip: int = 0) -> dict:
+        # Свежие сверху: сортируем по служебной Date desc (по ней сортировка
+        # разрешена, в отличие от CheckInDate). Фильтр по дате НЕ добавляем.
+        params = {"$format": "json", "$top": str(top), "$orderby": f"{self.field_query_date} desc"}
         if skip:
             params["$skip"] = str(skip)
-        flt = self._filters(since)
+        flt = self._filters()
         if flt:
             params["$filter"] = flt
-        # Комнату всегда разворачиваем ($expand) — иначе придёт только ссылка-GUID,
-        # а нам нужны готовые номер (Description) и этаж (Floor) из объекта Room.
-        if self.expand_room:
+        if self.expand_room:  # разворот комнаты — номер и этаж готовыми полями
             params["$expand"] = self.expand_room
         return params
 
-    async def fetch_checkins(self, since: dt.datetime | None, *, page: int = 500) -> list[dict]:
-        """Все заселения от since, с пагинацией $top/$skip до пустой страницы."""
+    def _query_date(self, row: dict) -> dt.datetime | None:
+        """Дата документа (по ней решаем о стопе) в наивном локальном камер."""
+        raw = parse_onec_datetime(row.get(self.field_query_date))
+        return to_camera_local(raw, self.conn.onec_tz) if raw is not None else None
+
+    async def fetch_checkins(self, since: dt.datetime, *, page: int = 500) -> list[dict]:
+        """Заселения не старше `since` (граница). Тянем страницами Date desc и
+        останавливаемся, как только встретили запись старее границы (список убыв.)."""
         url = f"{self.base_url}/{self.entity}"
         rows: list[dict] = []
-        skip = 0
         async with httpx.AsyncClient(auth=self.auth, timeout=30.0, verify=False) as http:
-            while True:
-                resp = await http.get(url, params=self._params(since, page, skip))
+            for pageno in range(self._MAX_PAGES):
+                resp = await http.get(url, params=self._params(page, pageno * page))
                 if resp.status_code != 200:
                     raise RuntimeError(f"OData HTTP {resp.status_code}: {resp.text[:200]}")
                 batch = resp.json().get("value") or []
-                rows.extend(batch)
-                if len(batch) < page:
-                    break
-                skip += page
-                if skip > 100_000:  # предохранитель от бесконечной пагинации
+                stop = False
+                for row in batch:
+                    qd = self._query_date(row)
+                    if qd is not None and qd < since:
+                        stop = True  # эта и все следующие старее окна → дальше не листаем
+                        break
+                    rows.append(row)
+                if stop or len(batch) < page:
                     break
         return rows
 
     async def probe(self) -> dict:
-        """Проба связи: $top=1 с $expand=Room (видно, что разворот комнаты работает)."""
+        """Проба связи: $top=1 (Date desc, $expand=Room) — видно свежую запись и разворот."""
         url = f"{self.base_url}/{self.entity}"
-        params = self._params(None, top=1)
+        params = self._params(top=1)
         try:
             async with httpx.AsyncClient(auth=self.auth, timeout=15.0, verify=False) as http:
                 resp = await http.get(url, params=params)
