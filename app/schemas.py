@@ -360,17 +360,19 @@ class OneCConnectionIn(BaseModel):
     username: str = ""
     password: str = ""
     onec_tz: str = "Asia/Khabarovsk"
-    entity: str = "Document_Размещение"
+    entity: str = "Document_Accommodation"
     field_ref: str = "Ref_Key"
-    field_date: str = "Date"
-    field_room: str = "Номер"
-    field_guest: str = "Гость"
-    field_arrival: str | None = None
+    field_date: str = "CheckInDate"
+    field_date_fallback: str = "Date"
+    field_guest: str = "GuestFullName"
     filter_posted: bool = True
+    expand_room: str = "Room"
+    field_room_ref: str = "Room_Key"
+    field_room_number: str = "Description"
+    field_room_floor: str = "Floor"
     property_field: str | None = None
     property_value: str | None = None
-    room_floor_rule: str = "first_digit"
-    backfill_days: int = Field(default=3, ge=1, le=90)
+    lookback_days: int = Field(default=5, ge=1, le=90)
     mask_guest: bool = True
 
 

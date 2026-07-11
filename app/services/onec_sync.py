@@ -18,7 +18,7 @@ import logging
 import re
 
 import httpx
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -85,23 +85,9 @@ def parse_onec_datetime(raw: str) -> dt.datetime | None:
         return None
 
 
-def room_to_floor(room: str | None, rule: str) -> int | None:
-    """Этаж из номера комнаты. Правило по умолчанию first_digit: «312» → 3."""
-    if not room or rule == "none":
-        return None
-    digits = re.sub(r"\D", "", str(room))
-    if not digits:
-        return None
-    if rule == "first_digit":
-        return int(digits[0])
-    if rule == "first_two_digits" and len(digits) >= 3:
-        return int(digits[:2])
-    return int(digits[0])
-
-
 # ── OData-бэкенд (адаптер: позже можно заменить на HTTP-сервис 1С) ───────────
 class ODataBackend:
-    """Клиент стандартного OData 1С для одной гостиницы."""
+    """Клиент стандартного OData 1С для одной гостиницы (Document_Accommodation)."""
 
     def __init__(self, conn: OneCConnection):
         self.conn = conn
@@ -111,9 +97,12 @@ class ODataBackend:
         # SQLAlchemy-дефолты ещё не применены — они срабатывают при INSERT)
         self.entity = conn.entity or settings.onec_default_entity
         self.field_ref = conn.field_ref or "Ref_Key"
-        self.field_date = conn.field_date or "Date"
-        self.field_room = conn.field_room or "Номер"
-        self.field_guest = conn.field_guest or "Гость"
+        self.field_date = conn.field_date or "CheckInDate"
+        self.field_date_fallback = conn.field_date_fallback or "Date"
+        self.field_guest = conn.field_guest or "GuestFullName"
+        self.expand_room = conn.expand_room or "Room"
+        self.field_room_number = conn.field_room_number or "Description"
+        self.field_room_floor = conn.field_room_floor or "Floor"
 
     def _filters(self, since: dt.datetime | None) -> str:
         """Собирает $filter: дата-водяной-знак, проведённость, разделитель объекта."""
@@ -131,28 +120,40 @@ class ODataBackend:
                 parts.append(f"{c.property_field} eq '{val}'")
         return " and ".join(parts)
 
-    def _params(self, since: dt.datetime | None, top: int) -> dict:
+    def _params(self, since: dt.datetime | None, top: int, skip: int = 0) -> dict:
         params = {"$format": "json", "$top": str(top), "$orderby": self.field_date}
+        if skip:
+            params["$skip"] = str(skip)
         flt = self._filters(since)
         if flt:
             params["$filter"] = flt
-        # Комната часто приходит ссылкой-GUID (Номер_Key) — разворачиваем справочник
-        # номерного фонда, чтобы получить человекочитаемый номер (Description).
-        if self.field_room.endswith("_Key"):
-            params["$expand"] = self.field_room[: -len("_Key")]
+        # Комнату всегда разворачиваем ($expand) — иначе придёт только ссылка-GUID,
+        # а нам нужны готовые номер (Description) и этаж (Floor) из объекта Room.
+        if self.expand_room:
+            params["$expand"] = self.expand_room
         return params
 
-    async def fetch_checkins(self, since: dt.datetime | None, *, top: int = 500) -> list[dict]:
+    async def fetch_checkins(self, since: dt.datetime | None, *, page: int = 500) -> list[dict]:
+        """Все заселения от since, с пагинацией $top/$skip до пустой страницы."""
         url = f"{self.base_url}/{self.entity}"
+        rows: list[dict] = []
+        skip = 0
         async with httpx.AsyncClient(auth=self.auth, timeout=30.0, verify=False) as http:
-            resp = await http.get(url, params=self._params(since, top))
-        if resp.status_code != 200:
-            raise RuntimeError(f"OData HTTP {resp.status_code}: {resp.text[:200]}")
-        data = resp.json()
-        return data.get("value") or []
+            while True:
+                resp = await http.get(url, params=self._params(since, page, skip))
+                if resp.status_code != 200:
+                    raise RuntimeError(f"OData HTTP {resp.status_code}: {resp.text[:200]}")
+                batch = resp.json().get("value") or []
+                rows.extend(batch)
+                if len(batch) < page:
+                    break
+                skip += page
+                if skip > 100_000:  # предохранитель от бесконечной пагинации
+                    break
+        return rows
 
     async def probe(self) -> dict:
-        """Проба связи: $top=1 к объекту (с учётом фильтра-разделителя)."""
+        """Проба связи: $top=1 с $expand=Room (видно, что разворот комнаты работает)."""
         url = f"{self.base_url}/{self.entity}"
         params = self._params(None, top=1)
         try:
@@ -163,18 +164,20 @@ class ODataBackend:
         if resp.status_code != 200:
             return {"ok": False, "status": resp.status_code, "error": resp.text[:300]}
         rows = (resp.json().get("value") or [])
-        return {"ok": True, "status": 200, "sample": rows[0] if rows else None}
+        sample = rows[0] if rows else None
+        room = self.extract_room_floor(sample) if sample else (None, None)
+        return {"ok": True, "status": 200, "sample": sample,
+                "room_expanded": {"number": room[0], "floor": room[1]}}
 
-    def extract_room(self, row: dict) -> str | None:
-        """Номер комнаты из записи: строка как есть либо Description развёрнутой ссылки."""
-        if self.field_room.endswith("_Key"):
-            expanded = row.get(self.field_room[: -len("_Key")])
-            if isinstance(expanded, dict):
-                return expanded.get("Description") or expanded.get("Code")
-            # $expand не сработал — остаётся GUID (лучше, чем ничего)
-            return row.get(self.field_room)
-        val = row.get(self.field_room)
-        return str(val) if val not in (None, "") else None
+    def extract_room_floor(self, row: dict) -> tuple[str | None, int | None]:
+        """Номер и этаж из развёрнутого объекта Room. Пустой Room_Key → (None, None)."""
+        room_obj = row.get(self.expand_room) or {}
+        if not isinstance(room_obj, dict):
+            return None, None
+        number = (str(room_obj.get(self.field_room_number) or "").strip()) or None
+        floor_raw = str(room_obj.get(self.field_room_floor) or "").strip()
+        floor = int(floor_raw) if floor_raw.isdigit() else None
+        return number, floor
 
 
 def onec_backend_for(conn: OneCConnection) -> ODataBackend:
@@ -214,23 +217,20 @@ async def sync_hotel(session: AsyncSession, hotel_id: int, *, full: bool = False
     hotel = await session.get(CheckinHotel, hotel_id)
     hotel_name = hotel.name if hotel else str(hotel_id)
 
-    # Водяной знак — per-hotel: максимум doc_time уже загруженных событий
-    watermark: dt.datetime | None = None
-    if not full:
-        watermark = (
-            await session.execute(
-                select(func.max(OneCCheckin.doc_time)).where(OneCCheckin.hotel_id == hotel_id)
-            )
-        ).scalar()
-    if watermark is None:
-        watermark = dt.datetime.now(_tz(settings.camera_tz)).replace(tzinfo=None) - dt.timedelta(
-            days=max(conn.backfill_days, 1)
-        )
+    # Скользящее окно: каждый синк перечитывает заселения за последние N дней и
+    # делает идемпотентный upsert. Ловит и новые заселения, и поздние правки
+    # недавних; строгий watermark не нужен (для anti-theft важны свежие события).
+    lookback = max(conn.lookback_days or 5, 1)
+    if full:
+        lookback = max(lookback, 30)
+    day_start = dt.datetime.now(_tz(settings.camera_tz)).replace(
+        hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
+    since = day_start - dt.timedelta(days=lookback)
 
     backend = onec_backend_for(conn)
     result = {"hotel_id": hotel_id, "fetched": 0, "inserted": 0, "updated": 0, "skipped": 0}
     try:
-        rows = await backend.fetch_checkins(since=watermark)
+        rows = await backend.fetch_checkins(since=since)
     except Exception as exc:  # noqa: BLE001  (сеть/учётка/кривой OData — фиксируем и живём)
         conn.last_sync_at = utcnow()
         conn.last_ok = False
@@ -252,38 +252,30 @@ async def sync_hotel(session: AsyncSession, hotel_id: int, *, full: bool = False
     for row in rows:
         result["fetched"] += 1
         ref = str(row.get(backend.field_ref) or "").strip()
-        raw_date = parse_onec_datetime(row.get(backend.field_date))
+        # Основная метка — CheckInDate (момент заезда), запасная — Date (проведение)
+        raw_date = parse_onec_datetime(
+            row.get(backend.field_date) or row.get(backend.field_date_fallback)
+        )
         if not ref or raw_date is None:
             result["skipped"] += 1
             continue
         doc_time = to_camera_local(raw_date, conn.onec_tz)
-        room = backend.extract_room(row)
+        room, floor = backend.extract_room_floor(row)  # из развёрнутого Room
         guest_val = row.get(backend.field_guest)
-        guest = None
-        if isinstance(guest_val, dict):
-            guest = guest_val.get("Description")
-        elif guest_val not in (None, ""):
-            guest = str(guest_val)
-        arrival = None
-        if conn.field_arrival:
-            arr_raw = parse_onec_datetime(row.get(conn.field_arrival))
-            if arr_raw is not None:
-                arrival = to_camera_local(arr_raw, conn.onec_tz)
+        guest = str(guest_val).strip() if guest_val not in (None, "") else None
 
         rec = existing.get(ref)
         if rec is None:
             session.add(OneCCheckin(
                 hotel_id=hotel_id, onec_ref=ref, doc_time=doc_time, room=room,
-                floor=room_to_floor(room, conn.room_floor_rule), guest=guest,
-                arrival_planned=arrival, raw=row,
+                floor=floor, guest=guest, arrival_planned=None, raw=row,
             ))
             result["inserted"] += 1
         else:
             rec.doc_time = doc_time
             rec.room = room
-            rec.floor = room_to_floor(room, conn.room_floor_rule)
+            rec.floor = floor
             rec.guest = guest
-            rec.arrival_planned = arrival
             rec.raw = row
             result["updated"] += 1
         if last_doc is None or doc_time > last_doc:

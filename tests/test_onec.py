@@ -37,20 +37,17 @@ async def _hotel_with_conn(name: str, **conn_kw) -> tuple[int, int]:
         return h.id, conn.id
 
 
-def _row(ref: str, date: str, room: str = "312", guest: str = "Иванов Иван Иванович", **extra) -> dict:
-    return {"Ref_Key": ref, "Date": date, "Номер": room, "Гость": guest, **extra}
+def _row(ref: str, checkin: str, room: str | None = "614", floor: str = "6",
+         guest: str = "Иванов Иван Иванович", **extra) -> dict:
+    """Запись Document_Accommodation с развёрнутым объектом Room."""
+    r = {"Ref_Key": ref, "CheckInDate": checkin, "GuestFullName": guest,
+         "Room_Key": f"room-{ref}", **extra}
+    if room is not None:
+        r["Room"] = {"Description": room, "Floor": floor}
+    return r
 
 
 # ── Чистые функции ───────────────────────────────────────────────────────────
-def test_room_to_floor_rules():
-    assert onec_sync.room_to_floor("312", "first_digit") == 3
-    assert onec_sync.room_to_floor("к.512а", "first_digit") == 5  # мусор отбрасывается
-    assert onec_sync.room_to_floor("1205", "first_two_digits") == 12
-    assert onec_sync.room_to_floor("312", "none") is None
-    assert onec_sync.room_to_floor(None, "first_digit") is None
-    assert onec_sync.room_to_floor("люкс", "first_digit") is None  # цифр нет
-
-
 def test_to_camera_local_naive():
     """Дата 1С → наивное локальное время камер, tzinfo отброшен (§6.2)."""
     src = dt.datetime(2026, 7, 10, 14, 30)  # наивная, пояс 1С = Хабаровск
@@ -70,7 +67,7 @@ def test_odata_filter_building():
                           property_value="a1b2c3d4-1111-2222-3333-444455556666")
     b = onec_sync.ODataBackend(conn)
     flt = b._filters(dt.datetime(2026, 7, 10, 0, 0))
-    assert "Date ge datetime'2026-07-10T00:00:00'" in flt
+    assert "CheckInDate ge datetime'2026-07-10T00:00:00'" in flt   # основная метка — заезд
     assert "Posted eq true" in flt
     assert "Организация_Key eq guid'a1b2c3d4-1111-2222-3333-444455556666'" in flt
     # не-GUID значение — строковое сравнение
@@ -79,27 +76,28 @@ def test_odata_filter_building():
     assert onec_sync.ODataBackend(conn2)._filters(None) == "Объект eq 'Суворова 8'"
 
 
-def test_odata_expand_for_room_key():
-    """Комната-ссылка (Номер_Key) → $expand справочника и чтение Description."""
-    conn = OneCConnection(hotel_id=1, field_room="Номер_Key")
-    b = onec_sync.ODataBackend(conn)
+def test_odata_expand_room_and_extract():
+    """$expand=Room всегда добавляется; из Room берутся Description и Floor(int)."""
+    b = onec_sync.ODataBackend(OneCConnection(hotel_id=1))
     params = b._params(None, top=10)
-    assert params.get("$expand") == "Номер"
-    assert b.extract_room({"Номер_Key": "guid", "Номер": {"Description": "312"}}) == "312"
-    # $expand не сработал — остаётся GUID
-    assert b.extract_room({"Номер_Key": "deadbeef"}) == "deadbeef"
+    assert params.get("$expand") == "Room"
+    assert b.extract_room_floor({"Room": {"Description": "614", "Floor": "6"}}) == ("614", 6)
+    # пустой Room_Key → нет объекта Room → (None, None), но заселение сохранимо
+    assert b.extract_room_floor({"Room_Key": "00000000-0000-0000-0000-000000000000"}) == (None, None)
+    # этаж не число → None, номер остаётся
+    assert b.extract_room_floor({"Room": {"Description": "Люкс", "Floor": ""}}) == ("Люкс", None)
 
 
 # ── Синхронизация ────────────────────────────────────────────────────────────
-async def test_sync_hotel_upsert_and_watermark(db, monkeypatch):
+async def test_sync_hotel_upsert_sliding_window(db, monkeypatch):
     hid, _ = await _hotel_with_conn("ГС-А")
     calls = {"since": []}
 
-    async def fake_fetch(self, since, top=500):
+    async def fake_fetch(self, since, **kw):
         calls["since"].append(since)
         return [
-            _row("ref-1", "2026-07-09T21:15:00"),
-            _row("ref-2", "2026-07-09T23:40:00", room="507"),
+            _row("ref-1", "2026-07-09T21:15:00", room="312", floor="3"),
+            _row("ref-2", "2026-07-09T23:40:00", room="507", floor="5"),
         ]
 
     monkeypatch.setattr(onec_sync.ODataBackend, "fetch_checkins", fake_fetch)
@@ -110,18 +108,40 @@ async def test_sync_hotel_upsert_and_watermark(db, monkeypatch):
 
         rows = (await s.execute(select(OneCCheckin).order_by(OneCCheckin.doc_time))).scalars().all()
         assert len(rows) == 2
-        assert rows[0].room == "312" and rows[0].floor == 3
+        assert rows[0].room == "312" and rows[0].floor == 3   # из развёрнутого Room
         assert rows[1].room == "507" and rows[1].floor == 5
-        assert rows[0].doc_time == dt.datetime(2026, 7, 9, 21, 15)  # наивное локальное
+        assert rows[0].doc_time == dt.datetime(2026, 7, 9, 21, 15)  # CheckInDate, наивное локальное
+        assert rows[0].guest == "Иванов Иван Иванович"
 
-        # повторный синк: те же ref → апдейт, не дубли; watermark = max(doc_time)
+        # повторный синк — те же ref → апдейт без дублей; окно скользящее (не watermark)
         r2 = await onec_sync.sync_hotel(s, hid)
         assert r2["updated"] == 2 and r2["inserted"] == 0
-        assert calls["since"][1] == dt.datetime(2026, 7, 9, 23, 40)
+        assert calls["since"][0] == calls["since"][1]  # одинаковое окно последних N дней
 
         conn = (await s.execute(select(OneCConnection))).scalar_one()
         assert conn.last_ok is True
-        assert conn.last_doc_time == dt.datetime(2026, 7, 9, 23, 40)
+
+
+async def test_checkin_date_fallback_and_empty_room(db, monkeypatch):
+    """Нет CheckInDate → берём Date; пустой Room → заселение сохраняется без номера/этажа."""
+    hid, _ = await _hotel_with_conn("Фолбэк")
+
+    async def fake_fetch(self, since, **kw):
+        return [
+            {"Ref_Key": "a", "Date": "2026-07-09T10:00:00", "GuestFullName": "Гость",
+             "Room_Key": "00000000-0000-0000-0000-000000000000"},  # нет CheckInDate и нет Room
+            _row("b", "2026-07-09T12:00:00", room="204", floor="2"),
+        ]
+
+    monkeypatch.setattr(onec_sync.ODataBackend, "fetch_checkins", fake_fetch)
+    async with SessionLocal() as s:
+        r = await onec_sync.sync_hotel(s, hid)
+        assert r["inserted"] == 2
+        a = (await s.execute(select(OneCCheckin).where(OneCCheckin.onec_ref == "a"))).scalar_one()
+        assert a.doc_time == dt.datetime(2026, 7, 9, 10, 0)  # взято из Date
+        assert a.room is None and a.floor is None            # пустой Room — но заселение есть
+        b = (await s.execute(select(OneCCheckin).where(OneCCheckin.onec_ref == "b"))).scalar_one()
+        assert b.room == "204" and b.floor == 2
 
 
 async def test_sync_isolation_between_hotels(db, monkeypatch):
@@ -129,8 +149,8 @@ async def test_sync_isolation_between_hotels(db, monkeypatch):
     hid_a, _ = await _hotel_with_conn("Изол-А")
     hid_b, _ = await _hotel_with_conn("Изол-Б")
 
-    async def fake_fetch(self, since, top=500):
-        if "Изол-А" not in self.conn.username and self.conn.hotel_id == hid_a:
+    async def fake_fetch(self, since, **kw):
+        if self.conn.hotel_id == hid_a:
             return [_row("ref-a", "2026-07-09T20:00:00")]
         raise RuntimeError("1С гостиницы Б лежит")
 
@@ -240,7 +260,8 @@ async def test_connection_save_load_and_password_keep(db):
     async with _client() as c:
         # до создания — форма с дефолтами
         d = (await c.get(f"/api/checkin/onec/connection?hotel_id={hid}")).json()
-        assert d["exists"] is False and d["entity"] == "Document_Размещение"
+        assert d["exists"] is False and d["entity"] == "Document_Accommodation"
+        assert d["field_date"] == "CheckInDate" and d["expand_room"] == "Room"
 
         body = {"hotel_id": hid, "enabled": True, "base_url": "http://1c/hotel/odata/standard.odata",
                 "username": "svc", "password": "s3cret", "property_field": "Организация_Key",

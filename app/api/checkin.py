@@ -54,7 +54,7 @@ _register_filters(templates)
 router = APIRouter(tags=["checkin"])
 
 # Метка сборки — видно в UI, сразу понятно, задеплоен ли новый код.
-CHECKIN_BUILD = "2026-07-10-nohints"
+CHECKIN_BUILD = "2026-07-10-accommodation"
 
 
 def _clip_url(path: str) -> str:
@@ -717,13 +717,15 @@ def _conn_defaults() -> dict:
         "entity": settings.onec_default_entity,
         "field_ref": settings.onec_default_field_ref,
         "field_date": settings.onec_default_field_date,
-        "field_room": settings.onec_default_field_room,
+        "field_date_fallback": settings.onec_default_field_date_fallback,
         "field_guest": settings.onec_default_field_guest,
-        "field_arrival": settings.onec_default_field_arrival or None,
         "filter_posted": settings.onec_default_filter_posted,
+        "expand_room": settings.onec_default_expand_room,
+        "field_room_ref": settings.onec_default_field_room_ref,
+        "field_room_number": settings.onec_default_field_room_number,
+        "field_room_floor": settings.onec_default_field_room_floor,
         "property_field": None, "property_value": None,
-        "room_floor_rule": settings.onec_default_room_floor_rule,
-        "backfill_days": settings.onec_default_backfill_days,
+        "lookback_days": settings.onec_default_lookback_days,
         "mask_guest": settings.onec_default_mask_guest,
     }
 
@@ -744,11 +746,12 @@ async def get_onec_connection(hotel_id: int, session: AsyncSession = Depends(get
         "has_password": bool(conn.password_enc),
         "onec_tz": conn.onec_tz, "entity": conn.entity,
         "field_ref": conn.field_ref, "field_date": conn.field_date,
-        "field_room": conn.field_room, "field_guest": conn.field_guest,
-        "field_arrival": conn.field_arrival, "filter_posted": conn.filter_posted,
+        "field_date_fallback": conn.field_date_fallback, "field_guest": conn.field_guest,
+        "filter_posted": conn.filter_posted,
+        "expand_room": conn.expand_room, "field_room_ref": conn.field_room_ref,
+        "field_room_number": conn.field_room_number, "field_room_floor": conn.field_room_floor,
         "property_field": conn.property_field, "property_value": conn.property_value,
-        "room_floor_rule": conn.room_floor_rule, "backfill_days": conn.backfill_days,
-        "mask_guest": conn.mask_guest,
+        "lookback_days": conn.lookback_days, "mask_guest": conn.mask_guest,
     }
 
 
@@ -777,15 +780,17 @@ async def save_onec_connection(
     conn.onec_tz = data.onec_tz.strip() or "Asia/Khabarovsk"
     conn.entity = data.entity.strip() or settings.onec_default_entity
     conn.field_ref = data.field_ref.strip() or "Ref_Key"
-    conn.field_date = data.field_date.strip() or "Date"
-    conn.field_room = data.field_room.strip() or "Номер"
-    conn.field_guest = data.field_guest.strip() or "Гость"
-    conn.field_arrival = (data.field_arrival or "").strip() or None
+    conn.field_date = data.field_date.strip() or "CheckInDate"
+    conn.field_date_fallback = data.field_date_fallback.strip() or "Date"
+    conn.field_guest = data.field_guest.strip() or "GuestFullName"
     conn.filter_posted = data.filter_posted
+    conn.expand_room = data.expand_room.strip() or "Room"
+    conn.field_room_ref = data.field_room_ref.strip() or "Room_Key"
+    conn.field_room_number = data.field_room_number.strip() or "Description"
+    conn.field_room_floor = data.field_room_floor.strip() or "Floor"
     conn.property_field = (data.property_field or "").strip() or None
     conn.property_value = (data.property_value or "").strip() or None
-    conn.room_floor_rule = data.room_floor_rule
-    conn.backfill_days = data.backfill_days
+    conn.lookback_days = data.lookback_days
     conn.mask_guest = data.mask_guest
     await session.commit()
     await audit.log_action(session, request, "onec_connection_save",

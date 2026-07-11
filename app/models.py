@@ -784,23 +784,34 @@ class OneCConnection(Base):
     password_enc: Mapped[str] = mapped_column(Text, default="")  # Fernet, как у CheckinRecorder
     onec_tz: Mapped[str] = mapped_column(String(64), default="Asia/Khabarovsk")
 
-    # Объект и реквизиты 1С (зависят от редакции — настраиваются, не хардкод)
-    entity: Mapped[str] = mapped_column(String(255), default="Document_Размещение")
+    # Объект и реквизиты 1С (реальная схема Document_Accommodation, всё настраиваемо)
+    entity: Mapped[str] = mapped_column(String(255), default="Document_Accommodation")
     field_ref: Mapped[str] = mapped_column(String(128), default="Ref_Key")
-    field_date: Mapped[str] = mapped_column(String(128), default="Date")
-    field_room: Mapped[str] = mapped_column(String(128), default="Номер")
-    field_guest: Mapped[str] = mapped_column(String(128), default="Гость")
+    field_date: Mapped[str] = mapped_column(String(128), default="CheckInDate")  # момент заезда
+    field_date_fallback: Mapped[str] = mapped_column(String(128), default="Date")  # момент проведения
+    field_guest: Mapped[str] = mapped_column(String(128), default="GuestFullName")  # ФИО строкой
     field_arrival: Mapped[str | None] = mapped_column(String(128), default=None)
     filter_posted: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # Комната — через разворот ссылки ($expand): номер и этаж приходят готовыми полями
+    expand_room: Mapped[str] = mapped_column(String(128), default="Room")            # что разворачивать
+    field_room_ref: Mapped[str] = mapped_column(String(128), default="Room_Key")     # ссылка на комнату
+    field_room_number: Mapped[str] = mapped_column(String(128), default="Description")  # номер во вложенном Room
+    field_room_floor: Mapped[str] = mapped_column(String(128), default="Floor")      # этаж во вложенном Room
 
     # Разделитель для случая «одна база 1С на несколько ГС»
     property_field: Mapped[str | None] = mapped_column(String(128), default=None)  # напр. Организация_Key
     property_value: Mapped[str | None] = mapped_column(String(128), default=None)  # GUID/значение этой ГС
 
     # Поведение
+    lookback_days: Mapped[int] = mapped_column(Integer, default=5)  # скользящее окно перечитывания
+    mask_guest: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # legacy (не используются; оставлены с дефолтами, чтобы INSERT не падал на
+    # старых БД, где эти колонки были NOT NULL — как User.role, см. §13)
+    field_room: Mapped[str] = mapped_column(String(128), default="Номер")
     room_floor_rule: Mapped[str] = mapped_column(String(64), default="first_digit")
     backfill_days: Mapped[int] = mapped_column(Integer, default=3)
-    mask_guest: Mapped[bool] = mapped_column(Boolean, default=True)
 
     # Статус последней синхронизации
     last_sync_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), default=None)

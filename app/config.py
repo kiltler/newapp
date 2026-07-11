@@ -88,17 +88,20 @@ class Settings(BaseSettings):
     # Пояс камер (общий для всех ГС); время заселений храним наивным локальным (§6.2)
     camera_tz: str = "Asia/Khabarovsk"
     onec_enabled: bool = False          # общий рубильник; подключения настраиваются на гостиницу в UI
-    # Дефолты для новых подключений (подставляются в форму при создании)
-    onec_default_entity: str = "Document_Размещение"
+    # Дефолты для новых подключений (реальная схема Document_Accommodation)
+    onec_default_entity: str = "Document_Accommodation"
     onec_default_field_ref: str = "Ref_Key"
-    onec_default_field_date: str = "Date"
-    onec_default_field_room: str = "Номер"
-    onec_default_field_guest: str = "Гость"
+    onec_default_field_date: str = "CheckInDate"
+    onec_default_field_date_fallback: str = "Date"
+    onec_default_field_guest: str = "GuestFullName"
     onec_default_field_arrival: str = ""
     onec_default_filter_posted: bool = True
+    onec_default_expand_room: str = "Room"
+    onec_default_field_room_ref: str = "Room_Key"
+    onec_default_field_room_number: str = "Description"
+    onec_default_field_room_floor: str = "Floor"
+    onec_default_lookback_days: int = 5
     onec_default_tz: str = "Asia/Khabarovsk"
-    onec_default_room_floor_rule: str = "first_digit"
-    onec_default_backfill_days: int = 3
     onec_default_mask_guest: bool = True
     # Синхронизация меток и часов (общее)
     onec_sync_minutes: int = 20

@@ -81,6 +81,13 @@ _NEW_COLUMNS = [
     ("users", "enabled", "BOOLEAN DEFAULT TRUE"),
     ("users", "display_name", "VARCHAR(128)"),
     ("users", "last_login_at", "TIMESTAMP"),
+    # 1С: реальная схема Document_Accommodation + $expand=Room
+    ("onec_connections", "field_date_fallback", "VARCHAR(128) DEFAULT 'Date'"),
+    ("onec_connections", "expand_room", "VARCHAR(128) DEFAULT 'Room'"),
+    ("onec_connections", "field_room_ref", "VARCHAR(128) DEFAULT 'Room_Key'"),
+    ("onec_connections", "field_room_number", "VARCHAR(128) DEFAULT 'Description'"),
+    ("onec_connections", "field_room_floor", "VARCHAR(128) DEFAULT 'Floor'"),
+    ("onec_connections", "lookback_days", "INTEGER DEFAULT 5"),
 ]
 
 
