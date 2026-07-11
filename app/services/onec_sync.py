@@ -107,6 +107,19 @@ class ODataBackend:
 
     _MAX_PAGES = 100  # предохранитель от бесконечного листания
 
+    def _select(self) -> str:
+        """$select только нужных полей — документ имеет ~140 реквизитов, а нам
+        хватает пяти. Резко уменьшает размер ответа и время его сборки в 1С."""
+        fields = [self.field_ref, self.field_date, self.field_date_fallback,
+                  self.field_query_date, self.field_guest, self.conn.field_room_ref or "Room_Key",
+                  self.expand_room, "Posted"]
+        seen, out = set(), []
+        for f in fields:
+            if f and f not in seen:
+                seen.add(f)
+                out.append(f)
+        return ",".join(out)
+
     def _filters(self) -> str:
         """$filter БЕЗ даты (в этой 1С отбор по полям документа запрещён — HTTP 500).
         Остаются только опциональный Posted и разделитель объекта."""
@@ -126,7 +139,7 @@ class ODataBackend:
         # $orderby по умолчанию (без desc): в этой 1С сортировка по полям
         # игнорируется, и база отдаётся ОТ СТАРЫХ К НОВЫМ — значит свежие
         # документы в «хвосте». Фильтр по дате не добавляем (запрещён).
-        params = {"$format": "json", "$top": str(top)}
+        params = {"$format": "json", "$top": str(top), "$select": self._select()}
         if skip:
             params["$skip"] = str(skip)
         flt = self._filters()
@@ -182,7 +195,7 @@ class ODataBackend:
         for _ in range(self._MAX_PAGES):
             params = {"$format": "json", "$top": "500", "$skip": str(skip),
                       "$orderby": self.field_ref, "$filter": " and ".join(parts),
-                      "$expand": self.expand_room}
+                      "$expand": self.expand_room, "$select": self._select()}
             log.info("1С GET (быстрый путь) %s", str(httpx.URL(url, params=params)))
             try:
                 resp = await http.get(url, params=params)
@@ -249,6 +262,12 @@ class ODataBackend:
                                 skip, exc)
                     raise RuntimeError(f"OData: {type(exc).__name__}: {exc}") from exc
                 log.info("1С ответ: HTTP %s (skip=%d)", resp.status_code, skip)
+                if resp.status_code != 200 and "$select" in params:
+                    # вдруг именно $select не принят — повторим без него
+                    log.info("1С: HTTP %s c $select → повтор без $select", resp.status_code)
+                    params.pop("$select")
+                    resp = await http.get(url, params=params)
+                    log.info("1С ответ (без $select): HTTP %s", resp.status_code)
                 if resp.status_code != 200:
                     log.warning("1С тело ответа: %s", resp.text[:500])
                     raise RuntimeError(f"OData HTTP {resp.status_code}: {resp.text[:200]}")
