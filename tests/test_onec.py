@@ -67,7 +67,10 @@ def test_odata_filter_building():
                           property_value="a1b2c3d4-1111-2222-3333-444455556666")
     b = onec_sync.ODataBackend(conn)
     flt = b._filters(dt.datetime(2026, 7, 10, 0, 0))
-    assert "CheckInDate ge datetime'2026-07-10T00:00:00'" in flt   # основная метка — заезд
+    # $filter/$orderby — по служебной Date (отбираемой), НЕ по CheckInDate (ошибка WHERE)
+    assert "Date ge datetime'2026-07-10T00:00:00'" in flt
+    assert "CheckInDate" not in flt
+    assert b._params(dt.datetime(2026, 7, 10), top=5)["$orderby"] == "Date"
     assert "Posted eq true" in flt
     assert "Организация_Key eq guid'a1b2c3d4-1111-2222-3333-444455556666'" in flt
     # не-GUID значение — строковое сравнение
@@ -142,6 +145,51 @@ async def test_checkin_date_fallback_and_empty_room(db, monkeypatch):
         assert a.room is None and a.floor is None            # пустой Room — но заселение есть
         b = (await s.execute(select(OneCCheckin).where(OneCCheckin.onec_ref == "b"))).scalar_one()
         assert b.room == "204" and b.floor == 2
+
+
+async def test_marker_time_from_checkin_not_query_date(db, monkeypatch):
+    """Метка — по CheckInDate, хотя фильтр/сортировка идут по служебной Date."""
+    hid, _ = await _hotel_with_conn("Даты")
+
+    async def fake_fetch(self, since, **kw):
+        # Date (проведение) и CheckInDate (заезд) различаются — метка по заезду
+        return [{"Ref_Key": "x", "Date": "2026-07-09T09:00:00",
+                 "CheckInDate": "2026-07-09T09:05:30", "GuestFullName": "Г",
+                 "Room": {"Description": "614", "Floor": "6"}}]
+
+    monkeypatch.setattr(onec_sync.ODataBackend, "fetch_checkins", fake_fetch)
+    async with SessionLocal() as s:
+        await onec_sync.sync_hotel(s, hid)
+        ev = (await s.execute(select(OneCCheckin))).scalar_one()
+        assert ev.doc_time == dt.datetime(2026, 7, 9, 9, 5, 30)  # CheckInDate, не Date
+
+
+async def test_odata_query_rejects_checkin_filter(db):
+    """Мок OData: 500 на $filter по CheckInDate, 200 на $filter по служебной Date."""
+    import httpx
+
+    conn = OneCConnection(hotel_id=1, base_url="http://1c/odata", username="u",
+                          field_query_date="Date")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        flt = request.url.params.get("$filter", "")
+        if "CheckInDate" in flt:  # реальное ограничение конфигурации
+            return httpx.Response(500, text="Операция не разрешена в предложении WHERE")
+        return httpx.Response(200, json={"value": [_row("r1", "2026-07-09T12:00:00")]})
+
+    backend = onec_sync.ODataBackend(conn)
+    # подменяем клиент моком транспорта — реальной сети нет
+    orig = httpx.AsyncClient
+
+    def patched(*a, **kw):
+        kw["transport"] = httpx.MockTransport(handler)
+        kw.pop("verify", None)
+        return orig(*a, **kw)
+
+    import unittest.mock as um
+    with um.patch.object(httpx, "AsyncClient", patched):
+        rows = await backend.fetch_checkins(since=dt.datetime(2026, 7, 5))
+    assert len(rows) == 1 and rows[0]["Ref_Key"] == "r1"  # запрос по Date прошёл
 
 
 async def test_sync_isolation_between_hotels(db, monkeypatch):

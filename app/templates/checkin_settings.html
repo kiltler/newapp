@@ -59,6 +59,7 @@
     <label class="muted">Реквизит Ref<input id="oc_field_ref"></label>
     <label class="muted">Реквизит даты (заезд)<input id="oc_field_date"></label>
     <label class="muted">Запасное поле даты<input id="oc_field_date_fallback"></label>
+    <label class="muted" title="если 1С отдаёт ошибку WHERE/ORDER BY по дате заезда — оставьте служебную дату Date">Поле даты для отбора/сортировки<input id="oc_field_query_date" placeholder="Date"></label>
     <label class="muted">Реквизит гостя<input id="oc_field_guest"></label>
     <label class="muted">Реквизит-ссылка комнаты<input id="oc_field_room_ref" placeholder="Room_Key"></label>
     <label class="muted">Разворачивать (expand)<input id="oc_expand_room" placeholder="Room"></label>
@@ -371,7 +372,7 @@ async function delChannel(id){
 
 // ── Интеграция 1С:Отель ──
 const OC_TEXT = ["base_url","username","onec_tz","entity","field_ref","field_date",
-                 "field_date_fallback","field_guest","field_room_ref","expand_room",
+                 "field_date_fallback","field_query_date","field_guest","field_room_ref","expand_room",
                  "field_room_number","field_room_floor","property_field","property_value"];
 function ocHotel(){ return +v("onecHotel"); }
 

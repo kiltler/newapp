@@ -97,19 +97,21 @@ class ODataBackend:
         # SQLAlchemy-дефолты ещё не применены — они срабатывают при INSERT)
         self.entity = conn.entity or settings.onec_default_entity
         self.field_ref = conn.field_ref or "Ref_Key"
-        self.field_date = conn.field_date or "CheckInDate"
+        self.field_date = conn.field_date or "CheckInDate"          # время метки
         self.field_date_fallback = conn.field_date_fallback or "Date"
+        self.field_query_date = conn.field_query_date or "Date"     # по нему $filter/$orderby
         self.field_guest = conn.field_guest or "GuestFullName"
         self.expand_room = conn.expand_room or "Room"
         self.field_room_number = conn.field_room_number or "Description"
         self.field_room_floor = conn.field_room_floor or "Floor"
 
     def _filters(self, since: dt.datetime | None) -> str:
-        """Собирает $filter: дата-водяной-знак, проведённость, разделитель объекта."""
+        """$filter по СЛУЖЕБНОЙ дате (field_query_date) — она отбираема в OData,
+        в отличие от CheckInDate, который в части конфигураций даёт ошибку WHERE."""
         c = self.conn
         parts: list[str] = []
         if since is not None:
-            parts.append(f"{self.field_date} ge datetime'{since.strftime('%Y-%m-%dT%H:%M:%S')}'")
+            parts.append(f"{self.field_query_date} ge datetime'{since.strftime('%Y-%m-%dT%H:%M:%S')}'")
         if c.filter_posted:
             parts.append("Posted eq true")
         if c.property_field and c.property_value:
@@ -121,7 +123,8 @@ class ODataBackend:
         return " and ".join(parts)
 
     def _params(self, since: dt.datetime | None, top: int, skip: int = 0) -> dict:
-        params = {"$format": "json", "$top": str(top), "$orderby": self.field_date}
+        # $orderby тоже по служебной дате (сортировка по CheckInDate недоступна там же)
+        params = {"$format": "json", "$top": str(top), "$orderby": self.field_query_date}
         if skip:
             params["$skip"] = str(skip)
         flt = self._filters(since)

@@ -93,6 +93,7 @@ class Settings(BaseSettings):
     onec_default_field_ref: str = "Ref_Key"
     onec_default_field_date: str = "CheckInDate"
     onec_default_field_date_fallback: str = "Date"
+    onec_default_field_query_date: str = "Date"  # $filter/$orderby (отбираемое поле)
     onec_default_field_guest: str = "GuestFullName"
     onec_default_field_arrival: str = ""
     onec_default_filter_posted: bool = True

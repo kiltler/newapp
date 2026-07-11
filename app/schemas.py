@@ -364,6 +364,7 @@ class OneCConnectionIn(BaseModel):
     field_ref: str = "Ref_Key"
     field_date: str = "CheckInDate"
     field_date_fallback: str = "Date"
+    field_query_date: str = "Date"
     field_guest: str = "GuestFullName"
     filter_posted: bool = True
     expand_room: str = "Room"

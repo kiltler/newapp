@@ -88,6 +88,7 @@ _NEW_COLUMNS = [
     ("onec_connections", "field_room_number", "VARCHAR(128) DEFAULT 'Description'"),
     ("onec_connections", "field_room_floor", "VARCHAR(128) DEFAULT 'Floor'"),
     ("onec_connections", "lookback_days", "INTEGER DEFAULT 5"),
+    ("onec_connections", "field_query_date", "VARCHAR(128) DEFAULT 'Date'"),
 ]
 
 

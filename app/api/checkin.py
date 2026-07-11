@@ -54,7 +54,7 @@ _register_filters(templates)
 router = APIRouter(tags=["checkin"])
 
 # Метка сборки — видно в UI, сразу понятно, задеплоен ли новый код.
-CHECKIN_BUILD = "2026-07-10-accommodation"
+CHECKIN_BUILD = "2026-07-10-querydate"
 
 
 def _clip_url(path: str) -> str:
@@ -718,6 +718,7 @@ def _conn_defaults() -> dict:
         "field_ref": settings.onec_default_field_ref,
         "field_date": settings.onec_default_field_date,
         "field_date_fallback": settings.onec_default_field_date_fallback,
+        "field_query_date": settings.onec_default_field_query_date,
         "field_guest": settings.onec_default_field_guest,
         "filter_posted": settings.onec_default_filter_posted,
         "expand_room": settings.onec_default_expand_room,
@@ -746,7 +747,8 @@ async def get_onec_connection(hotel_id: int, session: AsyncSession = Depends(get
         "has_password": bool(conn.password_enc),
         "onec_tz": conn.onec_tz, "entity": conn.entity,
         "field_ref": conn.field_ref, "field_date": conn.field_date,
-        "field_date_fallback": conn.field_date_fallback, "field_guest": conn.field_guest,
+        "field_date_fallback": conn.field_date_fallback,
+        "field_query_date": conn.field_query_date, "field_guest": conn.field_guest,
         "filter_posted": conn.filter_posted,
         "expand_room": conn.expand_room, "field_room_ref": conn.field_room_ref,
         "field_room_number": conn.field_room_number, "field_room_floor": conn.field_room_floor,
@@ -782,6 +784,7 @@ async def save_onec_connection(
     conn.field_ref = data.field_ref.strip() or "Ref_Key"
     conn.field_date = data.field_date.strip() or "CheckInDate"
     conn.field_date_fallback = data.field_date_fallback.strip() or "Date"
+    conn.field_query_date = data.field_query_date.strip() or "Date"
     conn.field_guest = data.field_guest.strip() or "GuestFullName"
     conn.filter_posted = data.filter_posted
     conn.expand_room = data.expand_room.strip() or "Room"

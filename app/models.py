@@ -787,8 +787,11 @@ class OneCConnection(Base):
     # Объект и реквизиты 1С (реальная схема Document_Accommodation, всё настраиваемо)
     entity: Mapped[str] = mapped_column(String(255), default="Document_Accommodation")
     field_ref: Mapped[str] = mapped_column(String(128), default="Ref_Key")
-    field_date: Mapped[str] = mapped_column(String(128), default="CheckInDate")  # момент заезда
-    field_date_fallback: Mapped[str] = mapped_column(String(128), default="Date")  # момент проведения
+    field_date: Mapped[str] = mapped_column(String(128), default="CheckInDate")  # из него берём время метки
+    field_date_fallback: Mapped[str] = mapped_column(String(128), default="Date")  # запас, если CheckInDate пуст
+    # По этому полю $filter и $orderby: CheckInDate в части конфигураций 1С
+    # недоступен для отбора (ошибка WHERE), а служебная Date — всегда отбираема.
+    field_query_date: Mapped[str] = mapped_column(String(128), default="Date")
     field_guest: Mapped[str] = mapped_column(String(128), default="GuestFullName")  # ФИО строкой
     field_arrival: Mapped[str | None] = mapped_column(String(128), default=None)
     filter_posted: Mapped[bool] = mapped_column(Boolean, default=True)
