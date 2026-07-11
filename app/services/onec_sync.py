@@ -163,17 +163,30 @@ class ODataBackend:
                     raise RuntimeError(f"OData HTTP {resp.status_code}: {resp.text[:200]}")
                 batch = resp.json().get("value") or []
                 log.info("1С: записей в value до фильтрации = %d", len(batch))
+                if batch:
+                    # диапазон дат страницы — сразу видно, отсортировала ли 1С по убыванию
+                    # и попадает ли вообще что-то в окно
+                    log.info("1С: диапазон страницы по %s — самая свежая=%s, самая старая=%s",
+                             self.field_query_date, batch[0].get(self.field_query_date),
+                             batch[-1].get(self.field_query_date))
+                    if pageno == 0:
+                        # сравнение двух полей даты у первой записи: не окажется ли, что
+                        # Date старое, а CheckInDate (реальный заезд) — свежее
+                        f = batch[0]
+                        log.info("1С: первая запись — Date=%s, CheckInDate=%s, Ref_Key=%s, ключи=%s",
+                                 f.get(self.field_query_date), f.get(self.field_date),
+                                 f.get(self.field_ref), sorted(f.keys()))
                 stop = False
                 for row in batch:
                     raw = row.get(self.field_query_date)
                     qd = self._query_date(row)
                     if qd is not None and qd < since:
-                        log.info("  ref=%s %s=%s → %s < граница %s → ОТСЕКАЕТСЯ (и всё дальше старее) → СТОП",
+                        log.info("1С  ref=%s %s=%s → %s < граница %s → ОТСЕКАЕТСЯ (дальше старее) → СТОП",
                                  row.get(self.field_ref), self.field_query_date, raw,
                                  qd.isoformat(), since.isoformat())
                         stop = True
                         break
-                    log.info("  ref=%s %s=%s → %s >= граница %s → проходит",
+                    log.info("1С  ref=%s %s=%s → %s >= граница %s → проходит",
                              row.get(self.field_ref), self.field_query_date, raw,
                              qd.isoformat() if qd else "?", since.isoformat())
                     rows.append(row)
