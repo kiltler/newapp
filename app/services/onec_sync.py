@@ -142,24 +142,46 @@ class ODataBackend:
 
     async def fetch_checkins(self, since: dt.datetime, *, page: int = 500) -> list[dict]:
         """Заселения не старше `since` (граница). Тянем страницами Date desc и
-        останавливаемся, как только встретили запись старее границы (список убыв.)."""
+        останавливаемся, как только встретили запись старее границы (список убыв.).
+
+        Подробно логируется (для диагностики): полный URL запроса, HTTP-статус,
+        число записей в value, и по каждой записи — её Date, граница и вердикт.
+        """
         url = f"{self.base_url}/{self.entity}"
+        log.info("1С: граница отсечения (наивное локальное) = %s; поле сортировки=%s, окно фильтруем на своей стороне",
+                 since.isoformat(), self.field_query_date)
         rows: list[dict] = []
         async with httpx.AsyncClient(auth=self.auth, timeout=30.0, verify=False) as http:
             for pageno in range(self._MAX_PAGES):
-                resp = await http.get(url, params=self._params(page, pageno * page))
+                params = self._params(page, pageno * page)
+                full_url = str(httpx.URL(url, params=params))
+                log.info("1С GET %s", full_url)  # логин/пароль в заголовке Basic, в URL их нет
+                resp = await http.get(url, params=params)
+                log.info("1С ответ: HTTP %s (страница %d, skip=%d)", resp.status_code, pageno, pageno * page)
                 if resp.status_code != 200:
+                    log.warning("1С тело ответа: %s", resp.text[:500])
                     raise RuntimeError(f"OData HTTP {resp.status_code}: {resp.text[:200]}")
                 batch = resp.json().get("value") or []
+                log.info("1С: записей в value до фильтрации = %d", len(batch))
                 stop = False
                 for row in batch:
+                    raw = row.get(self.field_query_date)
                     qd = self._query_date(row)
                     if qd is not None and qd < since:
-                        stop = True  # эта и все следующие старее окна → дальше не листаем
+                        log.info("  ref=%s %s=%s → %s < граница %s → ОТСЕКАЕТСЯ (и всё дальше старее) → СТОП",
+                                 row.get(self.field_ref), self.field_query_date, raw,
+                                 qd.isoformat(), since.isoformat())
+                        stop = True
                         break
+                    log.info("  ref=%s %s=%s → %s >= граница %s → проходит",
+                             row.get(self.field_ref), self.field_query_date, raw,
+                             qd.isoformat() if qd else "?", since.isoformat())
                     rows.append(row)
                 if stop or len(batch) < page:
+                    if len(batch) < page and not stop:
+                        log.info("1С: страница неполная (%d < %d) → это конец данных", len(batch), page)
                     break
+        log.info("1С: итог выборки — %d записей в окне (прочитано страниц: %d)", len(rows), pageno + 1)
         return rows
 
     async def probe(self) -> dict:
