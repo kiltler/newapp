@@ -60,20 +60,19 @@ def test_to_camera_local_naive():
     assert out2.tzinfo is None
 
 
-def test_odata_no_date_filter_orderby_desc():
-    """В запросе НЕТ фильтра по дате; сортировка Date desc; Posted + разделитель."""
+def test_odata_params_no_date_filter_no_orderby():
+    """В запросе НЕТ ни фильтра по дате, ни $orderby (в этой 1С игнорируются);
+    остаются Posted + разделитель + $expand, пагинация $top/$skip."""
     conn = OneCConnection(hotel_id=1, filter_posted=True,
                           property_field="Организация_Key",
                           property_value="a1b2c3d4-1111-2222-3333-444455556666")
     b = onec_sync.ODataBackend(conn)
     params = b._params(top=500, skip=1000)
     assert "datetime" not in params.get("$filter", "")   # никакой даты в $filter
-    assert "CheckInDate" not in params.get("$filter", "")
-    assert params["$orderby"] == "Date desc"             # свежие сверху по служебной дате
+    assert "$orderby" not in params                       # сортировку не шлём (игнорируется)
     assert params["$top"] == "500" and params["$skip"] == "1000"
     assert "Posted eq true" in params["$filter"]
     assert "Организация_Key eq guid'a1b2c3d4-1111-2222-3333-444455556666'" in params["$filter"]
-    # только Posted выключен + строковый разделитель
     conn2 = OneCConnection(hotel_id=1, filter_posted=False,
                            property_field="Объект", property_value="Суворова 8")
     assert onec_sync.ODataBackend(conn2)._filters() == "Объект eq 'Суворова 8'"
@@ -164,36 +163,32 @@ async def test_marker_time_from_checkin_not_query_date(db, monkeypatch):
         assert ev.doc_time == dt.datetime(2026, 7, 9, 9, 5, 30)  # CheckInDate, не Date
 
 
-async def test_fetch_paginates_desc_and_stops_at_boundary(db):
-    """Мок OData: Date desc + $top/$skip; листаем только пока не ушли за окно.
-
-    База с историей 2016 + свежие; тянутся только записи в пределах lookback,
-    старые (2016) отсекаются, и листание прекращается (не читаем всю базу).
-    """
+async def test_fetch_tail_by_count_and_window(db):
+    """1С игнорирует фильтр/сортировку → читаем хвост базы по $inlinecount и
+    режем окно по CheckInDate у себя. Старьё (2016) отсекается, свежие остаются."""
     import httpx
 
     now = dt.datetime.now()
-    # свежие (в пределах окна) + одна старая 2016 (за границей)
-    fresh = [
-        {"Ref_Key": f"n{i}", "Date": (now - dt.timedelta(hours=i)).strftime("%Y-%m-%dT%H:%M:%S"),
-         "CheckInDate": (now - dt.timedelta(hours=i)).strftime("%Y-%m-%dT%H:%M:%S"),
-         "GuestFullName": "Г", "Room": {"Description": "10", "Floor": "1"}}
-        for i in range(3)
-    ]
-    old = {"Ref_Key": "old", "Date": "2016-05-24T06:12:01", "CheckInDate": "2016-05-24T06:12:01",
-           "GuestFullName": "Старый", "Room": {"Description": "614", "Floor": "6"}}
-    all_rows = fresh + [old] + [dict(old, Ref_Key=f"old{i}") for i in range(500)]  # много старья
+    # база в порядке ОТ СТАРЫХ К НОВЫМ (как реальная 1С): старьё 2016, потом свежие
+    old = [{"Ref_Key": f"old{i}", "Date": "2016-05-24T06:12:01", "CheckInDate": "2016-05-24T06:12:01",
+            "GuestFullName": "Старый", "Room": {"Description": "614", "Floor": "6"}} for i in range(4)]
+    fresh = [{"Ref_Key": f"n{i}", "CheckInDate": (now - dt.timedelta(hours=i)).strftime("%Y-%m-%dT%H:%M:%S"),
+              "GuestFullName": "Г", "Room": {"Description": "10", "Floor": "1"}} for i in range(2)]
+    all_rows = old + fresh  # хвост = свежие
 
-    pages_served = {"n": 0}
+    seen = {"inlinecount": False}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        assert "datetime" not in request.url.params.get("$filter", "")  # без фильтра по дате
-        assert request.url.params["$orderby"].endswith(" desc")
-        pages_served["n"] += 1
-        top = int(request.url.params["$top"]); skip = int(request.url.params.get("$skip", "0"))
+        p = request.url.params
+        assert "datetime" not in p.get("$filter", "")   # без фильтра по дате
+        assert "$orderby" not in p                        # без сортировки
+        if p.get("$inlinecount") == "allpages":
+            seen["inlinecount"] = True
+            return httpx.Response(200, json={"odata.count": str(len(all_rows)), "value": all_rows[:1]})
+        top = int(p["$top"]); skip = int(p.get("$skip", "0"))
         return httpx.Response(200, json={"value": all_rows[skip:skip + top]})
 
-    conn = OneCConnection(hotel_id=1, base_url="http://1c/odata", username="u")
+    conn = OneCConnection(hotel_id=1, base_url="http://1c/odata", username="u", lookback_days=5)
     backend = onec_sync.ODataBackend(conn)
     orig = httpx.AsyncClient
 
@@ -205,11 +200,11 @@ async def test_fetch_paginates_desc_and_stops_at_boundary(db):
     import unittest.mock as um
     boundary = now - dt.timedelta(days=5)
     with um.patch.object(httpx, "AsyncClient", patched):
-        rows = await backend.fetch_checkins(since=boundary, page=2)
+        rows = await backend.fetch_checkins(since=boundary, page=3)
     refs = [r["Ref_Key"] for r in rows]
-    assert refs == ["n0", "n1", "n2"]           # только свежие, старьё отсечено
-    assert "old" not in refs
-    assert pages_served["n"] <= 3               # остановились рано, не листали всю базу
+    assert seen["inlinecount"]                    # число документов запрошено
+    assert set(refs) == {"n0", "n1"}              # только свежие в окне
+    assert not any(r.startswith("old") for r in refs)  # старьё 2016 отсечено на нашей стороне
 
 
 async def test_sync_isolation_between_hotels(db, monkeypatch):

@@ -123,9 +123,10 @@ class ODataBackend:
         return " and ".join(parts)
 
     def _params(self, top: int, skip: int = 0) -> dict:
-        # Свежие сверху: сортируем по служебной Date desc (по ней сортировка
-        # разрешена, в отличие от CheckInDate). Фильтр по дате НЕ добавляем.
-        params = {"$format": "json", "$top": str(top), "$orderby": f"{self.field_query_date} desc"}
+        # $orderby по умолчанию (без desc): в этой 1С сортировка по полям
+        # игнорируется, и база отдаётся ОТ СТАРЫХ К НОВЫМ — значит свежие
+        # документы в «хвосте». Фильтр по дате не добавляем (запрещён).
+        params = {"$format": "json", "$top": str(top)}
         if skip:
             params["$skip"] = str(skip)
         flt = self._filters()
@@ -135,66 +136,82 @@ class ODataBackend:
             params["$expand"] = self.expand_room
         return params
 
-    def _query_date(self, row: dict) -> dt.datetime | None:
-        """Дата документа (по ней решаем о стопе) в наивном локальном камер."""
-        raw = parse_onec_datetime(row.get(self.field_query_date))
+    def _window_date(self, row: dict) -> dt.datetime | None:
+        """Дата для оконного отбора: заезд (CheckInDate) с фолбэком на Date,
+        приведённая к наивному локальному камер."""
+        raw = parse_onec_datetime(row.get(self.field_date) or row.get(self.field_date_fallback))
         return to_camera_local(raw, self.conn.onec_tz) if raw is not None else None
 
-    async def fetch_checkins(self, since: dt.datetime, *, page: int = 500) -> list[dict]:
-        """Заселения не старше `since` (граница). Тянем страницами Date desc и
-        останавливаемся, как только встретили запись старее границы (список убыв.).
+    async def _count(self, http, url: str) -> int | None:
+        """Общее число документов через $inlinecount=allpages (с учётом Posted)."""
+        params = {"$format": "json", "$top": "1", "$inlinecount": "allpages"}
+        flt = self._filters()
+        if flt:
+            params["$filter"] = flt
+        resp = await http.get(url, params=params)
+        if resp.status_code != 200:
+            log.warning("1С $inlinecount → HTTP %s: %s", resp.status_code, resp.text[:200])
+            return None
+        data = resp.json()
+        for key in ("odata.count", "@odata.count", "__count"):
+            if key in data:
+                try:
+                    return int(data[key])
+                except (ValueError, TypeError):
+                    return None
+        return None
 
-        Подробно логируется (для диагностики): полный URL запроса, HTTP-статус,
-        число записей в value, и по каждой записи — её Date, граница и вердикт.
+    async def fetch_checkins(self, since: dt.datetime, *, page: int = 500) -> list[dict]:
+        """Свежие заселения (не старше `since`). Стратегия под 1С, где отбор и
+        сортировка по полям запрещены: узнаём общее число документов и читаем
+        «хвост» базы (последние ~N — они самые свежие), окно режем на своей стороне.
         """
         url = f"{self.base_url}/{self.entity}"
-        log.info("1С: граница отсечения (наивное локальное) = %s; поле сортировки=%s, окно фильтруем на своей стороне",
-                 since.isoformat(), self.field_query_date)
+        log.info("1С: граница окна (наивное локальное) = %s; отбор/сортировка на стороне 1С не используются",
+                 since.isoformat())
+        # Сколько записей «хвоста» тянуть: с запасом под окно (в среднем заселений
+        # в сутки немного). Масштабируем от lookback_days, с разумными границами.
+        tail = min(max((self.conn.lookback_days or 5) * 300, 1000), 5000)
+
         rows: list[dict] = []
         async with httpx.AsyncClient(auth=self.auth, timeout=30.0, verify=False) as http:
-            for pageno in range(self._MAX_PAGES):
-                params = self._params(page, pageno * page)
-                full_url = str(httpx.URL(url, params=params))
-                log.info("1С GET %s", full_url)  # логин/пароль в заголовке Basic, в URL их нет
+            total = await self._count(http, url)
+            log.info("1С: всего документов (odata.count) = %s", total)
+            if total is not None:
+                start = max(0, total - tail)
+                log.info("1С: читаю хвост базы с skip=%d (tail=%d, page=%d)", start, tail, page)
+            else:
+                start = 0
+                log.warning("1С: odata.count недоступен — листаю с начала (может быть медленно на большой базе)")
+
+            skip = start
+            pages = 0
+            for pages in range(1, self._MAX_PAGES + 1):
+                params = self._params(page, skip)
+                log.info("1С GET %s", str(httpx.URL(url, params=params)))
                 resp = await http.get(url, params=params)
-                log.info("1С ответ: HTTP %s (страница %d, skip=%d)", resp.status_code, pageno, pageno * page)
+                log.info("1С ответ: HTTP %s (skip=%d)", resp.status_code, skip)
                 if resp.status_code != 200:
                     log.warning("1С тело ответа: %s", resp.text[:500])
                     raise RuntimeError(f"OData HTTP {resp.status_code}: {resp.text[:200]}")
                 batch = resp.json().get("value") or []
-                log.info("1С: записей в value до фильтрации = %d", len(batch))
+                log.info("1С: записей в value = %d", len(batch))
                 if batch:
-                    # диапазон дат страницы — сразу видно, отсортировала ли 1С по убыванию
-                    # и попадает ли вообще что-то в окно
-                    log.info("1С: диапазон страницы по %s — самая свежая=%s, самая старая=%s",
+                    log.info("1С: диапазон страницы по %s — первая=%s, последняя=%s",
                              self.field_query_date, batch[0].get(self.field_query_date),
                              batch[-1].get(self.field_query_date))
-                    if pageno == 0:
-                        # сравнение двух полей даты у первой записи: не окажется ли, что
-                        # Date старое, а CheckInDate (реальный заезд) — свежее
-                        f = batch[0]
-                        log.info("1С: первая запись — Date=%s, CheckInDate=%s, Ref_Key=%s, ключи=%s",
-                                 f.get(self.field_query_date), f.get(self.field_date),
-                                 f.get(self.field_ref), sorted(f.keys()))
-                stop = False
+                kept = 0
                 for row in batch:
-                    raw = row.get(self.field_query_date)
-                    qd = self._query_date(row)
-                    if qd is not None and qd < since:
-                        log.info("1С  ref=%s %s=%s → %s < граница %s → ОТСЕКАЕТСЯ (дальше старее) → СТОП",
-                                 row.get(self.field_ref), self.field_query_date, raw,
-                                 qd.isoformat(), since.isoformat())
-                        stop = True
-                        break
-                    log.info("1С  ref=%s %s=%s → %s >= граница %s → проходит",
-                             row.get(self.field_ref), self.field_query_date, raw,
-                             qd.isoformat() if qd else "?", since.isoformat())
-                    rows.append(row)
-                if stop or len(batch) < page:
-                    if len(batch) < page and not stop:
-                        log.info("1С: страница неполная (%d < %d) → это конец данных", len(batch), page)
-                    break
-        log.info("1С: итог выборки — %d записей в окне (прочитано страниц: %d)", len(rows), pageno + 1)
+                    wd = self._window_date(row)  # по CheckInDate (фолбэк Date)
+                    if wd is None or wd >= since:
+                        rows.append(row)
+                        kept += 1
+                log.info("1С: со страницы в окно попало %d из %d (CheckInDate >= границы)", kept, len(batch))
+                if len(batch) < page:
+                    break  # конец базы
+                skip += page
+        log.info("1С: ИТОГ — %d заселений в окне последних %d дн. (прочитано страниц: %d)",
+                 len(rows), self.conn.lookback_days, pages)
         return rows
 
     async def probe(self) -> dict:
