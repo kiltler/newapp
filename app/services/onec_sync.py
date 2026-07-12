@@ -85,6 +85,20 @@ def parse_onec_datetime(raw: str) -> dt.datetime | None:
         return None
 
 
+def _to_int_floor(value) -> int | None:
+    """Этаж → целое, толерантно к формату HTTP-сервиса и OData.
+
+    Принимает число (3, 3.0), числовую строку («3», «3.0») → int; «цоколь»,
+    «мансарда», пусто/None → None. Ноль сохраняется (0 = цоколь как этаж).
+    """
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
 # ── OData-бэкенд (адаптер: позже можно заменить на HTTP-сервис 1С) ───────────
 class ODataBackend:
     """Клиент стандартного OData 1С для одной гостиницы (Document_Accommodation)."""
@@ -333,8 +347,10 @@ class ODataBackend:
                 rows = await self._fetch_from_service(since)
             except Exception as exc:  # noqa: BLE001
                 return {"ok": False, "mode": "service", "error": f"{type(exc).__name__}: {exc}"[:300]}
-            return {"ok": True, "mode": "service", "count": len(rows),
-                    "sample": rows[0] if rows else None}
+            sample = rows[0] if rows else None
+            room = self.extract_room_floor(sample) if sample else (None, None)
+            return {"ok": True, "mode": "service", "count": len(rows), "sample": sample,
+                    "room_expanded": {"number": room[0], "floor": room[1]}}
 
         url = f"{self.base_url}/{self.entity}"
         params = self._params(top=1)
@@ -357,8 +373,7 @@ class ODataBackend:
         if not isinstance(room_obj, dict):
             return None, None
         number = (str(room_obj.get(self.field_room_number) or "").strip()) or None
-        floor_raw = str(room_obj.get(self.field_room_floor) or "").strip()
-        floor = int(floor_raw) if floor_raw.isdigit() else None
+        floor = _to_int_floor(room_obj.get(self.field_room_floor))
         return number, floor
 
 

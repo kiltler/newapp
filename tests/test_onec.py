@@ -88,6 +88,12 @@ def test_odata_expand_room_and_extract():
     assert b.extract_room_floor({"Room_Key": "00000000-0000-0000-0000-000000000000"}) == (None, None)
     # этаж не число → None, номер остаётся
     assert b.extract_room_floor({"Room": {"Description": "Люкс", "Floor": ""}}) == ("Люкс", None)
+    # HTTP-сервис отдаёт этаж ЧИСЛОМ (не строкой) — принимаем и int, и float, и «3.0»
+    assert b.extract_room_floor({"Room": {"Description": "301", "Floor": 3}}) == ("301", 3)
+    assert b.extract_room_floor({"Room": {"Description": "301", "Floor": 3.0}}) == ("301", 3)
+    assert b.extract_room_floor({"Room": {"Description": "301", "Floor": "3.0"}}) == ("301", 3)
+    # «цоколь»/«мансарда» → None (не число), номер сохраняется
+    assert b.extract_room_floor({"Room": {"Description": "Ц1", "Floor": "цоколь"}}) == ("Ц1", None)
 
 
 # ── Синхронизация ────────────────────────────────────────────────────────────
