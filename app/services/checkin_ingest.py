@@ -321,15 +321,23 @@ async def _test_clip_jobs(client, ch, search_start, search_end, minutes) -> list
     берём последние N минут ЗАКРЫТОГО сегмента. Возвращает [(seg, win_start, win_end)],
     где seg — полный сегмент устройства (его качаем по HTTP, потом режем ffmpeg'ом)."""
     sub = main = 0
+    segs: list[dict] = []
+    # Субпоток пробуем первым, но его ОШИБКА (напр. HTTP 400/404, когда субпоток
+    # не пишется в архив) не должна отменять попытку основного потока — иначе
+    # канал ложно помечается «нет записи», хотя основной трек пишет нормально
+    # (именно его и видит мониторинг). Пустой результат субпотока → тоже фолбэк.
     try:
         segs = await client.search_playback(ch.channel_id, search_start, search_end, substream=True)
         sub = len(segs)
-        if not segs:
+    except NVRError as exc:
+        log.info("кан.%s: субпоток недоступен (%s) — пробую основной", ch.channel_id, exc)
+    if not segs:
+        try:
             segs = await client.search_playback(ch.channel_id, search_start, search_end, substream=False)
             main = len(segs)
-    except NVRError as exc:
-        log.warning("кан.%s: playback-поиск недоступен: %s", ch.channel_id, exc)
-        return []
+        except NVRError as exc:
+            log.warning("кан.%s: playback-поиск недоступен: %s", ch.channel_id, exc)
+            return []
     log.info("тест-клип кан.%s: сегментов субпотока=%d, основного=%d", ch.channel_id, sub, main)
     seg = _closed_segment(segs)
     if seg is None:
@@ -1000,7 +1008,7 @@ async def ingest_recorder(
                         stats["errors"] += 1
                         await _patch_run(run_id, incs={"errors": 1}, rec_id=recorder_id,
                                          rec_incs={"errors": 1, "channels_done": 1},
-                                         error_sample=f"кан.{ch.channel_id}: нет записи в архиве за последние сутки")
+                                         error_sample=f"кан.{ch.channel_id}: не нашёл запись для тест-клипа (ни субпоток, ни основной поток)")
                         continue
                     for seg_dict, ws, we in jobs:
                         res, err = await _ingest_http_clip(

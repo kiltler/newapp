@@ -58,6 +58,53 @@ async def test_list_tracks_parses_substream(monkeypatch):
     assert tracks[0]["channel"] == 1
 
 
+async def test_test_clip_jobs_falls_back_to_main_when_substream_errors():
+    """Ошибка поиска субпотока (напр. 400/404, если субпоток не пишется в архив)
+    НЕ должна отменять попытку основного потока — иначе канал ложно помечается
+    «нет записи», хотя основной трек пишет нормально (регресс: канал 10 «Ворон»)."""
+    import types
+
+    seg_start = dt.datetime(2026, 7, 11, 19, 0, 0)
+    seg_end = dt.datetime(2026, 7, 11, 20, 0, 0)
+    main_segs = [{"start": seg_start, "end": seg_end, "uri": "rtsp://x/Streaming/tracks/1001"}]
+
+    class _FakeClient:
+        def __init__(self):
+            self.calls = []
+
+        async def search_playback(self, channel_id, start, end, *, substream=True):
+            self.calls.append(substream)
+            if substream:
+                raise FeatureUnavailable("HTTP 404: субпоток не пишется")
+            return main_segs
+
+    client = _FakeClient()
+    ch = types.SimpleNamespace(channel_id=10)
+    jobs = await checkin_ingest._test_clip_jobs(
+        client, ch, seg_start - dt.timedelta(hours=54), seg_end + dt.timedelta(hours=1), 5)
+    # субпоток упал исключением → всё равно пробуем основной поток
+    assert client.calls == [True, False]
+    assert len(jobs) == 1
+    _seg, _ws, we = jobs[0]
+    assert we == seg_end
+
+
+async def test_test_clip_jobs_empty_when_both_streams_absent():
+    """Если и субпоток бросает, и основной пуст — честно возвращаем []."""
+    import types
+
+    class _FakeClient:
+        async def search_playback(self, channel_id, start, end, *, substream=True):
+            if substream:
+                raise FeatureUnavailable("HTTP 404")
+            return []
+
+    ch = types.SimpleNamespace(channel_id=7)
+    jobs = await checkin_ingest._test_clip_jobs(
+        _FakeClient(), ch, dt.datetime(2026, 7, 11), dt.datetime(2026, 7, 12), 5)
+    assert jobs == []
+
+
 async def test_search_activity_all_is_whole_window():
     c = _hik()
     s = dt.datetime(2026, 6, 15, 7, 0, 0)
