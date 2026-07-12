@@ -298,6 +298,28 @@ def _rewrite_uri_window(uri: str, start: dt.datetime, end: dt.datetime) -> str:
     return uri
 
 
+_DL_LEAD = dt.timedelta(seconds=30)   # запас перед окном на выравнивание по кейфрейму
+_DL_MAX_BPS = 1024 * 1024             # верхняя оценка битрейта (~8 Мбит/с) для лимита байт
+
+
+def _windowed_download(seg: dict, win_start: dt.datetime, win_end: dt.datetime) -> tuple[str, float, int]:
+    """Готовит скачивание ТОЛЬКО нужного окна, а не всего сегмента устройства.
+
+    При непрерывной записи основного потока «сегмент» (трек N*100+1) может тянуться
+    на многие часы/сутки, и скачивание seg['uri'] от НАЧАЛА сегмента виснет на
+    гигабайтах (симптом «0 МБ качается»). Переписываем URI на старт окна
+    (win_start−lead) и ограничиваем размер оценкой по длительности окна — так
+    качаем ~объём окна, а не весь архив до него. Возвращает (uri, offset, cap).
+    """
+    dl_start = max(win_start - _DL_LEAD, seg["start"])
+    uri = _rewrite_uri_window(seg.get("uri") or "", dl_start, win_end)
+    offset = max((win_start - dl_start).total_seconds(), 0)
+    need = max((win_end - dl_start).total_seconds(), 1)
+    cap = min(int(need * _DL_MAX_BPS) + 64 * 1024 * 1024,
+              settings.checkin_max_clip_mb * 1024 * 1024)
+    return uri, offset, cap
+
+
 def _mask(url: str) -> str:
     """Прячет пароль в rtsp://user:pass@host для логов."""
     return re.sub(r"(rtsp://[^:/@]+:)[^@]*@", r"\1***@", url or "")
@@ -646,7 +668,6 @@ async def _ingest_http_day(
         session.add(clip)
     await session.commit()
 
-    cap = settings.checkin_max_clip_mb * 1024 * 1024
     parts: list[str] = []
     total_bytes = total_ms = part_errors = 0
     for i, (seg, cs, ce) in enumerate(jobs):
@@ -667,8 +688,10 @@ async def _ingest_http_day(
                         f"{pct}{done // 1048576} МБ · {done / el / 1048576:.1f} МБ/с",
             )
 
+        # Качаем только окно части (cs..ce), а не весь сегмент от его начала.
+        dl_uri, dl_offset, dl_cap = _windowed_download(seg, cs, ce)
         dl_start = time.monotonic()
-        ok, nbytes, err = await client.download_segment(uri, tmp, max_bytes=cap, progress=_prog)
+        ok, nbytes, err = await client.download_segment(dl_uri, tmp, max_bytes=dl_cap, progress=_prog)
         dl_ms = int((time.monotonic() - dl_start) * 1000)
         total_bytes += nbytes or 0
         total_ms += dl_ms
@@ -679,8 +702,7 @@ async def _ingest_http_day(
             log.warning("рег.%s кан.%s часть %d: %s", recorder.id, ch.channel_id, i, err)
             continue
 
-        offset = max((cs - seg["start"]).total_seconds(), 0)
-        okt, errt = await _ffmpeg_trim(tmp, part_out, offset, (ce - cs).total_seconds())
+        okt, errt = await _ffmpeg_trim(tmp, part_out, dl_offset, (ce - cs).total_seconds())
         _safe_remove(tmp)
         if okt:
             parts.append(part_out)
@@ -761,9 +783,11 @@ async def _ingest_http_clip(
             current=f"{label}: {pct}{done // 1048576} МБ · {speed / 1048576:.1f} МБ/с",
         )
 
+    # Качаем только окно (для непрерывного основного потока сегмент огромен).
+    dl_uri, dl_offset, dl_cap = _windowed_download(seg, win_start, win_end)
     dl_start = time.monotonic()
     ok, nbytes, err = await client.download_segment(
-        uri, tmp, max_bytes=settings.checkin_max_clip_mb * 1024 * 1024, progress=_on_progress,
+        dl_uri, tmp, max_bytes=dl_cap, progress=_on_progress,
     )
     dl_ms = int((time.monotonic() - dl_start) * 1000)
     if not ok or nbytes == 0:
@@ -776,11 +800,10 @@ async def _ingest_http_clip(
     # учтём загрузку в суммарной статистике прогона (для средней скорости)
     await _patch_run(run_id, incs={"dl_bytes": nbytes, "dl_ms": dl_ms})
 
-    cap = settings.checkin_max_clip_mb * 1024 * 1024
-    if nbytes >= cap - 65536:  # упёрлись в предохранитель — клип, вероятно, обрезан
-        log.warning("рег.%s кан.%s: загрузка упёрлась в лимит %d МБ — клип может быть неполным "
-                    "(поднимите CHECKIN_MAX_CLIP_MB)", recorder.id, ch.channel_id,
-                    settings.checkin_max_clip_mb)
+    if nbytes >= dl_cap - 65536:  # упёрлись в лимит окна — клип, вероятно, обрезан
+        log.warning("рег.%s кан.%s: загрузка упёрлась в лимит окна (%d МБ) — клип может быть "
+                    "неполным (короткое окно/высокий битрейт)", recorder.id, ch.channel_id,
+                    dl_cap // (1024 * 1024))
 
     speed_mb = (nbytes / 1048576) / max(dl_ms / 1000, 0.001)
     await _patch_run(
@@ -788,7 +811,7 @@ async def _ingest_http_clip(
         current=f"{label}: обрезаю клип из {nbytes // 1048576} МБ "
                 f"(скачано за {dl_ms // 1000}с, {speed_mb:.1f} МБ/с)…",
     )
-    offset = max((win_start - seg["start"]).total_seconds(), 0)
+    offset = dl_offset  # смещение относительно скачанного окна (win_start − lead)
     duration = (win_end - win_start).total_seconds()
     ok2, err2 = await _ffmpeg_trim(tmp, out_path, offset, duration)
     _safe_remove(tmp)

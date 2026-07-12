@@ -132,6 +132,39 @@ async def test_test_clip_jobs_empty_when_both_streams_absent():
     assert jobs == []
 
 
+def test_windowed_download_limits_to_window():
+    """Скачивание переписывается на нужное окно, а не тянет весь непрерывный
+    сегмент основного потока от его начала (регресс: «0 МБ качается» на «Ворон»)."""
+    seg = {
+        "start": dt.datetime(2026, 7, 10, 0, 0, 0),   # непрерывка началась 2 дня назад
+        "end": dt.datetime(2026, 7, 12, 14, 12, 10),
+        "uri": ("rtsp://192.168.1.20/Streaming/tracks/1001/?starttime=20260710T000000Z"
+                "&endtime=20260712T141210Z&name=00010002736000000&size=99999999"),
+    }
+    ws = dt.datetime(2026, 7, 12, 13, 9, 14)
+    we = dt.datetime(2026, 7, 12, 13, 12, 14)
+    uri, offset, cap = checkin_ingest._windowed_download(seg, ws, we)
+    assert "starttime=20260712T130844Z" in uri   # win_start − 30с, а НЕ начало сегмента
+    assert "endtime=20260712T131214Z" in uri
+    assert "name=00010002736000000" in uri        # name сохранён (иначе отдаст main)
+    assert offset == 30
+    # лимит байт ~ по длительности окна (3м30с), а не 8 ГБ на весь архив
+    assert cap < 300 * 1024 * 1024
+
+
+def test_windowed_download_clamps_start_to_segment():
+    """Если окно у самого начала сегмента — не просим время раньше сегмента."""
+    seg = {
+        "start": dt.datetime(2026, 7, 12, 13, 9, 0),
+        "end": dt.datetime(2026, 7, 12, 14, 0, 0),
+        "uri": "rtsp://x/Streaming/tracks/1001/?starttime=20260712T130900Z&endtime=20260712T140000Z",
+    }
+    ws = dt.datetime(2026, 7, 12, 13, 9, 14)
+    we = dt.datetime(2026, 7, 12, 13, 12, 14)
+    _uri, offset, _cap = checkin_ingest._windowed_download(seg, ws, we)
+    assert offset == 14  # dl_start = seg.start (не ушли раньше), смещение = 14с
+
+
 async def test_search_activity_all_is_whole_window():
     c = _hik()
     s = dt.datetime(2026, 6, 15, 7, 0, 0)
@@ -579,10 +612,13 @@ async def test_test_clip_http_download_and_trim(db, monkeypatch, tmp_path):
 
     summary = await checkin_ingest.run_test_clip(3, [hid])
     assert summary["downloaded"] == 1
-    # качали по URI ЗАКРЫТОГО сегмента (не открытого)
+    # качали по URI ЗАКРЫТОГО сегмента (не открытого), name сохранён
     assert "name=CLOSED" in dl["uri"]
-    # обрезка: смещение = win_start - seg_start = (−23мин) − (−60мин) = 37 мин; длительность 3 мин
-    assert trim["offset"] == 37 * 60
+    # URI переписан на ОКНО (старт = win_start − 30с), а не на весь сегмент:
+    # win_start = dev_time − 23м = 23:19:00 → старт скачивания 23:18:30
+    assert "starttime=20260702T231830Z" in dl["uri"]
+    # обрезка теперь относительно окна: смещение = запас 30с; длительность 3 мин
+    assert trim["offset"] == 30
     assert trim["duration"] == 3 * 60
     async with SessionLocal() as s:
         clip = (await s.execute(__import__("sqlalchemy").select(CheckinClip))).scalars().first()
