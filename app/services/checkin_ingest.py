@@ -316,29 +316,38 @@ def _closed_segment(segs: list[dict], min_age: dt.timedelta = dt.timedelta(minut
     return min(segs, key=lambda s: s["start"])  # запасной: самый старый
 
 
-async def _test_clip_jobs(client, ch, search_start, search_end, minutes) -> list[tuple]:
-    """Для тест-клипа: спрашиваем у устройства записанные сегменты субпотока и
-    берём последние N минут ЗАКРЫТОГО сегмента. Возвращает [(seg, win_start, win_end)],
-    где seg — полный сегмент устройства (его качаем по HTTP, потом режем ffmpeg'ом)."""
-    sub = main = 0
+async def _search_playback_pref(client, ch, lo: dt.datetime, hi: dt.datetime) -> list[dict]:
+    """Ищет записанные сегменты канала, предпочитая ранее сработавший поток.
+
+    По умолчанию порядок: субпоток (трек N*100+2) → основной (N*100+1). Если ранее
+    сработал основной (на этом DVR субпоток пишется в дорожку N*100+1, а трек
+    N*100+2 отвечает HTTP 400) — начинаем сразу с него, не тратя запрос на мёртвый
+    трек. Рабочий поток запоминается в ``ch.playback_stream`` (персистится ближайшим
+    commit сессии прогона). ОШИБКА поиска одного потока не отменяет попытку другого.
+    """
+    order = ["main", "sub"] if ch.playback_stream == "main" else ["sub", "main"]
     segs: list[dict] = []
-    # Субпоток пробуем первым, но его ОШИБКА (напр. HTTP 400/404, когда субпоток
-    # не пишется в архив) не должна отменять попытку основного потока — иначе
-    # канал ложно помечается «нет записи», хотя основной трек пишет нормально
-    # (именно его и видит мониторинг). Пустой результат субпотока → тоже фолбэк.
-    try:
-        segs = await client.search_playback(ch.channel_id, search_start, search_end, substream=True)
-        sub = len(segs)
-    except NVRError as exc:
-        log.info("кан.%s: субпоток недоступен (%s) — пробую основной", ch.channel_id, exc)
-    if not segs:
+    for stream in order:
         try:
-            segs = await client.search_playback(ch.channel_id, search_start, search_end, substream=False)
-            main = len(segs)
+            found = await client.search_playback(
+                ch.channel_id, lo, hi, substream=(stream == "sub"))
         except NVRError as exc:
-            log.warning("кан.%s: playback-поиск недоступен: %s", ch.channel_id, exc)
-            return []
-    log.info("тест-клип кан.%s: сегментов субпотока=%d, основного=%d", ch.channel_id, sub, main)
+            log.info("кан.%s: поток %s недоступен (%s)", ch.channel_id, stream, exc)
+            continue
+        if found:
+            if ch.playback_stream != stream:
+                log.info("кан.%s: рабочий поток архива = %s (запомнен)", ch.channel_id, stream)
+                ch.playback_stream = stream
+            return found
+        segs = found  # пусто, но без ошибки — если оба потока пусты, вернём []
+    return segs
+
+
+async def _test_clip_jobs(client, ch, search_start, search_end, minutes) -> list[tuple]:
+    """Для тест-клипа: спрашиваем у устройства записанные сегменты и берём последние
+    N минут ЗАКРЫТОГО сегмента. Возвращает [(seg, win_start, win_end)], где seg —
+    полный сегмент устройства (его качаем по HTTP, потом режем ffmpeg'ом)."""
+    segs = await _search_playback_pref(client, ch, search_start, search_end)
     seg = _closed_segment(segs)
     if seg is None:
         return []
@@ -456,20 +465,7 @@ async def _window_jobs(client, ch, win_start: dt.datetime, win_end: dt.datetime)
     (последние 15 мин) исключаем.
     """
     lo, hi = win_start - dt.timedelta(hours=36), win_end + dt.timedelta(hours=36)
-    segs: list[dict] = []
-    # Субпоток первым; его ОШИБКА (HTTP 400/404, когда субпоток не пишется в
-    # архив) не должна отменять фолбэк на основной поток — иначе канал остаётся
-    # без клипов, хотя основной трек пишет (регресс: канал 10 «Ворон»).
-    try:
-        segs = await client.search_playback(ch.channel_id, lo, hi, substream=True)
-    except NVRError as exc:
-        log.info("кан.%s: субпоток недоступен (%s) — пробую основной", ch.channel_id, exc)
-    if not segs:
-        try:
-            segs = await client.search_playback(ch.channel_id, lo, hi, substream=False)
-        except NVRError as exc:
-            log.warning("кан.%s: playback-поиск недоступен: %s", ch.channel_id, exc)
-            return []
+    segs = await _search_playback_pref(client, ch, lo, hi)
     if not segs:
         return []
     ref = max(s["end"] for s in segs)

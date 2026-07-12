@@ -74,6 +74,7 @@ _NEW_COLUMNS = [
     ("checkin_recorders", "model_info", "VARCHAR(255)"),
     ("checkin_clips", "width", "INTEGER"),
     ("checkin_clips", "height", "INTEGER"),
+    ("checkin_channels", "playback_stream", "VARCHAR(8)"),
     ("checkin_recorders", "time_offset_sec", "INTEGER"),
     ("checkin_recorders", "time_offset_at", "TIMESTAMP"),
     ("users", "is_owner", "BOOLEAN DEFAULT FALSE"),

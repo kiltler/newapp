@@ -646,6 +646,10 @@ class CheckinChannel(Base):
     name: Mapped[str | None] = mapped_column(String(255), default=None)
     role: Mapped[str] = mapped_column(String(16), default=ChannelRole.ENTRANCE)
     substream_trackid: Mapped[int] = mapped_column(Integer, default=0)  # напр. 102 = кан.1 субпоток
+    # Запомненный рабочий поток архива: "sub"|"main"|None(=пробуем субпоток→основной).
+    # На части DVR субпоток пишется в дорожку N*100+1, а трек N*100+2 отвечает 400 —
+    # тогда запоминаем "main", чтобы не долбить мёртвый трек каждый прогон.
+    playback_stream: Mapped[str | None] = mapped_column(String(8), default=None)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
     recorder: Mapped["CheckinRecorder"] = relationship(back_populates="channels")

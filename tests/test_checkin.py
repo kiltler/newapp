@@ -79,7 +79,7 @@ async def test_test_clip_jobs_falls_back_to_main_when_substream_errors():
             return main_segs
 
     client = _FakeClient()
-    ch = types.SimpleNamespace(channel_id=10)
+    ch = types.SimpleNamespace(channel_id=10, playback_stream=None)
     jobs = await checkin_ingest._test_clip_jobs(
         client, ch, seg_start - dt.timedelta(hours=54), seg_end + dt.timedelta(hours=1), 5)
     # субпоток упал исключением → всё равно пробуем основной поток
@@ -87,6 +87,33 @@ async def test_test_clip_jobs_falls_back_to_main_when_substream_errors():
     assert len(jobs) == 1
     _seg, _ws, we = jobs[0]
     assert we == seg_end
+    # рабочий поток запомнён — следующий прогон не полезет в мёртвый субпоток
+    assert ch.playback_stream == "main"
+
+
+async def test_search_playback_pref_skips_dead_substream_once_learned():
+    """Запомнив рабочий основной поток, хелпер больше не пробует субпоток."""
+    import types
+
+    segs = [{"start": dt.datetime(2026, 7, 11, 19), "end": dt.datetime(2026, 7, 11, 20),
+             "uri": "rtsp://x/Streaming/tracks/1001"}]
+
+    class _FakeClient:
+        def __init__(self):
+            self.calls = []
+
+        async def search_playback(self, channel_id, start, end, *, substream=True):
+            self.calls.append(substream)
+            if substream:
+                raise FeatureUnavailable("HTTP 400")
+            return segs
+
+    client = _FakeClient()
+    ch = types.SimpleNamespace(channel_id=10, playback_stream="main")
+    lo, hi = dt.datetime(2026, 7, 11), dt.datetime(2026, 7, 12)
+    out = await checkin_ingest._search_playback_pref(client, ch, lo, hi)
+    assert out == segs
+    assert client.calls == [False]  # только основной, субпоток не трогали
 
 
 async def test_test_clip_jobs_empty_when_both_streams_absent():
@@ -99,7 +126,7 @@ async def test_test_clip_jobs_empty_when_both_streams_absent():
                 raise FeatureUnavailable("HTTP 404")
             return []
 
-    ch = types.SimpleNamespace(channel_id=7)
+    ch = types.SimpleNamespace(channel_id=7, playback_stream=None)
     jobs = await checkin_ingest._test_clip_jobs(
         _FakeClient(), ch, dt.datetime(2026, 7, 11), dt.datetime(2026, 7, 12), 5)
     assert jobs == []
