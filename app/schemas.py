@@ -376,6 +376,7 @@ class OneCConnectionIn(BaseModel):
     property_value: str | None = None
     lookback_days: int = Field(default=5, ge=1, le=90)
     mask_guest: bool = True
+    marker_shift_sec: int = Field(default=0, ge=-86400, le=86400)  # ручной сдвиг меток 1С↔видео
 
 
 class OneCSyncIn(BaseModel):

@@ -55,6 +55,7 @@
     <label class="muted">Логин 1С<input id="oc_username"></label>
     <label class="muted">Пароль<input id="oc_password" type="password" placeholder="•••• (не менять)"></label>
     <label class="muted">Окно выборки, дней<input id="oc_lookback_days" type="number" min="1" max="90"></label>
+    <label class="muted" title="сдвиг меток 1С относительно видео, если часы 1С и камеры разъехались. + = метка позже (правее), − = раньше. Выставь по одному известному заселению.">Сдвиг меток 1С, сек<input id="oc_marker_shift" type="number" step="1" placeholder="0"></label>
     <label class="muted">Маскировать ФИО гостя<br><input type="checkbox" id="oc_mask_guest"></label>
   </div>
   <div class="collect-controls" style="margin-top:10px">
@@ -364,6 +365,7 @@ async function onecLoad(){
   document.getElementById("oc_service_url").value = d.service_url ?? "";
   document.getElementById("oc_username").value = d.username ?? "";
   document.getElementById("oc_lookback_days").value = d.lookback_days ?? 5;
+  document.getElementById("oc_marker_shift").value = d.marker_shift_sec ?? 0;
   document.getElementById("oc_enabled").checked = !!d.enabled;
   document.getElementById("oc_mask_guest").checked = !!d.mask_guest;
   document.getElementById("oc_password").value = "";
@@ -374,7 +376,8 @@ async function onecLoad(){
 async function onecSave(){
   const body = {hotel_id: ocHotel(), enabled: ck("oc_enabled"), mask_guest: ck("oc_mask_guest"),
                 service_url: v("oc_service_url"), username: v("oc_username"),
-                password: v("oc_password"), lookback_days: +v("oc_lookback_days") || 5};
+                password: v("oc_password"), lookback_days: +v("oc_lookback_days") || 5,
+                marker_shift_sec: parseInt(v("oc_marker_shift"), 10) || 0};
   const d = await postJSON("/api/checkin/onec/connection", body);
   if (d){ document.getElementById("onecFormMsg").textContent = "✅ сохранено"; onecStatusLoad(); }
 }

@@ -728,6 +728,7 @@ def _conn_defaults() -> dict:
         "property_field": None, "property_value": None,
         "lookback_days": settings.onec_default_lookback_days,
         "mask_guest": settings.onec_default_mask_guest,
+        "marker_shift_sec": 0,
     }
 
 
@@ -754,6 +755,7 @@ async def get_onec_connection(hotel_id: int, session: AsyncSession = Depends(get
         "field_room_number": conn.field_room_number, "field_room_floor": conn.field_room_floor,
         "property_field": conn.property_field, "property_value": conn.property_value,
         "lookback_days": conn.lookback_days, "mask_guest": conn.mask_guest,
+        "marker_shift_sec": conn.marker_shift_sec or 0,
     }
 
 
@@ -798,6 +800,7 @@ async def save_onec_connection(
     conn.property_value = (data.property_value or "").strip() or None
     conn.lookback_days = data.lookback_days
     conn.mask_guest = data.mask_guest
+    conn.marker_shift_sec = data.marker_shift_sec
     await session.commit()
     await audit.log_action(session, request, "onec_connection_save",
                            target=f"гостиница {data.hotel_id}")

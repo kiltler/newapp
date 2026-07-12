@@ -390,6 +390,9 @@ async def markers_for_clip(session: AsyncSession, clip) -> dict:
         )
     ).scalar_one_or_none()
     mask = conn.mask_guest if conn else True
+    shift = (conn.marker_shift_sec or 0) if conn else 0  # ручной сдвиг 1С↔видео
+    # Итоговая поправка: калибровка камеры (камера−сервер) + ручной сдвиг 1С.
+    eff = offset + shift
 
     start = clip.start_ts.replace(tzinfo=None) if clip.start_ts.tzinfo else clip.start_ts
     end = clip.end_ts.replace(tzinfo=None) if clip.end_ts.tzinfo else clip.end_ts
@@ -398,9 +401,9 @@ async def markers_for_clip(session: AsyncSession, clip) -> dict:
     post = settings.onec_post_roll_sec
     margin = settings.onec_marker_margin_sec
 
-    # События, чьё окно пересекает клип (с учётом смещения часов)
-    lo = start - dt.timedelta(seconds=offset + post + margin)
-    hi = end + dt.timedelta(seconds=pre + margin - offset)
+    # События, чьё окно пересекает клип (с учётом поправки часов)
+    lo = start - dt.timedelta(seconds=eff + post + margin)
+    hi = end + dt.timedelta(seconds=pre + margin - eff)
     rows = (
         await session.execute(
             select(OneCCheckin)
@@ -421,7 +424,7 @@ async def markers_for_clip(session: AsyncSession, clip) -> dict:
         if clip_floor is not None and ev.floor is not None and ev.floor != clip_floor:
             continue  # этажная камера — чужие этажи не показываем
         doc_local = ev.doc_time.replace(tzinfo=None) if ev.doc_time.tzinfo else ev.doc_time
-        pos = (doc_local - start).total_seconds() + offset
+        pos = (doc_local - start).total_seconds() + eff
         w0 = max(pos - pre, 0)
         w1 = min(pos + post, duration)
         if w1 <= 0 or w0 >= duration:
@@ -447,6 +450,7 @@ async def markers_for_clip(session: AsyncSession, clip) -> dict:
         "duration_sec": round(duration),
         "clock": {
             "offset_sec": offset,
+            "shift_sec": shift,
             "measured_at": recorder.time_offset_at.isoformat() if recorder and recorder.time_offset_at else None,
             "warn": abs(offset) > settings.onec_clock_warn_sec,
         },

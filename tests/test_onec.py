@@ -288,6 +288,27 @@ async def test_markers_position_offset_and_isolation(db):
     assert d["clock"]["offset_sec"] == 60 and d["clock"]["warn"] is False
 
 
+async def test_markers_manual_shift(db):
+    """Ручной сдвиг меток 1С (marker_shift_sec) прибавляется к калибровке камеры
+    и двигает позицию метки — для расхождения часов 1С и камеры."""
+    hid, _ = await _hotel_with_conn("Сдвиг", marker_shift_sec=180)  # 1С на 3 мин раньше видео
+    async with SessionLocal() as s:
+        rec = CheckinRecorder(hotel_id=hid, host="10.0.0.2", time_offset_sec=0)
+        s.add(rec)
+        await s.flush()
+        rid = rec.id
+        s.add(OneCCheckin(hotel_id=hid, onec_ref="k", doc_time=dt.datetime(2026, 7, 9, 21, 0),
+                          room="313", floor=3, guest="Крылова Наталья Николаевна"))
+        await s.commit()
+    cid = await _clip(hid, rid)
+    async with _client() as c:
+        d = (await c.get(f"/api/checkin/clips/{cid}/markers")).json()
+    m = d["markers"][0]
+    # (21:00 − 20:00) + 0 калибровка + 180 сдвиг = 3780-я секунда видео
+    assert m["offset_sec"] == 3780
+    assert d["clock"]["shift_sec"] == 180
+
+
 async def test_markers_floor_filtering(db):
     """Этажная камера видит только заселения своего этажа."""
     hid, _ = await _hotel_with_conn("Этажи")

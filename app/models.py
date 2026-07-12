@@ -816,6 +816,10 @@ class OneCConnection(Base):
     # Поведение
     lookback_days: Mapped[int] = mapped_column(Integer, default=5)  # скользящее окно перечитывания
     mask_guest: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Ручной сдвиг меток 1С относительно видео (сек): часы 1С и камеры могут
+    # разъехаться. + = метка позже (правее), − = раньше. Оператор выставляет по
+    # одному известному заселению. Прибавляется к калибровке камеры time_offset_sec.
+    marker_shift_sec: Mapped[int] = mapped_column(Integer, default=0)
 
     # legacy (не используются; оставлены с дефолтами, чтобы INSERT не падал на
     # старых БД, где эти колонки были NOT NULL — как User.role, см. §13)
