@@ -51,25 +51,10 @@
     <label class="muted"><input type="checkbox" id="oc_enabled"> включена</label>
   </div>
   <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:8px; margin-top:8px">
-    <label class="muted">URL HTTP-сервиса 1С (приоритетно)<input id="oc_service_url" placeholder="http://host/base/hs/checkins/v1"></label>
-    <label class="muted">OData URL (если нет сервиса)<input id="oc_base_url" placeholder="http://host/base/odata/standard.odata"></label>
+    <label class="muted" style="grid-column:1/-1" title="базовый URL публикации 1С; путь /hs/checkins/v1 приложение добавит само">URL HTTP-сервиса 1С (базовый, до /hs/checkins/v1)<input id="oc_service_url" placeholder="http://192.168.1.2/voronhot"></label>
     <label class="muted">Логин 1С<input id="oc_username"></label>
     <label class="muted">Пароль<input id="oc_password" type="password" placeholder="•••• (не менять)"></label>
-    <label class="muted">Пояс 1С<input id="oc_onec_tz"></label>
-    <label class="muted">Объект (entity)<input id="oc_entity"></label>
-    <label class="muted">Реквизит Ref<input id="oc_field_ref"></label>
-    <label class="muted">Реквизит даты (заезд)<input id="oc_field_date"></label>
-    <label class="muted">Запасное поле даты<input id="oc_field_date_fallback"></label>
-    <label class="muted" title="фильтр по дате в этой 1С запрещён — тянем по сортировке Date desc и режем период на нашей стороне">Поле сортировки (Date)<input id="oc_field_query_date" placeholder="Date"></label>
-    <label class="muted">Реквизит гостя<input id="oc_field_guest"></label>
-    <label class="muted">Реквизит-ссылка комнаты<input id="oc_field_room_ref" placeholder="Room_Key"></label>
-    <label class="muted">Разворачивать (expand)<input id="oc_expand_room" placeholder="Room"></label>
-    <label class="muted">Поле номера комнаты<input id="oc_field_room_number" placeholder="Description"></label>
-    <label class="muted">Поле этажа<input id="oc_field_room_floor" placeholder="Floor"></label>
-    <label class="muted">Разделитель (одна база)<input id="oc_property_field" placeholder="напр. Организация_Key"></label>
-    <label class="muted">Значение объекта<input id="oc_property_value" placeholder="GUID этой ГС в 1С"></label>
     <label class="muted">Окно выборки, дней<input id="oc_lookback_days" type="number" min="1" max="90"></label>
-    <label class="muted">Только проведённые<br><input type="checkbox" id="oc_filter_posted"></label>
     <label class="muted">Маскировать ФИО гостя<br><input type="checkbox" id="oc_mask_guest"></label>
   </div>
   <div class="collect-controls" style="margin-top:10px">
@@ -371,18 +356,15 @@ async function delChannel(id){
   if (await postJSON("/api/checkin/channels/"+id+"/delete")) location.reload();
 }
 
-// ── Интеграция 1С:Отель ──
-const OC_TEXT = ["base_url","service_url","username","onec_tz","entity","field_ref","field_date",
-                 "field_date_fallback","field_query_date","field_guest","field_room_ref","expand_room",
-                 "field_room_number","field_room_floor","property_field","property_value"];
+// ── Интеграция 1С:Отель (прямой HTTP-сервис 1С) ──
 function ocHotel(){ return +v("onecHotel"); }
 
 async function onecLoad(){
   const d = await (await fetch(`/api/checkin/onec/connection?hotel_id=${ocHotel()}`)).json();
-  for (const f of OC_TEXT) document.getElementById("oc_"+f).value = d[f] ?? "";
+  document.getElementById("oc_service_url").value = d.service_url ?? "";
+  document.getElementById("oc_username").value = d.username ?? "";
   document.getElementById("oc_lookback_days").value = d.lookback_days ?? 5;
   document.getElementById("oc_enabled").checked = !!d.enabled;
-  document.getElementById("oc_filter_posted").checked = !!d.filter_posted;
   document.getElementById("oc_mask_guest").checked = !!d.mask_guest;
   document.getElementById("oc_password").value = "";
   document.getElementById("oc_password").placeholder = d.has_password ? "•••• (не менять)" : "пароль 1С";
@@ -390,11 +372,9 @@ async function onecLoad(){
 }
 
 async function onecSave(){
-  const body = {hotel_id: ocHotel(), enabled: ck("oc_enabled"),
-                filter_posted: ck("oc_filter_posted"), mask_guest: ck("oc_mask_guest"),
+  const body = {hotel_id: ocHotel(), enabled: ck("oc_enabled"), mask_guest: ck("oc_mask_guest"),
+                service_url: v("oc_service_url"), username: v("oc_username"),
                 password: v("oc_password"), lookback_days: +v("oc_lookback_days") || 5};
-  for (const f of OC_TEXT) body[f] = v("oc_"+f);
-  body.onec_tz = body.onec_tz || "Asia/Khabarovsk";
   const d = await postJSON("/api/checkin/onec/connection", body);
   if (d){ document.getElementById("onecFormMsg").textContent = "✅ сохранено"; onecStatusLoad(); }
 }

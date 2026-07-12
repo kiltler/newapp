@@ -54,7 +54,7 @@ _register_filters(templates)
 router = APIRouter(tags=["checkin"])
 
 # Метка сборки — видно в UI, сразу понятно, задеплоен ли новый код.
-CHECKIN_BUILD = "2026-07-12-hsservice"
+CHECKIN_BUILD = "2026-07-12-onec-direct"
 
 
 def _clip_url(path: str) -> str:
@@ -767,10 +767,9 @@ async def save_onec_connection(
         raise HTTPException(404, "Гостиница не найдена")
     url = data.base_url.strip()
     service_url = (data.service_url or "").strip()
-    # Достаточно любого из адресов; приоритет — у HTTP-сервиса (быстрый путь).
-    if data.enabled and not (url.lower().startswith(("http://", "https://"))
-                             or service_url.lower().startswith(("http://", "https://"))):
-        raise HTTPException(422, "Укажите OData URL или URL HTTP-сервиса (http:// или https://)")
+    # Источник заселений — HTTP-сервис 1С; в карточке хранится его базовый URL.
+    if data.enabled and not service_url.lower().startswith(("http://", "https://")):
+        raise HTTPException(422, "Укажите базовый URL HTTP-сервиса 1С (http:// или https://)")
     conn = (
         await session.execute(select(OneCConnection).where(OneCConnection.hotel_id == data.hotel_id))
     ).scalar_one_or_none()

@@ -60,29 +60,20 @@ def test_to_camera_local_naive():
     assert out2.tzinfo is None
 
 
-def test_odata_params_no_date_filter_no_orderby():
-    """В запросе НЕТ ни фильтра по дате, ни $orderby (в этой 1С игнорируются);
-    остаются Posted + разделитель + $expand, пагинация $top/$skip."""
-    conn = OneCConnection(hotel_id=1, filter_posted=True,
-                          property_field="Организация_Key",
-                          property_value="a1b2c3d4-1111-2222-3333-444455556666")
-    b = onec_sync.ODataBackend(conn)
-    params = b._params(top=500, skip=1000)
-    assert "datetime" not in params.get("$filter", "")   # никакой даты в $filter
-    assert "$orderby" not in params                       # сортировку не шлём (игнорируется)
-    assert params["$top"] == "500" and params["$skip"] == "1000"
-    assert "Posted eq true" in params["$filter"]
-    assert "Организация_Key eq guid'a1b2c3d4-1111-2222-3333-444455556666'" in params["$filter"]
-    conn2 = OneCConnection(hotel_id=1, filter_posted=False,
-                           property_field="Объект", property_value="Суворова 8")
-    assert onec_sync.ODataBackend(conn2)._filters() == "Объект eq 'Суворова 8'"
+def test_service_endpoint_from_base_url():
+    """В карточке хранится базовый URL — путь /hs/checkins/v1 дописываем сами.
+    Полный URL (с /hs/) оставляем как есть; хвостовой слэш/параметры срезаем."""
+    def ep(url):
+        return onec_sync.OneCBackend(OneCConnection(hotel_id=1, service_url=url))._service_endpoint()
+    assert ep("http://192.168.1.2/voronhot") == "http://192.168.1.2/voronhot/hs/checkins/v1"
+    assert ep("http://192.168.1.2/voronhot/") == "http://192.168.1.2/voronhot/hs/checkins/v1"
+    assert ep("http://192.168.1.2/voronhot/hs/checkins/v1") == "http://192.168.1.2/voronhot/hs/checkins/v1"
+    assert ep("") == ""
 
 
-def test_odata_expand_room_and_extract():
-    """$expand=Room всегда добавляется; из Room берутся Description и Floor(int)."""
-    b = onec_sync.ODataBackend(OneCConnection(hotel_id=1))
-    params = b._params(top=10)
-    assert params.get("$expand") == "Room"
+def test_extract_room_floor():
+    """Из объекта Room берутся номер (Description) и этаж (Floor)."""
+    b = onec_sync.OneCBackend(OneCConnection(hotel_id=1))
     assert b.extract_room_floor({"Room": {"Description": "614", "Floor": "6"}}) == ("614", 6)
     # пустой Room_Key → нет объекта Room → (None, None), но заселение сохранимо
     assert b.extract_room_floor({"Room_Key": "00000000-0000-0000-0000-000000000000"}) == (None, None)
@@ -108,7 +99,7 @@ async def test_sync_hotel_upsert_sliding_window(db, monkeypatch):
             _row("ref-2", "2026-07-09T23:40:00", room="507", floor="5"),
         ]
 
-    monkeypatch.setattr(onec_sync.ODataBackend, "fetch_checkins", fake_fetch)
+    monkeypatch.setattr(onec_sync.OneCBackend, "fetch_checkins", fake_fetch)
 
     async with SessionLocal() as s:
         r1 = await onec_sync.sync_hotel(s, hid)
@@ -141,7 +132,7 @@ async def test_checkin_date_fallback_and_empty_room(db, monkeypatch):
             _row("b", "2026-07-09T12:00:00", room="204", floor="2"),
         ]
 
-    monkeypatch.setattr(onec_sync.ODataBackend, "fetch_checkins", fake_fetch)
+    monkeypatch.setattr(onec_sync.OneCBackend, "fetch_checkins", fake_fetch)
     async with SessionLocal() as s:
         r = await onec_sync.sync_hotel(s, hid)
         assert r["inserted"] == 2
@@ -162,42 +153,33 @@ async def test_marker_time_from_checkin_not_query_date(db, monkeypatch):
                  "CheckInDate": "2026-07-09T09:05:30", "GuestFullName": "Г",
                  "Room": {"Description": "614", "Floor": "6"}}]
 
-    monkeypatch.setattr(onec_sync.ODataBackend, "fetch_checkins", fake_fetch)
+    monkeypatch.setattr(onec_sync.OneCBackend, "fetch_checkins", fake_fetch)
     async with SessionLocal() as s:
         await onec_sync.sync_hotel(s, hid)
         ev = (await s.execute(select(OneCCheckin))).scalar_one()
         assert ev.doc_time == dt.datetime(2026, 7, 9, 9, 5, 30)  # CheckInDate, не Date
 
 
-async def test_fetch_tail_by_count_and_window(db):
-    """1С игнорирует фильтр/сортировку → читаем хвост базы по $inlinecount и
-    режем окно по CheckInDate у себя. Старьё (2016) отсекается, свежие остаются."""
-    import httpx
+async def test_sync_hotel_via_service_base_url(db):
+    """Полный путь: sync_hotel → OneCBackend(базовый URL) → GET /hs/checkins/v1 →
+    разбор JSON сервиса → идемпотентный upsert. Эмулируем ответ HTTP-сервиса 1С."""
+    import unittest.mock as um
 
+    hid, _ = await _hotel_with_conn("Прямой сервис", service_url="http://192.168.1.2/voronhot")
     now = dt.datetime.now()
-    # база в порядке ОТ СТАРЫХ К НОВЫМ (как реальная 1С): старьё 2016, потом свежие
-    old = [{"Ref_Key": f"old{i}", "Date": "2016-05-24T06:12:01", "CheckInDate": "2016-05-24T06:12:01",
-            "GuestFullName": "Старый", "Room": {"Description": "614", "Floor": "6"}} for i in range(4)]
-    fresh = [{"Ref_Key": f"n{i}", "CheckInDate": (now - dt.timedelta(hours=i)).strftime("%Y-%m-%dT%H:%M:%S"),
-              "GuestFullName": "Г", "Room": {"Description": "10", "Floor": "1"}} for i in range(2)]
-    all_rows = old + fresh  # хвост = свежие
-
-    seen = {"inlinecount": False}
+    payload = {"count": 2, "items": [
+        {"ref": "guid-6a", "checkin": (now - dt.timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S"),
+         "date": (now - dt.timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S"),
+         "room": "301", "floor": 3, "guest": "Иванов Иван"},
+        {"ref": "guid-6b", "checkin": (now - dt.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S"),
+         "date": (now - dt.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S"),
+         "room": "512", "floor": None, "guest": "Петров Пётр"}]}
+    got = {"url": None}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        p = request.url.params
-        if "datetime" in p.get("$filter", ""):
-            # имитируем запрет фильтра по дате (AUTOORDER-500) → код уйдёт на хвост
-            return httpx.Response(500, text="Операция не разрешена в предложении WHERE ... AUTOORDER")
-        if p.get("$inlinecount") == "allpages":
-            seen["inlinecount"] = True
-            return httpx.Response(200, json={"odata.count": str(len(all_rows)), "value": all_rows[:1]})
-        assert "$orderby" not in p                        # хвост — без сортировки
-        top = int(p["$top"]); skip = int(p.get("$skip", "0"))
-        return httpx.Response(200, json={"value": all_rows[skip:skip + top]})
+        got["url"] = str(request.url)
+        return httpx.Response(200, json=payload)
 
-    conn = OneCConnection(hotel_id=1, base_url="http://1c/odata", username="u", lookback_days=5)
-    backend = onec_sync.ODataBackend(conn)
     orig = httpx.AsyncClient
 
     def patched(*a, **kw):
@@ -205,52 +187,20 @@ async def test_fetch_tail_by_count_and_window(db):
         kw.pop("verify", None)
         return orig(*a, **kw)
 
-    import unittest.mock as um
-    boundary = now - dt.timedelta(days=5)
     with um.patch.object(httpx, "AsyncClient", patched):
-        rows = await backend.fetch_checkins(since=boundary, page=3)
-    refs = [r["Ref_Key"] for r in rows]
-    assert seen["inlinecount"]                    # число документов запрошено
-    assert set(refs) == {"n0", "n1"}              # только свежие в окне
-    assert not any(r.startswith("old") for r in refs)  # старьё 2016 отсечено на нашей стороне
+        async with SessionLocal() as s:
+            res = await onec_sync.sync_hotel(s, hid)
+        async with SessionLocal() as s:
+            res2 = await onec_sync.sync_hotel(s, hid)  # повторный прогон — тот же мок
 
-
-async def test_fetch_fast_path_server_date_filter(db):
-    """Если 1С принимает $filter по дате с явным $orderby=Ref_Key — используем
-    быстрый серверный путь (без чтения хвоста и без $inlinecount)."""
-    import httpx
-
-    now = dt.datetime.now()
-    fresh = [{"Ref_Key": f"n{i}", "CheckInDate": (now - dt.timedelta(hours=i)).strftime("%Y-%m-%dT%H:%M:%S"),
-              "Date": (now - dt.timedelta(hours=i)).strftime("%Y-%m-%dT%H:%M:%S"),
-              "GuestFullName": "Г", "Room": {"Description": "10", "Floor": "1"}} for i in range(3)]
-    seen = {"count_called": False, "orderby": None}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        p = request.url.params
-        if p.get("$inlinecount") == "allpages":
-            seen["count_called"] = True
-            return httpx.Response(200, json={"odata.count": "999999", "value": []})
-        # быстрый путь: есть фильтр по дате и явный $orderby=Ref_Key → отдаём свежие
-        assert "datetime" in p["$filter"]
-        seen["orderby"] = p.get("$orderby")
-        return httpx.Response(200, json={"value": fresh})
-
-    conn = OneCConnection(hotel_id=1, base_url="http://1c/odata", username="u")
-    backend = onec_sync.ODataBackend(conn)
-    orig = httpx.AsyncClient
-
-    def patched(*a, **kw):
-        kw["transport"] = httpx.MockTransport(handler)
-        kw.pop("verify", None)
-        return orig(*a, **kw)
-
-    import unittest.mock as um
-    with um.patch.object(httpx, "AsyncClient", patched):
-        rows = await backend.fetch_checkins(since=now - dt.timedelta(days=5))
-    assert {r["Ref_Key"] for r in rows} == {"n0", "n1", "n2"}
-    assert seen["orderby"] == "Ref_Key"     # явный orderby, обходящий AUTOORDER
-    assert seen["count_called"] is False    # быстрый путь → хвост/count не понадобились
+    assert "/hs/checkins/v1?since=" in got["url"]   # путь достроен из базового URL
+    assert res["inserted"] == 2 and res["fetched"] == 2
+    assert res2["inserted"] == 0 and res2["updated"] == 2  # те же ref → без дублей
+    async with SessionLocal() as s:
+        a = (await s.execute(select(OneCCheckin).where(OneCCheckin.onec_ref == "guid-6a"))).scalar_one()
+        assert a.room == "301" and a.floor == 3 and a.guest == "Иванов Иван"
+        b = (await s.execute(select(OneCCheckin).where(OneCCheckin.onec_ref == "guid-6b"))).scalar_one()
+        assert b.room == "512" and b.floor is None     # этаж null допустим
 
 
 async def test_sync_isolation_between_hotels(db, monkeypatch):
@@ -263,7 +213,7 @@ async def test_sync_isolation_between_hotels(db, monkeypatch):
             return [_row("ref-a", "2026-07-09T20:00:00")]
         raise RuntimeError("1С гостиницы Б лежит")
 
-    monkeypatch.setattr(onec_sync.ODataBackend, "fetch_checkins", fake_fetch)
+    monkeypatch.setattr(onec_sync.OneCBackend, "fetch_checkins", fake_fetch)
 
     async with SessionLocal() as s:
         results = await onec_sync.sync_all(s)
@@ -372,9 +322,8 @@ async def test_connection_save_load_and_password_keep(db):
         assert d["exists"] is False and d["entity"] == "Document_Accommodation"
         assert d["field_date"] == "CheckInDate" and d["expand_room"] == "Room"
 
-        body = {"hotel_id": hid, "enabled": True, "base_url": "http://1c/hotel/odata/standard.odata",
-                "username": "svc", "password": "s3cret", "property_field": "Организация_Key",
-                "property_value": "a1b2c3d4-1111-2222-3333-444455556666"}
+        body = {"hotel_id": hid, "enabled": True, "service_url": "http://192.168.1.2/voronhot",
+                "username": "svc", "password": "s3cret", "lookback_days": 5}
         assert (await c.post("/api/checkin/onec/connection", json=body)).status_code == 200
 
         d2 = (await c.get(f"/api/checkin/onec/connection?hotel_id={hid}")).json()
@@ -392,8 +341,8 @@ async def test_connection_save_load_and_password_keep(db):
         assert decrypt(conn.password_enc) == "s3cret"  # пароль сохранился
 
     async with _client() as c:
-        # включённое подключение без URL — ошибка валидации
-        bad = {"hotel_id": hid, "enabled": True, "base_url": "ftp://х"}
+        # включённое подключение без URL сервиса — ошибка валидации
+        bad = {"hotel_id": hid, "enabled": True, "service_url": "ftp://х"}
         assert (await c.post("/api/checkin/onec/connection", json=bad)).status_code == 422
         # статус по гостиницам отвечает
         st = (await c.get("/api/checkin/onec/status")).json()
@@ -420,7 +369,7 @@ async def test_fetch_via_http_service(db):
 
     conn = OneCConnection(hotel_id=1, service_url="http://1c/voronhot/hs/checkins/v1",
                           username="u", lookback_days=5)
-    backend = onec_sync.ODataBackend(conn)
+    backend = onec_sync.OneCBackend(conn)
     orig = httpx.AsyncClient
 
     def patched(*a, **kw):

@@ -36,8 +36,6 @@ from app.models import (
 
 log = logging.getLogger(__name__)
 
-_GUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
-
 
 # ── Время и этажи ────────────────────────────────────────────────────────────
 # Фолбэк для систем с урезанной базой поясов (в свежих tzdata часть российских
@@ -99,69 +97,42 @@ def _to_int_floor(value) -> int | None:
         return None
 
 
-# ── OData-бэкенд (адаптер: позже можно заменить на HTTP-сервис 1С) ───────────
-class ODataBackend:
-    """Клиент стандартного OData 1С для одной гостиницы (Document_Accommodation)."""
+# ── Бэкенд 1С (прямой вызов HTTP-сервиса 1С, без OData) ─────────────────────
+# Путь HTTP-сервиса фиксирован публикацией расширения CheckinsAPI в 1С; в карточке
+# гостиницы задаётся только базовый URL публикации (до /hs/checkins/v1).
+_SERVICE_PATH = "/hs/checkins/v1"
+
+
+class OneCBackend:
+    """Клиент HTTP-сервиса 1С «Checkins» для одной гостиницы.
+
+    Весь отбор (проведён, CheckInDate >= since) делает 1С; панель лишь передаёт
+    `since` и разбирает готовый JSON. OData не используется.
+    """
 
     def __init__(self, conn: OneCConnection):
         self.conn = conn
-        self.base_url = (conn.base_url or "").rstrip("/")
         self.auth = httpx.BasicAuth(conn.username or "", decrypt(conn.password_enc) if conn.password_enc else "")
-        # Дефолты на случай незаполненных полей (у несохранённого объекта
-        # SQLAlchemy-дефолты ещё не применены — они срабатывают при INSERT)
-        self.entity = conn.entity or settings.onec_default_entity
+        # Имена полей ВНУТРЕННЕГО представления записи: ответ сервиса приводится к
+        # ним в _fetch_from_service, дальше — единый разбор в sync_hotel.
         self.field_ref = conn.field_ref or "Ref_Key"
         self.field_date = conn.field_date or "CheckInDate"          # время метки
         self.field_date_fallback = conn.field_date_fallback or "Date"
-        self.field_query_date = conn.field_query_date or "Date"     # по нему $filter/$orderby
         self.field_guest = conn.field_guest or "GuestFullName"
         self.expand_room = conn.expand_room or "Room"
         self.field_room_number = conn.field_room_number or "Description"
         self.field_room_floor = conn.field_room_floor or "Floor"
 
-    _MAX_PAGES = 100  # предохранитель от бесконечного листания
+    def _service_endpoint(self) -> str:
+        """Полный URL метода сервиса из базового URL карточки.
 
-    def _select(self) -> str:
-        """$select только нужных полей — документ имеет ~140 реквизитов, а нам
-        хватает пяти. Резко уменьшает размер ответа и время его сборки в 1С."""
-        fields = [self.field_ref, self.field_date, self.field_date_fallback,
-                  self.field_query_date, self.field_guest, self.conn.field_room_ref or "Room_Key",
-                  self.expand_room, "Posted"]
-        seen, out = set(), []
-        for f in fields:
-            if f and f not in seen:
-                seen.add(f)
-                out.append(f)
-        return ",".join(out)
-
-    def _filters(self) -> str:
-        """$filter БЕЗ даты (в этой 1С отбор по полям документа запрещён — HTTP 500).
-        Остаются только опциональный Posted и разделитель объекта."""
-        c = self.conn
-        parts: list[str] = []
-        if c.filter_posted:
-            parts.append("Posted eq true")
-        if c.property_field and c.property_value:
-            val = c.property_value.strip()
-            if _GUID_RE.match(val):
-                parts.append(f"{c.property_field} eq guid'{val}'")
-            else:
-                parts.append(f"{c.property_field} eq '{val}'")
-        return " and ".join(parts)
-
-    def _params(self, top: int, skip: int = 0) -> dict:
-        # $orderby по умолчанию (без desc): в этой 1С сортировка по полям
-        # игнорируется, и база отдаётся ОТ СТАРЫХ К НОВЫМ — значит свежие
-        # документы в «хвосте». Фильтр по дате не добавляем (запрещён).
-        params = {"$format": "json", "$top": str(top), "$select": self._select()}
-        if skip:
-            params["$skip"] = str(skip)
-        flt = self._filters()
-        if flt:
-            params["$filter"] = flt
-        if self.expand_room:  # разворот комнаты — номер и этаж готовыми полями
-            params["$expand"] = self.expand_room
-        return params
+        В карточке хранится базовый URL (напр. http://192.168.1.2/voronhot); путь
+        /hs/checkins/v1 добавляем сами. Если в URL уже есть /hs/ — считаем его
+        полным и не дописываем (обратная совместимость)."""
+        raw = (self.conn.service_url or "").strip().split("?", 1)[0].rstrip("/")
+        if not raw:
+            return ""
+        return raw if "/hs/" in raw else raw + _SERVICE_PATH
 
     def _window_date(self, row: dict) -> dt.datetime | None:
         """Дата для оконного отбора: заезд (CheckInDate) с фолбэком на Date,
@@ -169,76 +140,14 @@ class ODataBackend:
         raw = parse_onec_datetime(row.get(self.field_date) or row.get(self.field_date_fallback))
         return to_camera_local(raw, self.conn.onec_tz) if raw is not None else None
 
-    async def _count(self, http, url: str) -> int | None:
-        """Общее число документов через $inlinecount=allpages (с учётом Posted)."""
-        params = {"$format": "json", "$top": "1", "$inlinecount": "allpages"}
-        flt = self._filters()
-        if flt:
-            params["$filter"] = flt
-        try:
-            resp = await http.get(url, params=params)
-        except httpx.HTTPError as exc:
-            log.warning("1С $inlinecount — сетевая ошибка: %r", exc)
-            return None
-        if resp.status_code != 200:
-            log.warning("1С $inlinecount → HTTP %s: %s", resp.status_code, resp.text[:200])
-            return None
-        data = resp.json()
-        for key in ("odata.count", "@odata.count", "__count"):
-            if key in data:
-                try:
-                    return int(data[key])
-                except (ValueError, TypeError):
-                    return None
-        return None
-
-    async def _fetch_by_date_filter(self, http, url: str, since: dt.datetime) -> list[dict] | None:
-        """БЫСТРЫЙ путь: серверный фильтр по дате + ЯВНЫЙ $orderby по Ref_Key.
-
-        В этой 1С неявная автосортировка (AUTOORDER) при $filter падает с HTTP 500.
-        Явный $orderby по обычному полю (Ref_Key) её заменяет — и фильтр по дате
-        может заработать. Тогда сервер сам отдаёт только свежие документы (мало,
-        skip маленький, быстро). Возвращает None → путь недоступен, идём на хвост.
-        """
-        since_str = since.strftime("%Y-%m-%dT%H:%M:%S")
-        parts = [f"{self.field_query_date} ge datetime'{since_str}'"]
-        if self.conn.filter_posted:
-            parts.append("Posted eq true")
-        rows: list[dict] = []
-        skip = 0
-        for _ in range(self._MAX_PAGES):
-            params = {"$format": "json", "$top": "500", "$skip": str(skip),
-                      "$orderby": self.field_ref, "$filter": " and ".join(parts),
-                      "$expand": self.expand_room, "$select": self._select()}
-            log.info("1С GET (быстрый путь) %s", str(httpx.URL(url, params=params)))
-            try:
-                resp = await http.get(url, params=params)
-            except httpx.HTTPError as exc:
-                log.info("1С: быстрый путь — сетевая ошибка %r → перехожу на чтение хвоста", exc)
-                return None
-            if resp.status_code != 200:
-                log.info("1С: быстрый путь недоступен (HTTP %s: %s) → перехожу на чтение хвоста",
-                         resp.status_code, resp.text[:150])
-                return None
-            batch = resp.json().get("value") or []
-            log.info("1С: быстрый путь — записей на странице = %d (skip=%d)", len(batch), skip)
-            for row in batch:
-                wd = self._window_date(row)
-                if wd is None or wd >= since:
-                    rows.append(row)
-            if len(batch) < 500:
-                break
-            skip += 500
-        log.info("1С: быстрый путь СРАБОТАЛ — %d заселений в окне (серверный фильтр по дате)", len(rows))
-        return rows
-
     async def _fetch_from_service(self, since: dt.datetime) -> list[dict]:
         """HTTP-сервис 1С отдаёт готовый JSON свежих заселений за период
-        [{ref, checkin, date, room, floor, guest}]. Приводим к форме OData-записи,
-        чтобы дальнейший разбор в sync_hotel был единым."""
-        base = self.conn.service_url.rstrip("?&")
-        sep = "&" if "?" in base else "?"
-        url = f"{base}{sep}since={since.strftime('%Y-%m-%dT%H:%M:%S')}"
+        {count, items:[{ref, checkin, date, room, floor, guest}]}. Приводим к
+        внутренней форме записи, чтобы разбор в sync_hotel был единым."""
+        endpoint = self._service_endpoint()
+        if not endpoint:
+            raise RuntimeError("URL HTTP-сервиса 1С не задан")
+        url = f"{endpoint}?since={since.strftime('%Y-%m-%dT%H:%M:%S')}"
         log.info("1С HTTP-сервис GET %s", url)
         async with httpx.AsyncClient(auth=self.auth, timeout=settings.onec_http_timeout, verify=False) as http:
             resp = await http.get(url)
@@ -262,109 +171,28 @@ class ODataBackend:
         log.info("1С HTTP-сервис: получено %d заселений в окне", len(rows))
         return rows
 
-    async def fetch_checkins(self, since: dt.datetime, *, page: int = 2000) -> list[dict]:
-        """Свежие заселения (не старше `since`).
+    async def fetch_checkins(self, since: dt.datetime) -> list[dict]:
+        """Свежие заселения (не старше `since`) из HTTP-сервиса 1С.
 
-        Если у подключения задан HTTP-сервис — берём оттуда (быстро, фильтр по
-        дате на стороне 1С). Иначе OData: сначала серверный фильтр по дате (с
-        явным $orderby, чтобы обойти AUTOORDER-500), затем фолбэк на «хвост» базы.
+        Весь отбор (проведён, CheckInDate >= since) делает 1С — панель только
+        передаёт `since` и получает готовый JSON. Никакого OData/$skip/$orderby.
         """
-        if (self.conn.service_url or "").strip():
-            return await self._fetch_from_service(since)
-
-        url = f"{self.base_url}/{self.entity}"
-        log.info("1С: граница окна (наивное локальное) = %s", since.isoformat())
-        tail = min(max((self.conn.lookback_days or 5) * 300, 1000), 5000)
-        timeout = settings.onec_http_timeout
-
-        rows: list[dict] = []
-        pages = 0
-        async with httpx.AsyncClient(auth=self.auth, timeout=timeout, verify=False) as http:
-            fast = await self._fetch_by_date_filter(http, url, since)
-            if fast is not None:
-                return fast
-
-            log.info("1С: фолбэк — читаю хвост базы (skip). Отбор/сортировка на стороне 1С недоступны")
-            total = await self._count(http, url)
-            log.info("1С: всего документов (odata.count) = %s", total)
-            if total is not None:
-                skip = max(0, total - tail)
-                log.info("1С: читаю хвост базы с skip=%d (tail=%d, крупными страницами по %d)", skip, tail, page)
-            else:
-                skip = 0
-                log.warning("1С: odata.count недоступен — листаю с начала (может быть медленно на большой базе)")
-
-            for pages in range(1, self._MAX_PAGES + 1):
-                top = page if total is None else min(page, total - skip)
-                if top <= 0:
-                    break
-                params = self._params(top, skip)
-                log.info("1С GET %s", str(httpx.URL(url, params=params)))
-                try:
-                    resp = await http.get(url, params=params)
-                except httpx.HTTPError as exc:
-                    log.warning("1С: запрос (skip=%d) не выполнен: %r "
-                                "(большой $skip в 1С медленный — поднимите ONEC_HTTP_TIMEOUT или lookback_days)",
-                                skip, exc)
-                    raise RuntimeError(f"OData: {type(exc).__name__}: {exc}") from exc
-                log.info("1С ответ: HTTP %s (skip=%d)", resp.status_code, skip)
-                if resp.status_code != 200 and "$select" in params:
-                    # вдруг именно $select не принят — повторим без него
-                    log.info("1С: HTTP %s c $select → повтор без $select", resp.status_code)
-                    params.pop("$select")
-                    resp = await http.get(url, params=params)
-                    log.info("1С ответ (без $select): HTTP %s", resp.status_code)
-                if resp.status_code != 200:
-                    log.warning("1С тело ответа: %s", resp.text[:500])
-                    raise RuntimeError(f"OData HTTP {resp.status_code}: {resp.text[:200]}")
-                batch = resp.json().get("value") or []
-                log.info("1С: записей в value = %d", len(batch))
-                if batch:
-                    log.info("1С: диапазон страницы по %s — первая=%s, последняя=%s",
-                             self.field_query_date, batch[0].get(self.field_query_date),
-                             batch[-1].get(self.field_query_date))
-                kept = 0
-                for row in batch:
-                    wd = self._window_date(row)  # по CheckInDate (фолбэк Date)
-                    if wd is None or wd >= since:
-                        rows.append(row)
-                        kept += 1
-                log.info("1С: со страницы в окно попало %d из %d (CheckInDate >= границы)", kept, len(batch))
-                skip += len(batch)
-                if not batch or len(batch) < top or (total is not None and skip >= total):
-                    break  # конец базы / хвоста
-        log.info("1С: ИТОГ — %d заселений в окне последних %d дн. (запросов страниц: %d)",
-                 len(rows), self.conn.lookback_days, pages)
-        return rows
+        return await self._fetch_from_service(since)
 
     async def probe(self) -> dict:
-        """Проба связи. При заданном HTTP-сервисе — тянем свежие через него;
-        иначе OData $top=1 c $expand=Room."""
-        if (self.conn.service_url or "").strip():
-            since = dt.datetime.now(_tz(settings.camera_tz)).replace(tzinfo=None) - dt.timedelta(
-                days=max(self.conn.lookback_days or 5, 1))
-            try:
-                rows = await self._fetch_from_service(since)
-            except Exception as exc:  # noqa: BLE001
-                return {"ok": False, "mode": "service", "error": f"{type(exc).__name__}: {exc}"[:300]}
-            sample = rows[0] if rows else None
-            room = self.extract_room_floor(sample) if sample else (None, None)
-            return {"ok": True, "mode": "service", "count": len(rows), "sample": sample,
-                    "room_expanded": {"number": room[0], "floor": room[1]}}
+        """Проба связи: тянем свежие заселения за lookback_days через HTTP-сервис.
 
-        url = f"{self.base_url}/{self.entity}"
-        params = self._params(top=1)
+        Возвращает count и sample + room_expanded (номер/этаж) — сразу видно, что
+        комната и этаж распарсились."""
+        since = dt.datetime.now(_tz(settings.camera_tz)).replace(tzinfo=None) - dt.timedelta(
+            days=max(self.conn.lookback_days or 5, 1))
         try:
-            async with httpx.AsyncClient(auth=self.auth, timeout=15.0, verify=False) as http:
-                resp = await http.get(url, params=params)
-        except httpx.HTTPError as exc:
-            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
-        if resp.status_code != 200:
-            return {"ok": False, "status": resp.status_code, "error": resp.text[:300]}
-        rows = (resp.json().get("value") or [])
+            rows = await self._fetch_from_service(since)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "mode": "service", "error": f"{type(exc).__name__}: {exc}"[:300]}
         sample = rows[0] if rows else None
         room = self.extract_room_floor(sample) if sample else (None, None)
-        return {"ok": True, "status": 200, "sample": sample,
+        return {"ok": True, "mode": "service", "count": len(rows), "sample": sample,
                 "room_expanded": {"number": room[0], "floor": room[1]}}
 
     def extract_room_floor(self, row: dict) -> tuple[str | None, int | None]:
@@ -377,9 +205,9 @@ class ODataBackend:
         return number, floor
 
 
-def onec_backend_for(conn: OneCConnection) -> ODataBackend:
-    """Фабрика бэкенда (точка замены OData → HTTP-сервис в будущем)."""
-    return ODataBackend(conn)
+def onec_backend_for(conn: OneCConnection) -> OneCBackend:
+    """Фабрика бэкенда 1С (прямой вызов HTTP-сервиса 1С)."""
+    return OneCBackend(conn)
 
 
 # ── Синхронизация ────────────────────────────────────────────────────────────
