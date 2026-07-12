@@ -390,9 +390,11 @@ async def markers_for_clip(session: AsyncSession, clip) -> dict:
         )
     ).scalar_one_or_none()
     mask = conn.mask_guest if conn else True
-    shift = (conn.marker_shift_sec or 0) if conn else 0  # ручной сдвиг 1С↔видео
-    # Итоговая поправка: калибровка камеры (камера−сервер) + ручной сдвиг 1С.
-    eff = offset + shift
+    # Выравнивание меток 1С↔видео — ТОЛЬКО ручным сдвигом (оператор выставляет по
+    # известному заселению). Калибровку камеры (time_offset_sec) к позиции метки НЕ
+    # прибавляем: она меряет камеру против сервера панели, а не против 1С, и её
+    # сложение со сдвигом давало перекоррекцию. offset ниже — только для инфо-плашки.
+    eff = shift = (conn.marker_shift_sec or 0) if conn else 0
 
     start = clip.start_ts.replace(tzinfo=None) if clip.start_ts.tzinfo else clip.start_ts
     end = clip.end_ts.replace(tzinfo=None) if clip.end_ts.tzinfo else clip.end_ts

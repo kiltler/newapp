@@ -167,18 +167,23 @@ function renderMarkers(d){
   if (!d || !d.markers || !d.markers.length){ wrap.style.display = "none"; return; }
   wrap.style.display = "block";
 
-  if (d.clock && d.clock.warn){
+  // Показываем применённый ручной сдвиг меток 1С↔видео (если задан).
+  const sh = d.clock ? (d.clock.shift_sec || 0) : 0;
+  if (sh){
     clock.style.display = "";
-    clock.textContent = `⏱ часы регистратора уехали на ${d.clock.offset_sec>0?"+":""}${d.clock.offset_sec}с — отметки могут смещаться`;
+    clock.textContent = `⏱ сдвиг меток 1С: ${sh>0?"+":""}${sh}с (Настройки → 1С)`;
   } else clock.style.display = "none";
 
   const dur = d.duration_sec || 1;
   const hhmm = iso => iso.slice(11,16);
+  // Клик — прыгаем на ~1 мин ДО времени метки (а не на начало 5-мин окна), чтобы
+  // сразу видеть событие; широкое окно остаётся подсветкой на полосе.
+  const seekOf = m => Math.max((m.offset_sec ?? m.window_start_sec) - 60, 0);
   bar.innerHTML = d.markers.map((m,i) => {
     const left = m.window_start_sec / dur * 100;
     const width = Math.max((m.window_end_sec - m.window_start_sec) / dur * 100, 0.5);
     const tip = `🛏 ${m.room||"?"} · ${hhmm(m.doc_time)}${m.guest ? " · "+m.guest : ""}`;
-    return `<div data-seek="${m.window_start_sec}" title="${tip.replace(/"/g,"&quot;")}"
+    return `<div data-seek="${seekOf(m)}" title="${tip.replace(/"/g,"&quot;")}"
       style="position:absolute; left:${left}%; width:${width}%; top:0; bottom:0;
              background:var(--accent); opacity:.75; border-radius:4px"></div>`;
   }).join("");
@@ -189,7 +194,7 @@ function renderMarkers(d){
     player.currentTime = (e.clientX - rect.left) / rect.width * dur;
   };
   list.innerHTML = d.markers.map(m =>
-    `<button class="mini" onclick="player.currentTime=${m.window_start_sec}; player.play().catch(()=>{})">
+    `<button class="mini" onclick="player.currentTime=${seekOf(m)}; player.play().catch(()=>{})">
        🛏 ${m.room || "?"} · ${hhmm(m.doc_time)}${m.guest ? " · " + m.guest : ""}</button>`
   ).join("");
 }

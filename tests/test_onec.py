@@ -263,7 +263,7 @@ async def test_markers_position_offset_and_isolation(db):
     hid, _ = await _hotel_with_conn("Маркеры")
     hid2, _ = await _hotel_with_conn("Чужая")
     async with SessionLocal() as s:
-        rec = CheckinRecorder(hotel_id=hid, host="10.0.0.1", time_offset_sec=60)  # часы NVR на +60с
+        rec = CheckinRecorder(hotel_id=hid, host="10.0.0.1", time_offset_sec=60)  # калибровка есть…
         s.add(rec)
         await s.flush()
         rid = rec.id
@@ -279,13 +279,15 @@ async def test_markers_position_offset_and_isolation(db):
         d = (await c.get(f"/api/checkin/clips/{cid}/markers")).json()
     assert len(d["markers"]) == 1                       # чужая гостиница отфильтрована
     m = d["markers"][0]
-    # позиция: (21:00 − 20:00) + 60с смещения часов = 3660-я секунда видео
-    assert m["offset_sec"] == 3660
-    assert m["window_start_sec"] == 3660 - 300           # PRE_ROLL
-    assert m["window_end_sec"] == 3660 + 120             # POST_ROLL
+    # позиция: (21:00 − 20:00), сдвиг 0 → 3600. Калибровка time_offset_sec к метке
+    # НЕ прибавляется (только ручной сдвиг двигает метку).
+    assert m["offset_sec"] == 3600
+    assert m["window_start_sec"] == 3600 - 300           # PRE_ROLL
+    assert m["window_end_sec"] == 3600 + 120             # POST_ROLL
     assert m["room"] == "312"
     assert m["guest"] == "Иванов И."                     # ФИО замаскировано
-    assert d["clock"]["offset_sec"] == 60 and d["clock"]["warn"] is False
+    assert d["clock"]["offset_sec"] == 60                # калибровка показывается (инфо), метку не двигает
+    assert d["clock"]["shift_sec"] == 0
 
 
 async def test_markers_manual_shift(db):
