@@ -456,13 +456,20 @@ async def _window_jobs(client, ch, win_start: dt.datetime, win_end: dt.datetime)
     (последние 15 мин) исключаем.
     """
     lo, hi = win_start - dt.timedelta(hours=36), win_end + dt.timedelta(hours=36)
+    segs: list[dict] = []
+    # Субпоток первым; его ОШИБКА (HTTP 400/404, когда субпоток не пишется в
+    # архив) не должна отменять фолбэк на основной поток — иначе канал остаётся
+    # без клипов, хотя основной трек пишет (регресс: канал 10 «Ворон»).
     try:
         segs = await client.search_playback(ch.channel_id, lo, hi, substream=True)
-        if not segs:
-            segs = await client.search_playback(ch.channel_id, lo, hi, substream=False)
     except NVRError as exc:
-        log.warning("кан.%s: playback-поиск недоступен: %s", ch.channel_id, exc)
-        return []
+        log.info("кан.%s: субпоток недоступен (%s) — пробую основной", ch.channel_id, exc)
+    if not segs:
+        try:
+            segs = await client.search_playback(ch.channel_id, lo, hi, substream=False)
+        except NVRError as exc:
+            log.warning("кан.%s: playback-поиск недоступен: %s", ch.channel_id, exc)
+            return []
     if not segs:
         return []
     ref = max(s["end"] for s in segs)
