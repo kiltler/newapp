@@ -865,3 +865,194 @@ class OneCCheckin(Base):
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+
+# ── Модуль «Инвентарь» (принтеры/ЗиП/расходники; задел под ККТ/ИБП) ───────────
+# Неймспейс inventory: не пересекается со складом активов модуля «Автобусы»
+# (тот использует Asset/AssetStatus и роуты /assets — их НЕ трогаем).
+# Времена: created_at — UTC (utcnow); «человеческие» даты (sent_at/received_at/
+# at/commissioned_at/…) — наивное локальное Хабаровска, без конверсии (§6.2).
+class InvAssetType:
+    printer = "printer"
+    kkt = "kkt"          # задел, сейчас не используем
+    ups = "ups"          # задел
+    other = "other"
+    ALL = (printer, kkt, ups, other)
+
+
+class InvAssetStatus:
+    installed = "installed"        # стоит и работает на точке
+    reserve = "reserve"            # в ЗиПе, запасной
+    at_service = "at_service"      # уехал в ремонт (лаба/сервис)
+    broken = "broken"              # неисправен, ждёт решения
+    written_off = "written_off"    # списан
+    ALL = (installed, reserve, at_service, broken, written_off)
+
+
+class InvLocationKind:
+    POINT = "point"
+    OFFICE = "office"
+    SERVICE = "service"       # лаба/сервис-центр
+    WAREHOUSE = "warehouse"
+    ALL = (POINT, OFFICE, SERVICE, WAREHOUSE)
+
+
+class Location(Base):
+    """Справочник точек: АВ, Офис, Троицкое, Бикин, Лаба, магазины…
+
+    Общий для всего «инвентаря» (принтеры сейчас, ККТ/ИБП позже переиспользуют).
+    """
+
+    __tablename__ = "locations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(255))
+    kind: Mapped[str] = mapped_column(String(16), default=InvLocationKind.POINT)
+    address: Mapped[str | None] = mapped_column(String(512), default=None)
+    note: Mapped[str | None] = mapped_column(Text, default=None)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class InvAsset(Base):
+    """Единица инвентаря (принтер; в будущем ККТ/ИБП по полю type)."""
+
+    __tablename__ = "inv_assets"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    type: Mapped[str] = mapped_column(String(16), default=InvAssetType.printer)
+    model: Mapped[str | None] = mapped_column(String(128), default=None)
+    serial: Mapped[str | None] = mapped_column(String(128), default=None, index=True)
+    inv_number: Mapped[str | None] = mapped_column(String(64), default=None)
+    name: Mapped[str | None] = mapped_column(String(255), default=None)
+    location_id: Mapped[int | None] = mapped_column(
+        ForeignKey("locations.id", ondelete="SET NULL"), default=None
+    )
+    status: Mapped[str] = mapped_column(String(16), default=InvAssetStatus.installed)
+    responsible: Mapped[str | None] = mapped_column(String(128), default=None)  # ФИО/логин
+    commissioned_at: Mapped[dt.datetime | None] = mapped_column(DateTime, default=None)  # наивная локальная
+    note: Mapped[str | None] = mapped_column(Text, default=None)
+    # meta под тип: для принтера {ip, snmp_port, snmp_community(enc), snmp_enabled,
+    # last_poll_at, last_counters:{pages, toner_pct, bunker_pct, errors}}
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class InvMovement(Base):
+    """Перемещение актива между точками. received_at IS NULL → «в пути»."""
+
+    __tablename__ = "inv_movements"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("inv_assets.id", ondelete="CASCADE"))
+    from_location_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    to_location_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    sent_at: Mapped[dt.datetime | None] = mapped_column(DateTime, default=None)      # наивная локальная
+    received_at: Mapped[dt.datetime | None] = mapped_column(DateTime, default=None)  # NULL = в пути
+    carrier: Mapped[str | None] = mapped_column(String(128), default=None)          # кто вёз
+    sent_by: Mapped[str | None] = mapped_column(String(128), default=None)
+    received_by: Mapped[str | None] = mapped_column(String(128), default=None)
+    note: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class InvService(Base):
+    """Ремонт актива (отдали в лабу/сервис)."""
+
+    __tablename__ = "inv_services"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("inv_assets.id", ondelete="CASCADE"))
+    vendor: Mapped[str | None] = mapped_column(String(128), default=None)  # куда отдали
+    issue: Mapped[str | None] = mapped_column(Text, default=None)          # что случилось
+    sent_at: Mapped[dt.datetime | None] = mapped_column(DateTime, default=None)
+    promised_at: Mapped[dt.datetime | None] = mapped_column(DateTime, default=None)
+    returned_at: Mapped[dt.datetime | None] = mapped_column(DateTime, default=None)
+    cost: Mapped[float | None] = mapped_column(Float, default=None)
+    result: Mapped[str | None] = mapped_column(Text, default=None)
+    note: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class InvConsumableKind:
+    toner = "toner"
+    waste_bunker = "waste_bunker"
+    drum = "drum"
+    fuser_film = "fuser_film"
+    other = "other"
+    ALL = (toner, waste_bunker, drum, fuser_film, other)
+
+
+INV_CONSUMABLE_KIND_NAMES = {
+    InvConsumableKind.toner: "тонер-картридж",
+    InvConsumableKind.waste_bunker: "бункер отработки",
+    InvConsumableKind.drum: "драм-юнит",
+    InvConsumableKind.fuser_film: "термоплёнка",
+    InvConsumableKind.other: "прочее",
+}
+
+
+class InvConsumableModel(Base):
+    """SKU расходника (напр. TK-1150) + совместимость и цены для экономики."""
+
+    __tablename__ = "inv_consumable_models"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), default=InvConsumableKind.toner)
+    model: Mapped[str] = mapped_column(String(128))
+    compatible_with: Mapped[list] = mapped_column(JSON, default=list)  # список моделей принтеров
+    price_new: Mapped[float | None] = mapped_column(Float, default=None)
+    price_refill: Mapped[float | None] = mapped_column(Float, default=None)
+    resource_pages: Mapped[int | None] = mapped_column(Integer, default=None)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    note: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class InvConsumableStock(Base):
+    """Остаток расходника на точке (уникально по модель×точка)."""
+
+    __tablename__ = "inv_consumable_stock"
+    __table_args__ = (
+        UniqueConstraint("consumable_model_id", "location_id", name="uq_inv_stock"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    consumable_model_id: Mapped[int] = mapped_column(
+        ForeignKey("inv_consumable_models.id", ondelete="CASCADE")
+    )
+    location_id: Mapped[int] = mapped_column(ForeignKey("locations.id", ondelete="CASCADE"))
+    qty: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class InvConsumableEventType:
+    purchased = "purchased"                       # куплен новый (приход)
+    installed = "installed"                       # поставлен в принтер (расход со склада)
+    removed = "removed"                           # снят с принтера
+    sent_to_refill = "sent_to_refill"
+    returned_from_refill = "returned_from_refill"
+    scrapped = "scrapped"                         # списан
+    ALL = (purchased, installed, removed, sent_to_refill, returned_from_refill, scrapped)
+
+
+class InvConsumableEvent(Base):
+    """История движения расходника + экономика (цены заправок/покупок)."""
+
+    __tablename__ = "inv_consumable_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    consumable_model_id: Mapped[int] = mapped_column(
+        ForeignKey("inv_consumable_models.id", ondelete="CASCADE")
+    )
+    event_type: Mapped[str] = mapped_column(String(24), default=InvConsumableEventType.purchased)
+    asset_id: Mapped[int | None] = mapped_column(
+        ForeignKey("inv_assets.id", ondelete="SET NULL"), default=None
+    )  # для installed/removed — в какой принтер
+    location_id: Mapped[int | None] = mapped_column(Integer, default=None)  # где произошло
+    qty: Mapped[int] = mapped_column(Integer, default=1)
+    at: Mapped[dt.datetime | None] = mapped_column(DateTime, default=None)  # наивная локальная
+    cost: Mapped[float | None] = mapped_column(Float, default=None)         # цена операции
+    counter_at: Mapped[int | None] = mapped_column(Integer, default=None)   # счётчик принтера
+    by_user: Mapped[str | None] = mapped_column(String(128), default=None)
+    note: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
