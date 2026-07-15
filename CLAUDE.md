@@ -101,9 +101,10 @@ app/
                      dahua.py (CGI) · detect.py (автоопределение) · factory.py (build_client)
   services/          poller · archive · alerts · quality · metrics · backup · worklist ·
                      bulkops · watchdog · audit · appsettings · users · telegram · bot ·
-                     checkin_ingest (ingestion заселений)
+                     checkin_ingest (ingestion заселений) · onec_sync (1С HTTP-сервис) ·
+                     inventory (принтеры/ЗиП/расходники)
   api/               auth · devices · monitoring · dashboard · plan · buses · worklist ·
-                     users_api · backup_api · checkin
+                     users_api · backup_api · checkin · inventory_api
   templates/ static/ SSR-панель, PWA (sw.js, manifest), стили (style.css, CSS-переменные)
 mock/                эмулятор NVR (ISAPI + Dahua CGI) с digest-auth: server.py, state.py, auth.py
 tests/               pytest против моков (по модулю на файл)
@@ -222,6 +223,11 @@ replace_existing=True)`. Условные джобы включаются по �
 - **Бэкап** (`services/backup.py`): экспорт/импорт данных, авто-бэкап 03:30.
 - **Метрики** (`services/metrics.py`): `/metrics` для Prometheus.
 - **Автобусы** (`api/buses.py`): офлайн-учёт дисковой ротации, атомарная «Замена диска», журнал.
+- **Инвентарь** (`api/inventory_api.py`, `services/inventory.py`): реестр активов (принтеры;
+  задел ККТ/ИБП по `InvAsset.type`) в неймспейсе `inventory` — НЕ путать со складом `Asset`
+  модуля «Автобусы». Перемещения (честное «в пути»: `location_id` меняется только при приёмке),
+  ремонты, расходники со списанием со склада (минус запрещён), отчёт экономики заправок.
+  Общий справочник точек `Location`. `meta.snmp_community` шифруется; SNMP-поллер — отдельная задача.
 - **Заселения** (`api/checkin.py`, `services/checkin_ingest.py`): см. §12.
 - **Пользователи/вход** (`api/auth.py`, `users_api.py`, `services/users.py`): роли admin/bus.
 
