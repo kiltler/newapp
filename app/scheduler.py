@@ -8,7 +8,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import settings
-from app.services import archive, backup, poller, quality, watchdog
+from app.services import archive, backup, poller, quality, snmp_poller, watchdog
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +44,17 @@ def start_scheduler() -> None:
             trigger=IntervalTrigger(minutes=settings.quality_check_minutes),
             id="quality_check",
             name="Контроль качества картинки",
+            max_instances=1,
+            coalesce=True,
+            replace_existing=True,
+        )
+
+    if settings.snmp_poll_minutes > 0:
+        scheduler.add_job(
+            snmp_poller.poll_all_printers,
+            trigger=IntervalTrigger(minutes=settings.snmp_poll_minutes),
+            id="snmp_poll",
+            name="SNMP-опрос принтеров",
             max_instances=1,
             coalesce=True,
             replace_existing=True,

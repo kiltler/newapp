@@ -112,6 +112,10 @@ class Settings(BaseSettings):
     onec_marker_margin_sec: int = 120
     onec_clock_warn_sec: int = 120      # |смещение часов регистратора| больше → предупреждение
 
+    # Модуль «Инвентарь»: SNMP-поллер принтеров
+    snmp_poll_minutes: int = 0            # период опроса, 0 = выключено
+    snmp_default_community: str = "public"  # community по умолчанию, если у актива не задан
+
     # Прочее
     log_level: str = "INFO"
     mock_mode: bool = False

@@ -33,8 +33,10 @@
     <label class="muted">Community<input id="s_comm" type="password" placeholder="{{ '•••• (задан)' if meta.get('has_snmp_community') else 'public' }}"></label>
     <label class="muted">Опрашивать<br><input id="s_en" type="checkbox" {{'checked' if meta.get('snmp_enabled')}}></label>
   </div>
-  <p class="muted" style="font-size:13px">Последний опрос: {{ meta.get('last_poll_at') or '— (поллера ещё нет)' }} ·
-     счётчики: {{ meta.get('last_counters') or '—' }}</p>
+  {% set lc = meta.get('last_counters') or {} %}
+  <p class="muted" style="font-size:13px">Последний опрос: {{ meta.get('last_poll_at') or '— (ещё не опрашивался)' }}
+    {% if meta.get('last_error') %}· <span style="color:var(--bad)">ошибка: {{ meta.get('last_error') }}</span>{% endif %}
+    {% if lc %}<br>📄 страниц: <b>{{ lc.get('pages','—') }}</b> · 🖋 тонер: <b>{{ lc.get('toner_pct','—') }}%</b> · 🗑 бункер: <b>{{ lc.get('bunker_pct','—') }}%</b>{% endif %}</p>
   <button class="mini" onclick="saveSnmp()">💾 Сохранить SNMP</button> <span id="snmpMsg" class="muted"></span>
 </div>
 {% endif %}

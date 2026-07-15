@@ -6,9 +6,10 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Системные зависимости. ffmpeg — для ingestion клипов субпотока (модуль «Заселения»).
+# Системные зависимости. ffmpeg — для ingestion клипов субпотока (модуль «Заселения»);
+# snmp (net-snmp) — для SNMP-опроса принтеров (модуль «Инвентарь»).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ca-certificates tzdata ffmpeg && rm -rf /var/lib/apt/lists/*
+    curl ca-certificates tzdata ffmpeg snmp && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt

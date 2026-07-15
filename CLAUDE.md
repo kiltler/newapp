@@ -227,7 +227,10 @@ replace_existing=True)`. Условные джобы включаются по �
   задел ККТ/ИБП по `InvAsset.type`) в неймспейсе `inventory` — НЕ путать со складом `Asset`
   модуля «Автобусы». Перемещения (честное «в пути»: `location_id` меняется только при приёмке),
   ремонты, расходники со списанием со склада (минус запрещён), отчёт экономики заправок.
-  Общий справочник точек `Location`. `meta.snmp_community` шифруется; SNMP-поллер — отдельная задача.
+  Общий справочник точек `Location`. `meta.snmp_community` шифруется. **SNMP-поллер
+  принтеров** (`services/snmp_poller.py`): net-snmp через subprocess (пакет `snmp` в
+  Dockerfile), джоб `snmp_poll` (`SNMP_POLL_MINUTES`), пишет счётчики/тонер/бункер в
+  `meta.last_counters`. Опрашивает только `snmp_enabled` принтеры с `meta.ip`.
 - **Заселения** (`api/checkin.py`, `services/checkin_ingest.py`): см. §12.
 - **Пользователи/вход** (`api/auth.py`, `users_api.py`, `services/users.py`): роли admin/bus.
 
