@@ -37,6 +37,7 @@
         {% if _owner %}<a href="/users">Пользователи</a>{% endif %}
         {% if _owner or 'backup' in _caps %}<a href="/backup">Бэкап</a>{% endif %}
         {% if _owner or 'buses' in _caps %}<a href="/buses" class="nav-bus">🚌 Автобусы</a>{% endif %}
+        {% if _owner or 'inventory' in _caps %}<a href="/inventory" class="nav-inv">🖨 Инвентарь</a>{% endif %}
         {% if _mon %}
         <a href="#" id="add-device-btn">+ Устройство</a>
         <a href="#" id="bell" title="Системные уведомления">🔕</a>

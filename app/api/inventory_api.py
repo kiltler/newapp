@@ -30,8 +30,24 @@ from app.models import (
 from app.services import audit, inventory
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+from fastapi.responses import HTMLResponse  # noqa: E402
+from fastapi.templating import Jinja2Templates  # noqa: E402
+
+from app.models import INV_CONSUMABLE_KIND_NAMES, InvConsumableEventType  # noqa: E402
+from app.templatefilters import register as _register_filters  # noqa: E402
+
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+_register_filters(templates)
 
 router = APIRouter(tags=["inventory"])
+
+_STATUS_NAMES = {
+    InvAssetStatus.installed: "работает", InvAssetStatus.reserve: "в ЗиПе",
+    InvAssetStatus.at_service: "в ремонте", InvAssetStatus.broken: "неисправен",
+    InvAssetStatus.written_off: "списан",
+}
+_TYPE_NAMES = {InvAssetType.printer: "принтер", InvAssetType.kkt: "ККТ",
+               InvAssetType.ups: "ИБП", InvAssetType.other: "прочее"}
 
 
 # ── Сериализация ─────────────────────────────────────────────────────────────
@@ -372,3 +388,109 @@ async def report(date_from: str | None = None, date_to: str | None = None,
     df = dt.datetime.fromisoformat(date_from) if date_from else None
     dtu = dt.datetime.fromisoformat(date_to) if date_to else None
     return await inventory.refill_economy(session, date_from=df, date_to=dtu)
+
+
+# ── HTML-страницы ────────────────────────────────────────────────────────────
+async def _locations(session: AsyncSession) -> list[Location]:
+    return list((await session.execute(select(Location).order_by(Location.name))).scalars())
+
+
+@router.get("/inventory", response_class=HTMLResponse)
+async def page_list(request: Request, type: str | None = None, location_id: int | None = None,
+                    status: str | None = None, model: str | None = None, q: str | None = None,
+                    session: AsyncSession = Depends(get_session)):
+    stmt = select(InvAsset)
+    if type:
+        stmt = stmt.where(InvAsset.type == type)
+    if location_id is not None:
+        stmt = stmt.where(InvAsset.location_id == location_id)
+    if status:
+        stmt = stmt.where(InvAsset.status == status)
+    if model:
+        stmt = stmt.where(InvAsset.model.ilike(f"%{model}%"))
+    if q:
+        like = f"%{q}%"
+        stmt = stmt.where(InvAsset.serial.ilike(like) | InvAsset.inv_number.ilike(like)
+                          | InvAsset.name.ilike(like))
+    assets = list((await session.execute(stmt.order_by(InvAsset.id.desc()))).scalars())
+    open_ids = set((await session.execute(
+        select(InvMovement.asset_id).where(InvMovement.received_at.is_(None)))).scalars())
+    locs = await _locations(session)
+    loc_names = {l.id: l.name for l in locs}
+    return templates.TemplateResponse("inventory_list.html", {
+        "request": request, "assets": assets, "open_ids": open_ids, "loc_names": loc_names,
+        "locations": locs, "status_names": _STATUS_NAMES, "type_names": _TYPE_NAMES,
+        "f": {"type": type or "", "location_id": location_id, "status": status or "",
+              "model": model or "", "q": q or ""},
+    })
+
+
+@router.get("/inventory/stock", response_class=HTMLResponse)
+async def page_stock(request: Request, location_id: int | None = None,
+                     session: AsyncSession = Depends(get_session)):
+    summary = await inventory.stock_summary(session, location_id)
+    locs = await _locations(session)
+    models = list((await session.execute(
+        select(InvConsumableModel).where(InvConsumableModel.active.is_(True))
+        .order_by(InvConsumableModel.model))).scalars())
+    return templates.TemplateResponse("inventory_stock.html", {
+        "request": request, "summary": summary, "locations": locs, "models": models,
+        "kind_names": INV_CONSUMABLE_KIND_NAMES, "type_names": _TYPE_NAMES,
+        "location_id": location_id,
+    })
+
+
+@router.get("/inventory/locations", response_class=HTMLResponse)
+async def page_locations(request: Request, session: AsyncSession = Depends(get_session)):
+    return templates.TemplateResponse("inventory_locations.html", {
+        "request": request, "locations": await _locations(session),
+    })
+
+
+@router.get("/inventory/consumables", response_class=HTMLResponse)
+async def page_consumables(request: Request, session: AsyncSession = Depends(get_session)):
+    models = list((await session.execute(
+        select(InvConsumableModel).order_by(InvConsumableModel.model))).scalars())
+    return templates.TemplateResponse("inventory_consumables.html", {
+        "request": request, "models": models, "kind_names": INV_CONSUMABLE_KIND_NAMES,
+    })
+
+
+@router.get("/inventory/report", response_class=HTMLResponse)
+async def page_report(request: Request, date_from: str | None = None, date_to: str | None = None,
+                      session: AsyncSession = Depends(get_session)):
+    df = dt.datetime.fromisoformat(date_from) if date_from else None
+    dtu = dt.datetime.fromisoformat(date_to) if date_to else None
+    econ = await inventory.refill_economy(session, date_from=df, date_to=dtu)
+    return templates.TemplateResponse("inventory_report.html", {
+        "request": request, "econ": econ, "date_from": date_from or "", "date_to": date_to or "",
+    })
+
+
+@router.get("/inventory/{asset_id}", response_class=HTMLResponse)
+async def page_asset(asset_id: int, request: Request, session: AsyncSession = Depends(get_session)):
+    a = await session.get(InvAsset, asset_id)
+    if a is None:
+        raise HTTPException(404, "Актив не найден")
+    movements = list((await session.execute(
+        select(InvMovement).where(InvMovement.asset_id == asset_id)
+        .order_by(InvMovement.id.desc()))).scalars())
+    services = list((await session.execute(
+        select(InvService).where(InvService.asset_id == asset_id)
+        .order_by(InvService.id.desc()))).scalars())
+    consumables = list((await session.execute(
+        select(InvConsumableEvent).where(InvConsumableEvent.asset_id == asset_id)
+        .order_by(InvConsumableEvent.id.desc()))).scalars())
+    locs = await _locations(session)
+    loc_names = {l.id: l.name for l in locs}
+    cmodels = list((await session.execute(
+        select(InvConsumableModel).where(InvConsumableModel.active.is_(True)))).scalars())
+    return templates.TemplateResponse("inventory_asset.html", {
+        "request": request, "a": a, "meta": _safe_meta(a.meta),
+        "movements": movements, "services": services, "consumables": consumables,
+        "in_transit": any(m.received_at is None for m in movements),
+        "locations": locs, "loc_names": loc_names, "cmodels": cmodels,
+        "status_names": _STATUS_NAMES, "type_names": _TYPE_NAMES,
+        "event_names": {InvConsumableEventType.installed: "установлен",
+                        InvConsumableEventType.removed: "снят"},
+    })

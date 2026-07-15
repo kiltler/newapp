@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}{{ a.model or "Актив" }} — Инвентарь{% endblock %}
+{% block content %}
+<p><a href="/inventory">← к списку</a></p>
+<div class="page-head">
+  <h2>{{ type_names.get(a.type, a.type) }} · {{ a.model or "без модели" }}
+    {% if in_transit %}<span class="badge warn">🚚 в пути</span>{% endif %}</h2>
+</div>
+
+<div class="card">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px">
+    <label class="muted">Модель<input id="e_model" value="{{ a.model or '' }}"></label>
+    <label class="muted">Серийник<input id="e_serial" value="{{ a.serial or '' }}"></label>
+    <label class="muted">Инв. номер<input id="e_inv" value="{{ a.inv_number or '' }}"></label>
+    <label class="muted">Имя/метка<input id="e_name" value="{{ a.name or '' }}"></label>
+    <label class="muted">Точка<select id="e_loc"><option value="">—</option>
+      {% for l in locations %}<option value="{{l.id}}" {{'selected' if l.id==a.location_id}}>{{l.name}}</option>{% endfor %}</select></label>
+    <label class="muted">Статус<select id="e_status">
+      {% for k,v in status_names.items() %}<option value="{{k}}" {{'selected' if k==a.status}}>{{v}}</option>{% endfor %}</select></label>
+    <label class="muted">Ответственный<input id="e_resp" value="{{ a.responsible or '' }}"></label>
+    <label class="muted">Введён в эксплуатацию<input id="e_comm" placeholder="ГГГГ-ММ-ДД" value="{{ a.commissioned_at.strftime('%Y-%m-%d') if a.commissioned_at else '' }}"></label>
+  </div>
+  <label class="muted">Заметка<textarea id="e_note" rows="2">{{ a.note or '' }}</textarea></label>
+  <div style="margin-top:8px"><button class="mini" onclick="saveAsset()">💾 Сохранить</button> <span id="saveMsg" class="muted"></span></div>
+</div>
+
+{% if a.type == 'printer' %}
+<div class="card">
+  <h3>SNMP <span class="muted" style="font-weight:400">(поллер — отдельная задача; сейчас поля хранятся вручную)</span></h3>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px">
+    <label class="muted">IP<input id="s_ip" value="{{ meta.get('ip','') }}"></label>
+    <label class="muted">Порт SNMP<input id="s_port" type="number" value="{{ meta.get('snmp_port',161) }}"></label>
+    <label class="muted">Community<input id="s_comm" type="password" placeholder="{{ '•••• (задан)' if meta.get('has_snmp_community') else 'public' }}"></label>
+    <label class="muted">Опрашивать<br><input id="s_en" type="checkbox" {{'checked' if meta.get('snmp_enabled')}}></label>
+  </div>
+  <p class="muted" style="font-size:13px">Последний опрос: {{ meta.get('last_poll_at') or '— (поллера ещё нет)' }} ·
+     счётчики: {{ meta.get('last_counters') or '—' }}</p>
+  <button class="mini" onclick="saveSnmp()">💾 Сохранить SNMP</button> <span id="snmpMsg" class="muted"></span>
+</div>
+{% endif %}
+
+<div class="card">
+  <h3>Действия</h3>
+  <div class="collect-controls">
+    <select id="mv_loc"><option value="">точка назначения…</option>
+      {% for l in locations %}<option value="{{l.id}}">{{l.name}}</option>{% endfor %}</select>
+    <input id="mv_carrier" placeholder="кто вёз">
+    <button class="mini" onclick="doMove()">🚚 Переместить</button>
+  </div>
+  <div class="collect-controls" style="margin-top:6px">
+    <input id="sv_vendor" placeholder="куда (лаба/сервис)">
+    <input id="sv_issue" placeholder="что случилось">
+    <button class="mini" onclick="doService()">🔧 В ремонт</button>
+  </div>
+  <div class="collect-controls" style="margin-top:6px">
+    <select id="ic_model"><option value="">расходник…</option>
+      {% for m in cmodels %}<option value="{{m.id}}">{{m.model}}</option>{% endfor %}</select>
+    <input id="ic_counter" type="number" placeholder="счётчик стр.">
+    <button class="mini" onclick="doInstall()">🧴 Установить расходник</button>
+  </div>
+  <span id="actMsg" class="muted"></span>
+</div>
+
+<div class="card"><h3>Движения</h3>
+  <table class="tbl"><thead><tr><th>Откуда</th><th>Куда</th><th>Отправлен</th><th>Принят</th><th>Вёз</th></tr></thead><tbody>
+  {% for m in movements %}<tr>
+    <td>{{ loc_names.get(m.from_location_id,'—') }}</td><td>{{ loc_names.get(m.to_location_id,'—') }}</td>
+    <td>{{ m.sent_at.strftime('%d.%m %H:%M') if m.sent_at else '—' }}</td>
+    <td>{% if m.received_at %}{{ m.received_at.strftime('%d.%m %H:%M') }}{% else %}<button class="mini" onclick="doReceive({{m.id}})">принять</button>{% endif %}</td>
+    <td>{{ m.carrier or '—' }}</td></tr>
+  {% else %}<tr><td colspan="5" class="muted">нет</td></tr>{% endfor %}
+  </tbody></table>
+</div>
+
+<div class="card"><h3>Ремонты</h3>
+  <table class="tbl"><thead><tr><th>Куда</th><th>Проблема</th><th>Отдан</th><th>Обещали</th><th>Вернули</th><th>Цена</th><th></th></tr></thead><tbody>
+  {% for s in services %}<tr>
+    <td>{{ s.vendor or '—' }}</td><td>{{ s.issue or '—' }}</td>
+    <td>{{ s.sent_at.strftime('%d.%m') if s.sent_at else '—' }}</td>
+    <td>{{ s.promised_at.strftime('%d.%m') if s.promised_at else '—' }}</td>
+    <td>{% if s.returned_at %}{{ s.returned_at.strftime('%d.%m') }}{% else %}<button class="mini" onclick="doReturn({{s.id}})">вернуть</button>{% endif %}</td>
+    <td>{{ s.cost or '' }}</td><td>{{ s.result or '' }}</td></tr>
+  {% else %}<tr><td colspan="7" class="muted">нет</td></tr>{% endfor %}
+  </tbody></table>
+</div>
+
+<div class="card"><h3>Установленные расходники</h3>
+  <table class="tbl"><thead><tr><th>Когда</th><th>Событие</th><th>SKU id</th><th>Счётчик</th><th>Кто</th></tr></thead><tbody>
+  {% for e in consumables %}<tr>
+    <td>{{ e.at.strftime('%d.%m.%Y %H:%M') if e.at else '—' }}</td>
+    <td>{{ event_names.get(e.event_type, e.event_type) }}</td>
+    <td>{{ e.consumable_model_id }}</td><td>{{ e.counter_at or '—' }}</td><td>{{ e.by_user or '—' }}</td></tr>
+  {% else %}<tr><td colspan="5" class="muted">нет</td></tr>{% endfor %}
+  </tbody></table>
+</div>
+
+<script>
+const AID={{ a.id }};
+async function postJSON(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+  if(!r.ok){let t=await r.json().catch(()=>({}));throw new Error(t.detail||r.status);}return r.json();}
+function msg(id,t,ok){const e=document.getElementById(id);e.textContent=(ok?'✅ ':'❌ ')+t;}
+const val=id=>document.getElementById(id).value;
+async function saveAsset(){try{await postJSON('/api/inventory/assets/'+AID,{
+    type:'{{a.type}}',model:val('e_model')||null,serial:val('e_serial')||null,inv_number:val('e_inv')||null,
+    name:val('e_name')||null,location_id:+val('e_loc')||null,status:val('e_status'),responsible:val('e_resp')||null,
+    commissioned_at:val('e_comm')||null,note:val('e_note')||null});msg('saveMsg','сохранено',1);}
+  catch(e){msg('saveMsg',e.message,0);}}
+async function saveSnmp(){try{await postJSON('/api/inventory/assets/'+AID,{
+    type:'printer',model:val('e_model')||null,serial:val('e_serial')||null,inv_number:val('e_inv')||null,
+    name:val('e_name')||null,location_id:+val('e_loc')||null,status:val('e_status'),responsible:val('e_resp')||null,
+    commissioned_at:val('e_comm')||null,note:val('e_note')||null,
+    meta:{ip:val('s_ip')||null,snmp_port:+val('s_port')||161,snmp_enabled:document.getElementById('s_en').checked,
+          snmp_community:val('s_comm')||''}});msg('snmpMsg','сохранено (community зашифрован)',1);}
+  catch(e){msg('snmpMsg',e.message,0);}}
+async function doMove(){try{await postJSON('/api/inventory/assets/'+AID+'/move',{to_location_id:+val('mv_loc'),carrier:val('mv_carrier')||null});location.reload();}catch(e){msg('actMsg',e.message,0);}}
+async function doReceive(id){try{await postJSON('/api/inventory/movements/'+id+'/receive',{});location.reload();}catch(e){msg('actMsg',e.message,0);}}
+async function doService(){try{await postJSON('/api/inventory/assets/'+AID+'/service',{vendor:val('sv_vendor')||null,issue:val('sv_issue')||null});location.reload();}catch(e){msg('actMsg',e.message,0);}}
+async function doReturn(id){try{await postJSON('/api/inventory/services/'+id+'/return',{});location.reload();}catch(e){msg('actMsg',e.message,0);}}
+async function doInstall(){try{await postJSON('/api/inventory/assets/'+AID+'/consumable',{consumable_model_id:+val('ic_model'),counter_at:+val('ic_counter')||null});location.reload();}catch(e){msg('actMsg',e.message,0);}}
+</script>
+{% endblock %}

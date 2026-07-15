@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Инвентарь — NVR Monitor{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h2>🖨 Инвентарь</h2>
+  <nav class="subnav">
+    <a href="/inventory/stock">📦 ЗиП</a>
+    <a href="/inventory/report">💰 Экономика заправок</a>
+    <a href="/inventory/consumables">🧴 Расходники (SKU)</a>
+    <a href="/inventory/locations">📍 Точки</a>
+    <button class="mini" onclick="document.getElementById('addAsset').classList.toggle('hidden')">+ Актив</button>
+  </nav>
+</div>
+
+<form method="get" class="collect-controls" style="margin:10px 0">
+  <select name="type"><option value="">— тип —</option>
+    {% for k,v in type_names.items() %}<option value="{{k}}" {{'selected' if f.type==k}}>{{v}}</option>{% endfor %}
+  </select>
+  <select name="location_id"><option value="">— точка —</option>
+    {% for l in locations %}<option value="{{l.id}}" {{'selected' if f.location_id==l.id}}>{{l.name}}</option>{% endfor %}
+  </select>
+  <select name="status"><option value="">— статус —</option>
+    {% for k,v in status_names.items() %}<option value="{{k}}" {{'selected' if f.status==k}}>{{v}}</option>{% endfor %}
+  </select>
+  <input name="model" placeholder="модель" value="{{f.model}}">
+  <input name="q" placeholder="серийник / инв. номер" value="{{f.q}}">
+  <button class="mini" type="submit">Фильтр</button>
+</form>
+
+<div id="addAsset" class="hidden card" style="margin-bottom:12px">
+  <h3>Новый актив</h3>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px">
+    <label class="muted">Тип<select id="na_type">{% for k,v in type_names.items() %}<option value="{{k}}">{{v}}</option>{% endfor %}</select></label>
+    <label class="muted">Модель<input id="na_model" placeholder="напр. Kyocera P2040"></label>
+    <label class="muted">Серийник<input id="na_serial"></label>
+    <label class="muted">Инв. номер<input id="na_inv"></label>
+    <label class="muted">Имя/метка<input id="na_name"></label>
+    <label class="muted">Точка<select id="na_loc"><option value="">—</option>{% for l in locations %}<option value="{{l.id}}">{{l.name}}</option>{% endfor %}</select></label>
+    <label class="muted">Статус<select id="na_status">{% for k,v in status_names.items() %}<option value="{{k}}" {{'selected' if k=='installed'}}>{{v}}</option>{% endfor %}</select></label>
+    <label class="muted">Ответственный<input id="na_resp"></label>
+  </div>
+  <div style="margin-top:8px"><button class="mini" onclick="addAsset()">💾 Создать</button> <span id="naMsg" class="muted"></span></div>
+</div>
+
+<table class="tbl">
+  <thead><tr><th>Модель</th><th>Серийник</th><th>Инв.</th><th>Точка</th><th>Статус</th><th>Ответственный</th><th></th></tr></thead>
+  <tbody>
+  {% for a in assets %}
+    <tr onclick="location='/inventory/{{a.id}}'" style="cursor:pointer">
+      <td>{{ type_names.get(a.type, a.type) }} · {{ a.model or "—" }}</td>
+      <td>{{ a.serial or "—" }}</td>
+      <td>{{ a.inv_number or "—" }}</td>
+      <td>{{ loc_names.get(a.location_id, "—") }}</td>
+      <td>{{ status_names.get(a.status, a.status) }}</td>
+      <td>{{ a.responsible or "—" }}</td>
+      <td>{% if a.id in open_ids %}<span class="badge warn">🚚 в пути</span>{% endif %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="muted">Активов не найдено. Нажмите «+ Актив».</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<script>
+async function postJSON(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+  if(!r.ok){let t=await r.json().catch(()=>({}));throw new Error(t.detail||r.status);}return r.json();}
+async function addAsset(){
+  const body={type:document.getElementById('na_type').value,model:document.getElementById('na_model').value||null,
+    serial:document.getElementById('na_serial').value||null,inv_number:document.getElementById('na_inv').value||null,
+    name:document.getElementById('na_name').value||null,location_id:+document.getElementById('na_loc').value||null,
+    status:document.getElementById('na_status').value,responsible:document.getElementById('na_resp').value||null};
+  try{const d=await postJSON('/api/inventory/assets',body);location='/inventory/'+d.id;}
+  catch(e){document.getElementById('naMsg').textContent='❌ '+e.message;}
+}
+</script>
+{% endblock %}

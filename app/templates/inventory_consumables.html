@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Расходники (SKU) — Инвентарь{% endblock %}
+{% block content %}
+<p><a href="/inventory">← к списку</a></p>
+<div class="page-head"><h2>🧴 Расходники (SKU)</h2></div>
+
+<div class="card">
+  <h3>Новый SKU</h3>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px">
+    <label class="muted">Вид<select id="c_kind">
+      {% for k,v in kind_names.items() %}<option value="{{k}}">{{v}}</option>{% endfor %}</select></label>
+    <label class="muted">Модель<input id="c_model" placeholder="напр. TK-1150"></label>
+    <label class="muted">Совместимость<input id="c_compat" placeholder="P2040, M2540 (через запятую)"></label>
+    <label class="muted">Цена новый ₽<input id="c_new" type="number" step="0.01"></label>
+    <label class="muted">Цена заправки ₽<input id="c_refill" type="number" step="0.01"></label>
+    <label class="muted">Ресурс, стр.<input id="c_res" type="number"></label>
+  </div>
+  <div style="margin-top:8px"><button class="mini" onclick="addModel()">💾 Добавить</button> <span id="cMsg" class="muted"></span></div>
+</div>
+
+<table class="tbl"><thead><tr><th>Модель</th><th>Вид</th><th>Совместимость</th><th>Новый ₽</th><th>Заправка ₽</th><th>Ресурс</th></tr></thead><tbody>
+{% for m in models %}<tr>
+  <td>{{ m.model }}</td><td>{{ kind_names.get(m.kind, m.kind) }}</td>
+  <td>{{ (m.compatible_with or [])|join(', ') or '—' }}</td>
+  <td>{{ m.price_new or '—' }}</td><td>{{ m.price_refill or '—' }}</td><td>{{ m.resource_pages or '—' }}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">SKU ещё нет</td></tr>{% endfor %}
+</tbody></table>
+
+<script>
+async function postJSON(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+  if(!r.ok){let t=await r.json().catch(()=>({}));throw new Error(t.detail||r.status);}return r.json();}
+const val=id=>document.getElementById(id).value;
+async function addModel(){const m=val('c_model').trim();
+  if(!m){document.getElementById('cMsg').textContent='укажите модель';return;}
+  const compat=val('c_compat').split(',').map(s=>s.trim()).filter(Boolean);
+  try{await postJSON('/api/inventory/consumable-models',{kind:val('c_kind'),model:m,compatible_with:compat,
+    price_new:+val('c_new')||null,price_refill:+val('c_refill')||null,resource_pages:+val('c_res')||null});location.reload();}
+  catch(e){document.getElementById('cMsg').textContent='❌ '+e.message;}}
+</script>
+{% endblock %}

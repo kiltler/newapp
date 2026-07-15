@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}ЗиП — Инвентарь{% endblock %}
+{% block content %}
+<p><a href="/inventory">← к списку</a></p>
+<div class="page-head"><h2>📦 ЗиП / склад</h2>
+  <form method="get" class="collect-controls">
+    <select name="location_id" onchange="this.form.submit()"><option value="">— все точки —</option>
+      {% for l in locations %}<option value="{{l.id}}" {{'selected' if location_id==l.id}}>{{l.name}}</option>{% endfor %}</select>
+  </form>
+</div>
+
+<div class="card">
+  <h3>Запасные активы (в ЗиПе)</h3>
+  <table class="tbl"><thead><tr><th>Точка</th><th>Тип</th><th>Модель</th><th>Кол-во</th></tr></thead><tbody>
+  {% for g in summary.spare_assets %}<tr>
+    <td>{{ g.location_name or '—' }}</td><td>{{ type_names.get(g.type, g.type) }}</td>
+    <td>{{ g.model or '—' }}</td><td><b>{{ g.count }}</b></td></tr>
+  {% else %}<tr><td colspan="4" class="muted">запасных активов нет</td></tr>{% endfor %}
+  </tbody></table>
+</div>
+
+<div class="card">
+  <h3>Расходники на точках</h3>
+  <table class="tbl"><thead><tr><th>Модель</th><th>Вид</th><th>Точка</th><th>Остаток</th></tr></thead><tbody>
+  {% for c in summary.consumables %}<tr>
+    <td>{{ c.model or '—' }}</td><td>{{ kind_names.get(c.kind, c.kind) }}</td>
+    <td>{{ c.location_name or '—' }}</td><td><b>{{ c.qty }}</b></td></tr>
+  {% else %}<tr><td colspan="4" class="muted">расходников на складе нет</td></tr>{% endfor %}
+  </tbody></table>
+
+  <h4 style="margin-top:14px">Операции с расходником</h4>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px">
+    <label class="muted">Расходник<select id="op_model">{% for m in models %}<option value="{{m.id}}">{{m.model}}</option>{% endfor %}</select></label>
+    <label class="muted">Точка<select id="op_loc">{% for l in locations %}<option value="{{l.id}}">{{l.name}}</option>{% endfor %}</select></label>
+    <label class="muted">Кол-во<input id="op_qty" type="number" value="1" min="1"></label>
+    <label class="muted">Цена ₽<input id="op_cost" type="number" step="0.01" placeholder="для заправки/прихода"></label>
+  </div>
+  <div style="margin-top:8px">
+    <button class="mini" onclick="op('/api/inventory/stock/receive')">➕ Приход (покупка)</button>
+    <button class="mini" onclick="op('/api/inventory/stock/refill/send')">📤 На заправку</button>
+    <button class="mini" onclick="op('/api/inventory/stock/refill/return')">📥 Вернуть с заправки (с ценой)</button>
+    <span id="opMsg" class="muted"></span>
+  </div>
+</div>
+
+<script>
+async function postJSON(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+  if(!r.ok){let t=await r.json().catch(()=>({}));throw new Error(t.detail||r.status);}return r.json();}
+const val=id=>document.getElementById(id).value;
+async function op(url){try{await postJSON(url,{consumable_model_id:+val('op_model'),location_id:+val('op_loc'),
+    qty:+val('op_qty')||1,cost:+val('op_cost')||null});location.reload();}
+  catch(e){document.getElementById('opMsg').textContent='❌ '+e.message;}}
+</script>
+{% endblock %}

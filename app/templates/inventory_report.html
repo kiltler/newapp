@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Экономика заправок — Инвентарь{% endblock %}
+{% block content %}
+<p><a href="/inventory">← к списку</a></p>
+<div class="page-head"><h2>💰 Экономика заправок</h2>
+  <form method="get" class="collect-controls">
+    <label class="muted">с<input type="date" name="date_from" value="{{ date_from[:10] }}"></label>
+    <label class="muted">по<input type="date" name="date_to" value="{{ date_to[:10] }}"></label>
+    <button class="mini" type="submit">Показать</button>
+  </form>
+</div>
+
+<div class="card" style="text-align:center;padding:24px">
+  <div class="muted">заправок за период: {{ econ.refills }} · потрачено на заправки {{ econ.total_refill_cost }} ₽ ·
+    новые стоили бы {{ econ.total_new_cost }} ₽</div>
+  <div style="font-size:38px;font-weight:700;margin-top:8px;color:{{ 'var(--ok)' if econ.saved >= 0 else 'var(--bad)' }}">
+    {{ '💚 сэкономлено' if econ.saved >= 0 else '🔴 переплачено' }} {{ econ.saved|abs }} ₽
+  </div>
+</div>
+
+<div class="card">
+  <h3>По моделям расходников</h3>
+  <table class="tbl"><thead><tr><th>Модель</th><th>Заправок</th><th>Потрачено ₽</th><th>Новые ₽</th><th>Дельта ₽</th></tr></thead><tbody>
+  {% for r in econ.by_model %}<tr>
+    <td>{{ r.model or '—' }}</td><td>{{ r.qty }}</td><td>{{ r.refill_cost }}</td><td>{{ r.new_cost }}</td>
+    <td style="color:{{ 'var(--ok)' if r.saved >= 0 else 'var(--bad)' }}"><b>{{ r.saved }}</b></td></tr>
+  {% else %}<tr><td colspan="5" class="muted">за период заправок не было (или у SKU не заполнены цены)</td></tr>{% endfor %}
+  </tbody></table>
+</div>
+{% endblock %}

@@ -35,6 +35,8 @@ CAPABILITIES = [
     Capability("buses", "Автобусы (учёт дисков)",
                ("/buses", "/disks", "/assets", "/api/buses", "/api/disks", "/api/assets",
                 "/api/asset-batches")),
+    Capability("inventory", "Инвентарь (активы, ЗиП, расходники)",
+               ("/inventory", "/api/inventory")),
     Capability("backup", "Бэкап (экспорт/восстановление)", ("/backup", "/api/backup")),
 ]
 
@@ -47,7 +49,8 @@ BASE_PREFIXES = ("/logout", "/static", "/sw.js", "/offline", "/manifest.webmanif
 # Порядок стартовой страницы: (ключ права, путь)
 _START_ORDER = [
     ("monitoring", "/"), ("checkin", "/checkin"), ("buses", "/buses"),
-    ("worklist", "/worklist"), ("audit", "/audit"), ("backup", "/backup"),
+    ("inventory", "/inventory"), ("worklist", "/worklist"), ("audit", "/audit"),
+    ("backup", "/backup"),
 ]
 
 

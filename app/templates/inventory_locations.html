@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Точки — Инвентарь{% endblock %}
+{% block content %}
+<p><a href="/inventory">← к списку</a></p>
+<div class="page-head"><h2>📍 Точки</h2></div>
+
+<div class="card">
+  <h3>Новая точка</h3>
+  <div class="collect-controls">
+    <input id="l_name" placeholder="название (АВ, Офис, Троицкое, Лаба…)">
+    <select id="l_kind">
+      <option value="point">точка</option><option value="office">офис</option>
+      <option value="service">сервис/лаба</option><option value="warehouse">склад</option>
+    </select>
+    <input id="l_addr" placeholder="адрес (необяз.)">
+    <button class="mini" onclick="addLoc()">💾 Добавить</button>
+    <span id="lMsg" class="muted"></span>
+  </div>
+</div>
+
+<table class="tbl"><thead><tr><th>Название</th><th>Тип</th><th>Адрес</th><th>Активна</th></tr></thead><tbody>
+{% for l in locations %}<tr><td>{{ l.name }}</td><td>{{ l.kind }}</td><td>{{ l.address or '—' }}</td><td>{{ '✔' if l.active else '—' }}</td></tr>
+{% else %}<tr><td colspan="4" class="muted">точек ещё нет</td></tr>{% endfor %}
+</tbody></table>
+
+<script>
+async function postJSON(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+  if(!r.ok){let t=await r.json().catch(()=>({}));throw new Error(t.detail||r.status);}return r.json();}
+async function addLoc(){const n=document.getElementById('l_name').value.trim();
+  if(!n){document.getElementById('lMsg').textContent='укажите название';return;}
+  try{await postJSON('/api/inventory/locations',{name:n,kind:document.getElementById('l_kind').value,
+    address:document.getElementById('l_addr').value||null});location.reload();}
+  catch(e){document.getElementById('lMsg').textContent='❌ '+e.message;}}
+</script>
+{% endblock %}
