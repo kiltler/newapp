@@ -9,7 +9,23 @@
     <a href="/inventory/consumables">🧴 Расходники (SKU)</a>
     <a href="/inventory/locations">📍 Точки</a>
     <button class="mini" onclick="document.getElementById('addAsset').classList.toggle('hidden')">+ Актив</button>
+    <button class="mini" onclick="document.getElementById('bulkBox').classList.toggle('hidden')">⤵ Импорт списком</button>
   </nav>
+</div>
+
+<div id="bulkBox" class="hidden card" style="margin-bottom:12px">
+  <h3>Массовый импорт</h3>
+  <p class="muted" style="font-size:13px">Одна строка = один актив, поля через <b>;</b> в порядке:
+    <code>модель ; серийник ; инв.номер ; IP ; страниц</code>. Пустые поля можно пропускать.
+    Идемпотентно по IP — повторный импорт обновит, а не задвоит.</p>
+  <div class="collect-controls">
+    <label class="muted">Тип<select id="b_type">{% for k,v in type_names.items() %}<option value="{{k}}">{{v}}</option>{% endfor %}</select></label>
+    <label class="muted">Точка (всем)<select id="b_loc"><option value="">— не задавать —</option>
+      {% for l in locations %}<option value="{{l.id}}">{{l.name}}</option>{% endfor %}</select></label>
+  </div>
+  <textarea id="b_text" rows="8" style="width:100%;font-family:monospace"
+    placeholder="ECOSYS M2040dn;;;192.168.11.6;264612"></textarea>
+  <div style="margin-top:8px"><button class="mini" onclick="bulkImport()">📥 Импортировать</button> <span id="bMsg" class="muted"></span></div>
 </div>
 
 <form method="get" class="collect-controls" style="margin:10px 0">
@@ -71,6 +87,19 @@ async function addAsset(){
     status:document.getElementById('na_status').value,responsible:document.getElementById('na_resp').value||null};
   try{const d=await postJSON('/api/inventory/assets',body);location='/inventory/'+d.id;}
   catch(e){document.getElementById('naMsg').textContent='❌ '+e.message;}
+}
+async function bulkImport(){
+  const rows=document.getElementById('b_text').value.split('\n').map(s=>s.trim()).filter(Boolean).map(line=>{
+    const p=line.split(';').map(x=>x.trim());
+    return {model:p[0]||null,serial:p[1]||null,inv_number:p[2]||null,ip:p[3]||null,pages:p[4]?+p[4]:null};
+  });
+  if(!rows.length){document.getElementById('bMsg').textContent='пусто';return;}
+  const loc=document.getElementById('b_loc').value;
+  try{const d=await postJSON('/api/inventory/assets/bulk',
+      {type:document.getElementById('b_type').value,location_id:loc?+loc:null,rows});
+    document.getElementById('bMsg').textContent=`✅ создано ${d.created}, обновлено ${d.updated}`;
+    setTimeout(()=>location.reload(),800);}
+  catch(e){document.getElementById('bMsg').textContent='❌ '+e.message;}
 }
 </script>
 {% endblock %}

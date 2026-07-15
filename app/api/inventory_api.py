@@ -160,6 +160,18 @@ async def create_asset(data: schemas.InvAssetIn, request: Request,
     return {"ok": True, "id": a.id}
 
 
+@router.post("/api/inventory/assets/bulk")
+async def bulk_import(data: schemas.InvBulkImportIn, request: Request,
+                      session: AsyncSession = Depends(get_session)):
+    if data.type not in InvAssetType.ALL:
+        raise HTTPException(422, "Недопустимый тип актива")
+    res = await inventory.bulk_import_assets(
+        session, type=data.type, location_id=data.location_id,
+        rows=[r.model_dump() for r in data.rows], request=request)
+    await session.commit()
+    return {"ok": True, **res}
+
+
 @router.get("/api/inventory/assets/{asset_id}")
 async def get_asset(asset_id: int, session: AsyncSession = Depends(get_session)):
     a = await session.get(InvAsset, asset_id)

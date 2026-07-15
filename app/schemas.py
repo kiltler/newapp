@@ -533,3 +533,17 @@ class InvRefillReturnIn(BaseModel):
     cost: float | None = None
     at: dt.datetime | None = None
     by_user: str | None = None
+
+
+class InvBulkRow(BaseModel):
+    model: str | None = None
+    serial: str | None = None
+    inv_number: str | None = None
+    ip: str | None = None
+    pages: int | None = None
+
+
+class InvBulkImportIn(BaseModel):
+    type: str = "printer"
+    location_id: int | None = None
+    rows: list[InvBulkRow] = Field(default_factory=list)

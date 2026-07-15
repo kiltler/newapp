@@ -205,6 +205,28 @@ async def test_snmp_community_encrypted(db):
         assert card["asset"]["meta"]["has_snmp_community"] is True
 
 
+# 10. Массовый импорт: создаёт активы, повтор идемпотентен (дедуп по IP)
+async def test_bulk_import_idempotent(db):
+    rows = [
+        {"model": "ECOSYS M2040dn", "ip": "192.168.11.6", "pages": 264612},
+        {"model": "ECOSYS M2540dn", "ip": "192.168.11.120", "pages": 19934},
+    ]
+    async with _client() as c:
+        r1 = (await c.post("/api/inventory/assets/bulk", json={"type": "printer", "rows": rows})).json()
+        assert r1["created"] == 2 and r1["updated"] == 0
+        # повтор с обновлённым счётчиком — не дублирует, обновляет
+        rows[0]["pages"] = 265000
+        r2 = (await c.post("/api/inventory/assets/bulk", json={"type": "printer", "rows": rows})).json()
+        assert r2["created"] == 0 and r2["updated"] == 2
+    from sqlalchemy import select as _sel
+    async with SessionLocal() as s:
+        assets = (await s.execute(_sel(InvAsset))).scalars().all()
+        assert len(assets) == 2                              # дублей нет
+        a6 = next(a for a in assets if a.meta.get("ip") == "192.168.11.6")
+        assert a6.model == "ECOSYS M2040dn"
+        assert a6.meta["last_counters"]["pages"] == 265000   # счётчик обновлён
+
+
 # 9. Смоук: страницы рендерятся (владелец)
 async def test_pages_render(db):
     async with SessionLocal() as s:

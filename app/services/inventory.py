@@ -29,6 +29,59 @@ class InventoryError(Exception):
     """Бизнес-ошибка инвентаря (показывается пользователю понятным текстом)."""
 
 
+# ── Массовый импорт активов (напр. парк принтеров из SNMP/PJL-скана) ─────────
+async def bulk_import_assets(
+    session: AsyncSession, *, type: str, location_id: int | None, rows: list[dict],
+    request: Request | None = None,
+) -> dict:
+    """Создать/обновить активы пачкой. Идемпотентно по IP (meta.ip): повторный
+    импорт того же парка не плодит дубли, а обновляет модель/счётчик.
+
+    row: {model, serial, inv_number, ip, pages}. Пустые поля игнорируются.
+    """
+    from app.models import InvAsset  # локальный импорт — избегаем цикла на верхнем уровне
+
+    existing = list((await session.execute(select(InvAsset).where(InvAsset.type == type))).scalars())
+    by_ip = {(a.meta or {}).get("ip"): a for a in existing if (a.meta or {}).get("ip")}
+    by_serial = {a.serial: a for a in existing if a.serial}
+
+    created = updated = 0
+    for row in rows:
+        ip = (row.get("ip") or "").strip() or None
+        serial = (row.get("serial") or "").strip() or None
+        model = (row.get("model") or "").strip() or None
+        inv_number = (row.get("inv_number") or "").strip() or None
+        pages = row.get("pages")
+        a = (by_ip.get(ip) if ip else None) or (by_serial.get(serial) if serial else None)
+        if a is None:
+            a = InvAsset(type=type, status="reserve", location_id=location_id, meta={})
+            session.add(a)
+            created += 1
+        else:
+            updated += 1
+        meta = dict(a.meta or {})
+        if ip:
+            meta["ip"] = ip
+            by_ip[ip] = a
+        if pages not in (None, ""):
+            counters = dict(meta.get("last_counters") or {})
+            counters["pages"] = int(pages)
+            meta["last_counters"] = counters
+        a.meta = meta
+        if model:
+            a.model = model
+        if serial:
+            a.serial = serial
+            by_serial[serial] = a
+        if inv_number:
+            a.inv_number = inv_number
+        if location_id is not None and a.location_id is None:
+            a.location_id = location_id
+    await audit.log_action(session, request, "inv_bulk_import",
+                           target=f"{type}", detail=f"создано {created}, обновлено {updated}")
+    return {"created": created, "updated": updated}
+
+
 # ── Активы: перемещения и ремонты ────────────────────────────────────────────
 async def move_asset(
     session: AsyncSession, asset_id: int, to_location_id: int, *,
