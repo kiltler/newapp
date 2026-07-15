@@ -54,7 +54,8 @@ async def bulk_import_assets(
         pages = row.get("pages")
         a = (by_ip.get(ip) if ip else None) or (by_serial.get(serial) if serial else None)
         if a is None:
-            a = InvAsset(type=type, status="reserve", location_id=location_id, meta={})
+            # живые принтеры из скана — «работает» (installed), не «в ЗиПе»
+            a = InvAsset(type=type, status=InvAssetStatus.installed, location_id=location_id, meta={})
             session.add(a)
             created += 1
         else:
