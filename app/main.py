@@ -14,8 +14,8 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.api import (
-    auth, backup_api, buses, checkin, dashboard, devices, monitoring, plan, users_api,
-    worklist,
+    auth, backup_api, buses, checkin, dashboard, devices, inventory_api, monitoring, plan,
+    users_api, worklist,
 )
 from app.config import settings
 from app.database import init_db
@@ -119,6 +119,7 @@ app.include_router(buses.router)
 app.include_router(checkin.router)
 app.include_router(users_api.router)
 app.include_router(backup_api.router)
+app.include_router(inventory_api.router)
 app.include_router(dashboard.router)
 
 # Статика

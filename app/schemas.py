@@ -439,3 +439,97 @@ class TestClipIn(BaseModel):
 
 class StorageIn(BaseModel):
     path: str = Field(min_length=1, max_length=1024)
+
+
+# ── Инвентарь (принтеры/ЗиП/расходники) ──────────────────────────────────────
+class LocationIn(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    kind: str = "point"
+    address: str | None = None
+    note: str | None = None
+    active: bool = True
+
+
+class InvAssetIn(BaseModel):
+    type: str = "printer"
+    model: str | None = None
+    serial: str | None = None
+    inv_number: str | None = None
+    name: str | None = None
+    location_id: int | None = None
+    status: str = "installed"
+    responsible: str | None = None
+    commissioned_at: dt.datetime | None = None   # наивная локальная
+    note: str | None = None
+    meta: dict = Field(default_factory=dict)      # snmp_community шифруется на сервере
+
+
+class InvMoveIn(BaseModel):
+    to_location_id: int
+    sent_at: dt.datetime | None = None
+    carrier: str | None = None
+    sent_by: str | None = None
+    note: str | None = None
+
+
+class InvReceiveIn(BaseModel):
+    received_at: dt.datetime | None = None
+    received_by: str | None = None
+
+
+class InvServiceIn(BaseModel):
+    vendor: str | None = None
+    issue: str | None = None
+    sent_at: dt.datetime | None = None
+    promised_at: dt.datetime | None = None
+
+
+class InvServiceReturnIn(BaseModel):
+    returned_at: dt.datetime | None = None
+    cost: float | None = None
+    result: str | None = None
+    to_status: str = "reserve"
+
+
+class InvInstallConsumableIn(BaseModel):
+    consumable_model_id: int
+    at: dt.datetime | None = None
+    counter_at: int | None = None
+    by_user: str | None = None
+
+
+class InvConsumableModelIn(BaseModel):
+    kind: str = "toner"
+    model: str = Field(min_length=1, max_length=128)
+    compatible_with: list[str] = Field(default_factory=list)
+    price_new: float | None = None
+    price_refill: float | None = None
+    resource_pages: int | None = None
+    active: bool = True
+    note: str | None = None
+
+
+class InvStockReceiveIn(BaseModel):
+    consumable_model_id: int
+    location_id: int
+    qty: int = Field(default=1, ge=1)
+    cost: float | None = None
+    at: dt.datetime | None = None
+    by_user: str | None = None
+
+
+class InvRefillSendIn(BaseModel):
+    consumable_model_id: int
+    location_id: int
+    qty: int = Field(default=1, ge=1)
+    at: dt.datetime | None = None
+    by_user: str | None = None
+
+
+class InvRefillReturnIn(BaseModel):
+    consumable_model_id: int
+    location_id: int
+    qty: int = Field(default=1, ge=1)
+    cost: float | None = None
+    at: dt.datetime | None = None
+    by_user: str | None = None
