@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>{% block title %}NVR Monitor{% endblock %}</title>
-    <link rel="stylesheet" href="/static/style.css?v=16">
+    <link rel="stylesheet" href="/static/style.css?v=17">
     <link rel="manifest" href="/manifest.webmanifest">
     <meta name="theme-color" content="#5980a6">
     <meta name="mobile-web-app-capable" content="yes">
@@ -18,65 +18,39 @@
 {% set _owner = request.session.get('is_owner') %}
 {% set _caps = request.session.get('caps', []) %}
 {% set _mon = _owner or 'monitoring' in _caps %}
-<div class="shell">
-<aside class="sidebar">
-    <a href="/" class="brand"><span class="brand-sq"></span><span class="brand-name">NVR MONITOR</span></a>
-    <div class="brand-sub" title="Версия приложения">v{{ app_version }}</div>
-    <nav class="side-nav">
-        {% if _mon %}
-        <div class="nav-sec">Мониторинг</div>
-        <a href="/" data-nav="/">Дашборд</a>
-        {% endif %}
-        {% if _owner or 'worklist' in _caps %}
-        <a href="/worklist" data-nav="/worklist">Доска проблем<span class="nav-count" id="nav-wl-count"></span></a>
-        {% endif %}
+<header class="topbar">
+    <a href="/" class="brand"><span class="brand-sq"></span><span class="brand-name">NVR MONITOR</span>
+      <span class="brand-sub" title="Версия приложения">v{{ app_version }}</span></a>
+    <nav>
+        {% if _mon %}<a href="/" data-nav="/">Дашборд</a>{% endif %}
+        {% if _owner or 'worklist' in _caps %}<a href="/worklist" data-nav="/worklist">Доска проблем<span class="nav-count" id="nav-wl-count"></span></a>{% endif %}
         {% if _mon %}
         <a href="/tv" data-nav="/tv">TV-режим</a>
         <a href="/history" data-nav="/history">История</a>
-        <a href="/plan" data-nav="/plan">План объекта</a>
-        <div class="nav-sec">Инфраструктура</div>
+        <a href="/plan" data-nav="/plan">План</a>
         <a href="/firmware" data-nav="/firmware">Прошивки</a>
-        <a href="/calc" data-nav="/calc">Калькулятор хранилища</a>
-        <a href="#" id="add-device-btn">+ Устройство</a>
-        <a href="#" id="bell-link" title="Системные уведомления"><span id="bell">🔕</span> Уведомления</a>
+        <a href="/calc" data-nav="/calc">Хранилище</a>
         {% endif %}
-        {% if _owner or 'checkin' in _caps %}
-        <div class="nav-sec">Гостиницы</div>
-        <a href="/checkin" data-nav="/checkin">Заселения</a>
-        {% endif %}
+        {% if _owner or 'checkin' in _caps %}<a href="/checkin" data-nav="/checkin">Заселения</a>{% endif %}
         {% if _owner or 'buses' in _caps %}
-        <div class="nav-sec">Автобусы · offline</div>
         <a href="/buses" data-nav="/buses">Автобусы</a>
-        <a href="/disks" data-nav="/disks">Реестр дисков</a>
+        <a href="/disks" data-nav="/disks">Диски</a>
         {% endif %}
-        {% if _owner or 'audit' in _caps or 'backup' in _caps %}
-        <div class="nav-sec">Администрирование</div>
         {% if _owner %}<a href="/users" data-nav="/users">Пользователи</a>{% endif %}
         {% if _owner or 'audit' in _caps %}<a href="/audit" data-nav="/audit">Аудит</a>{% endif %}
         {% if _owner or 'backup' in _caps %}<a href="/backup" data-nav="/backup">Бэкап</a>{% endif %}
-        {% endif %}
     </nav>
-    {% if _mon %}
-    <div class="side-rack" id="side-rack" hidden>
-        <div class="rack-cap" id="rack-cap">Парк NVR</div>
-        <svg id="rack-svg" fill="none" stroke-linejoin="round"></svg>
-        <div class="rack-legend" id="rack-legend"></div>
-    </div>
-    {% endif %}
-    <div class="side-foot" {% if not _mon %}style="margin-top:auto"{% endif %}>
-        <div class="duty">Дежурный</div>
-        <div class="duty-sub">{{ request.session.get('user') or 'admin' }}{% if _owner %} · владелец{% endif %}</div>
+    <div class="topbar-user">
+        {% if _mon %}<a href="#" id="bell-link" title="Системные уведомления"><span id="bell">🔕</span></a>{% endif %}
+        <span class="duty-sub">{{ request.session.get('user') or 'admin' }}{% if _owner %} · владелец{% endif %}</span>
         <!-- Кнопка смены адреса сервера — видна только в нативном приложении -->
-        <a href="https://localhost/" id="app-server-btn" title="Сменить адрес сервера" style="display:none">⚙ Сервер</a>
-        <a href="/logout">Выход →</a>
+        <a href="https://localhost/" id="app-server-btn" title="Сменить адрес сервера" style="display:none">⚙</a>
+        <a href="/logout">Выход</a>
     </div>
-</aside>
-<div class="content">
+</header>
 <main class="container">
     {% block content %}{% endblock %}
 </main>
-</div>
-</div>
 
 <!-- Модал добавления устройства -->
 <div id="modal" class="modal hidden">
@@ -149,9 +123,9 @@
       if (e.target !== span) span.click();
     });
   })();
-  // активный пункт сайдбара: точное совпадение или самый длинный префикс
+  // активный пункт верхней навигации: точное совпадение или самый длинный префикс
   (() => {
-    const links = [...document.querySelectorAll(".side-nav a[data-nav]")];
+    const links = [...document.querySelectorAll(".topbar nav a[data-nav]")];
     let best = null;
     for (const a of links) {
       const p = a.dataset.nav;

@@ -14,6 +14,7 @@
     <button onclick="bulkRun('sync_time')">Синхр. время</button>
     <button onclick="bulkRun('archive_check')">Проверить архив</button>
     <button onclick="bulkRun('quality_check')">Проверить качество</button>
+    <button id="add-device-btn" class="primary">+ Устройство</button>
   </div>
 </div>
 <div class="rule"></div>
@@ -106,6 +107,18 @@
   </div>
 </section>
 
+{# Панель «Парк · N NVR» — изометрическая стойка (строит iso.js из /api/devices + /api/worklist) #}
+<div class="blueprint rack-panel" id="side-rack" hidden>{{ corners() }}
+  <div style="flex:none">
+    <div class="rack-cap" id="rack-cap">Парк NVR</div>
+    <svg id="rack-svg" fill="none" stroke-linejoin="round"></svg>
+  </div>
+  <div class="rack-side">
+    <div class="rack-note">Изометрический срез здоровья парка: каждый юнит стойки — один регистратор, худшие сверху.</div>
+    <div class="rack-legend" id="rack-legend"></div>
+  </div>
+</div>
+
 {% if not archive.day %}
 <h2>Архив записи</h2>
 <p class="muted">Проверок архива ещё не было — он проверяется автоматически раз в сутки (за прошедшие сутки).</p>
@@ -119,6 +132,7 @@
   <div class="wl-progress-bar"><div id="bulk-fill" class="wl-progress-fill"></div></div>
   <div class="wl-progress-text muted" id="bulk-text"></div>
 </div>
+<div class="table-wrap">
 <table class="grid" style="margin-top:12px">
   <thead><tr><th style="width:26px"></th><th>Объект</th><th>Группа</th><th>Host</th><th>Тип</th><th>Каналы</th><th>Статус</th><th>Архив</th></tr></thead>
   <tbody>
@@ -144,8 +158,8 @@
         {% set a = arch_by_id.get(d.id) %}
         {% if a and a.total %}
           <span class="arch-mini" title="запись {{ a.full }}/{{ a.total }}{% if a.partial %}, частично {{ a.partial }}{% endif %}{% if a.none %}, без записи {{ a.none }}{% endif %}{% if a.no_data %}, нет данных {{ a.no_data }}{% endif %}">
-            <i style="width:{{ (a.full / a.total * 100) | round(1) }}%;background:var(--color-text)"></i>
-            <i style="width:{{ (a.partial / a.total * 100) | round(1) }}%;background:repeating-linear-gradient(45deg,var(--color-text) 0 2px,transparent 2px 5px)"></i>
+            <i style="width:{{ (a.full / a.total * 100) | round(1) }}%;background:var(--color-accent-400)"></i>
+            <i style="width:{{ (a.partial / a.total * 100) | round(1) }}%;background:repeating-linear-gradient(45deg,var(--color-accent-600) 0 2px,transparent 2px 5px)"></i>
             <i style="width:{{ (a.none / a.total * 100) | round(1) }}%;background:var(--color-accent)"></i>
           </span>{{ a.full }}/{{ a.total }}
         {% else %}<span class="muted">—</span>{% endif %}
@@ -156,6 +170,7 @@
   {% endfor %}
   </tbody>
 </table>
+</div>
 
 <div style="display:grid;grid-template-columns:7fr 5fr;gap:28px;align-items:start" class="dash-cols">
 <div>
