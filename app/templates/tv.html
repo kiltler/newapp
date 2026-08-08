@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <title>TV — NVR Monitor</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v=15">
 </head>
 <body class="tv-body">
   <div class="tv-head">
     <span id="tv-clock"></span>
     <span id="tv-summary" class="muted"></span>
-    <a href="/" class="muted">выйти</a>
+    <a href="/">выйти из TV-режима →</a>
   </div>
   <div id="tv-grid" class="tv-grid"></div>
 
@@ -25,20 +25,22 @@ function beep() {
     o.start(); setTimeout(() => o.stop(), 400);
   } catch (e) {}
 }
-const ARCH_DOT = { green: "🟢", yellow: "🟡", red: "🔴", gray: "⚪" };
+const CORNERS = '<i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>';
 function tile(d, up, total, arch) {
   let cls = "green";
   if (!d.enabled) cls = "gray";
   else if (!d.reachable) cls = "red";
   else if (up < total) cls = "yellow";
-  let archLine = '<div class="tv-arch muted">архив: нет данных</div>';
+  let archLine = '<div class="tv-arch">архив: нет данных</div>';
   if (arch && arch.total) {
     let extra = "";
     if (arch.none) extra = ` · ${arch.none} без записи`;
     else if (arch.partial) extra = ` · ${arch.partial} с дырами`;
-    archLine = `<div class="tv-arch">${ARCH_DOT[arch.status] || ""} архив ${arch.full}/${arch.total}${extra}</div>`;
+    archLine = `<div class="tv-arch">архив ${arch.full}/${arch.total}${extra}</div>`;
   }
+  // угловые метки «+» — только на плитках-рамках (норма)
   return `<div class="tv-tile ${cls}" onclick="location.href='/devices/${d.id}'">
+    ${cls === "green" ? CORNERS : ""}
     <div class="tv-name">${d.name}</div>
     <div class="tv-stat">${d.reachable ? up + "/" + total + " камер" : "НЕДОСТУПЕН"}</div>
     ${archLine}

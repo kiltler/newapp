@@ -2,37 +2,86 @@
 {% block title %}Автобусы — ручной учёт{% endblock %}
 {% block content %}
 {% set cm = {'green':'green','yellow':'yellow','orange':'orange','red':'red'} %}
+{% macro busiso(r) %}
+  {# изометрическая моделька автобуса: слот диска, аварийные — наклон/дым/знак «!» #}
+  <svg class="bcard-iso" viewBox="0 -12 120 68" width="118" height="66" fill="none"
+       stroke="var(--color-text)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round">
+    <g {% if r.color == 'red' %}transform="rotate(3 60 30)"{% endif %}>
+      <polygon points="18,14 90,14 102,8 30,8"></polygon>
+      <polygon points="18,14 90,14 90,44 18,44"></polygon>
+      <polygon points="90,14 102,8 102,38 90,44"></polygon>
+      <rect x="24" y="19" width="11" height="8"></rect>
+      <rect x="39" y="19" width="11" height="8"></rect>
+      <rect x="54" y="19" width="11" height="8"></rect>
+      <rect x="69" y="19" width="11" height="8"></rect>
+      <polygon points="92,15 100,11 100,22 92,26"></polygon>
+      <line x1="18" y1="34" x2="90" y2="34" stroke="var(--color-accent)"></line>
+      <line x1="90" y1="34" x2="102" y2="28" stroke="var(--color-accent)"></line>
+      <circle cx="40" cy="44" r="6.5" fill="var(--color-bg)"></circle>
+      <circle cx="40" cy="44" r="2"></circle>
+      <circle cx="76" cy="44" r="6.5" fill="var(--color-bg)"></circle>
+      <circle cx="76" cy="44" r="2"></circle>
+      <rect x="21" y="36" width="9" height="6"
+            style="{{ 'fill:var(--color-accent);stroke:var(--color-accent)' if r.disk else 'fill:none;stroke:var(--color-accent);stroke-dasharray:2.5 2' }}">
+        <title>{{ 'слот: диск установлен' if r.disk else 'слот пуст — диск не установлен' }}</title>
+      </rect>
+      {% if r.color == 'red' %}
+      <g>
+        <polyline points="93,16 96,19 93,22 96,25" stroke="var(--color-accent)" stroke-width="1.2"></polyline>
+        <circle cx="98" cy="2" r="2.2" stroke="var(--color-neutral-400)"></circle>
+        <circle cx="103" cy="-3" r="3" stroke="var(--color-neutral-400)"></circle>
+        <circle cx="109" cy="-8" r="3.8" stroke="var(--color-neutral-400)"></circle>
+      </g>
+      {% endif %}
+    </g>
+    {% if r.color != 'green' %}
+    <g>
+      <polygon points="8,10 20,10 14,-1" stroke="var(--color-accent)" fill="var(--color-accent-100)"></polygon>
+      <line x1="14" y1="2.5" x2="14" y2="6" stroke="var(--color-accent)" stroke-width="1.8"></line>
+      <circle cx="14" cy="8.2" r="0.9" fill="var(--color-accent)" stroke="none"></circle>
+    </g>
+    {% endif %}
+    <line x1="12" y1="52" x2="108" y2="52" stroke="var(--color-neutral-300)"></line>
+  </svg>
+{% endmacro %}
 {% macro bcard(r) %}
   <a class="bcard b-{{ r.color }}" href="/buses/{{ r.bus.id }}">
     <div class="bcard-top">
-      <span class="dot {{ cm[r.color] }}"></span>
-      <span class="bcard-num">{{ r.bus.bus_number }}</span>
-      <span class="bcard-route">марш. {{ r.bus.route or '—' }}</span>
+      <div style="flex:1;min-width:0">
+        <span class="bcard-num">{{ r.bus.bus_number }}</span>
+        <div style="display:flex;gap:6px;margin-top:9px;flex-wrap:wrap;align-items:center">
+          <span class="badge muted">марш. {{ r.bus.route or '—' }}</span>
+          {% if r.color == 'red' %}<span class="badge err">{{ 'просрочен' if r.disk else 'нет диска' }}</span>
+          {% elif r.color in ('yellow', 'orange') %}<span class="badge warn">пора менять</span>{% endif %}
+        </div>
+      </div>
+      {{ busiso(r) }}
     </div>
     <div class="bcard-disk">
-      {% if r.disk %}💿 <b>{{ r.disk.label }}</b> <span class="muted">({{ r.disk.type }})</span>
+      {% if r.disk %}<b>{{ r.disk.label }}</b> <span class="muted">({{ r.disk.type }})</span>
         {% if r.bus.installed_since %}<span class="muted"> · с {{ r.bus.installed_since | localtime('%d.%m') }}</span>{% endif %}
-      {% else %}<span class="badge err">нет диска</span>{% endif %}
+      {% else %}Диск не установлен{% endif %}
     </div>
     <div class="bcard-reason">{{ r.reason }}</div>
   </a>
 {% endmacro %}
 <div class="bus-scope">
-  <div class="bus-banner">
-    <div><span class="bus-ico">🚌</span> <b>Автобусы</b>
-      <span class="badge-offline">OFFLINE · Ручной учёт</span></div>
-    <div>
-      <a class="bus-btn" href="/buses/collection">📅 День сбора</a>
-      <a class="bus-btn" href="/buses/plan">🗓 План</a>
-      <a class="bus-btn" href="/buses/review">🔎 Очередь</a>
+  <div class="kicker">Ручной учёт дисковой ротации · без сети</div>
+  <div class="page-head">
+    <h1>Автобусы <span class="badge-offline">offline</span></h1>
+    <div class="device-actions">
+      <a class="bus-btn" href="/buses/collection">День сбора</a>
+      <a class="bus-btn" href="/buses/plan">План</a>
+      <a class="bus-btn" href="/buses/review">Очередь</a>
       <a class="bus-btn" href="/disks">Реестр дисков</a>
-      <a class="bus-btn" href="/assets">📦 Склад</a>
+      <a class="bus-btn" href="/assets">Склад</a>
       <a class="bus-btn" href="/buses/swaplog">Журнал</a>
-      <a class="bus-btn" href="/buses/stats">📊 Статистика</a>
-      <button class="bus-btn" onclick="addBus()">+ Автобус</button>
+      <a class="bus-btn" href="/buses/stats">Статистика</a>
+      <button class="bus-btn primary" onclick="addBus()">+ Автобус</button>
     </div>
   </div>
-  <p class="muted">С этих регистраторов нет связи — статусы вносятся вручную.</p>
+  <div class="rule"></div>
+  <p class="muted" style="margin-top:10px">С этих регистраторов нет связи — статусы вносятся вручную.</p>
 
   <section class="bus-summary">
     <div class="bus-tile"><span class="num">{{ summary.buses }}</span><span>автобусов</span></div>

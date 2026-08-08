@@ -1,9 +1,12 @@
 {% extends "base.html" %}
 {% block title %}{{ device.name }} — NVR Monitor{% endblock %}
 {% block content %}
-<a href="/" class="muted">← к дашборду</a>
-<div class="device-head">
-  <h1>{{ device.name }}</h1>
+<a href="/" style="font-size:13px;font-weight:600;color:var(--color-accent-700)">← Дашборд</a>
+<div class="device-head" style="margin-top:14px">
+  <div>
+    <div class="kicker" style="margin-bottom:8px">Объект · {{ device.host }}:{{ device.http_port }}</div>
+    <h1><span class="dot {{ device_health(device) }}" style="width:12px;height:12px"></span>{{ device.name }}</h1>
+  </div>
   <div class="device-actions">
     <button onclick="location.href='/devices/{{ device.id }}/wall'">🖼 Стена камер</button>
     <button onclick="location.href='/devices/{{ device.id }}/report'">📄 Отчёт</button>
@@ -18,6 +21,11 @@
     <button class="danger" onclick="deleteDevice({{ device.id }})">Удалить</button>
   </div>
 </div>
+<div class="rule"></div>
+
+{% if device.last_error %}
+<div class="err-plate"><span>{{ device.last_error }}</span></div>
+{% endif %}
 
 <section class="info-grid">
   <div><b>Host:</b> {{ device.host }}:{{ device.http_port }}</div>
@@ -39,7 +47,6 @@
       <span class="badge {{ 'ok' if v else 'err' }}">{{ k }}{{ '✓' if v else '✗' }}</span>
     {% endfor %}
   </div>
-  {% if device.last_error %}<div class="err-text"><b>Ошибка:</b> {{ device.last_error }}</div>{% endif %}
 </section>
 
 <h2>Каналы</h2>
@@ -88,7 +95,8 @@
   </tbody>
 </table>
 
-<h2>Календарь архива (14 дней)</h2>
+<h2>Календарь архива <span class="muted">14 дней · канал × день</span></h2>
+<div class="blueprint" style="padding:14px 16px"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
 <div class="calendar-wrap">
 <table class="calendar">
   <thead><tr><th>Канал</th>
@@ -115,12 +123,14 @@
   <span class="cal cal-none"></span> нет записи
   <span class="cal cal-unknown"></span> нет данных
 </div>
+</div>
 
 <h2>Таймлайн архива по каналам</h2>
 <div class="tl-controls">
   <label>День: <select id="tl-day"></select></label>
   <span class="muted" id="tl-empty" style="display:none">Нет данных за этот день — нажмите «Проверить архив».</span>
 </div>
+<div class="blueprint" style="padding:14px 16px"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
 <div class="tl-wrap">
   <div class="tl-scroll">
     <div id="tl-ruler" class="tl-ruler"></div>
@@ -131,7 +141,8 @@
   <span class="tl-swatch tl-rec"></span> запись
   <span class="tl-swatch tl-gap"></span> дыра
   <span class="tl-swatch tl-nodata"></span> нет данных
-  <span class="muted">· наведите на красный участок — покажет интервал</span>
+  <span class="muted">· наведите на акцентный участок — покажет интервал</span>
+</div>
 </div>
 
 <h2>События устройства</h2>
@@ -142,7 +153,7 @@
     <tr>
       <td class="muted">{{ e.created_at | localtime('%d.%m %H:%M') }}</td>
       <td>{{ e.type }}</td>
-      <td><span class="badge {{ {'info':'ok','warning':'warn','critical':'err'}[e.severity] }}">{{ e.severity }}</span></td>
+      <td><span class="badge {{ {'info':'ok','warning':'warn','critical':'err'}[e.severity] }}">{{ {'info':'инфо','warning':'внимание','critical':'критично'}[e.severity] }}</span></td>
       <td>{{ e.message }}</td>
     </tr>
   {% else %}<tr><td colspan="4" class="muted">Событий нет.</td></tr>{% endfor %}

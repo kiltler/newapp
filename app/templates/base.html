@@ -4,53 +4,79 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>{% block title %}NVR Monitor{% endblock %}</title>
-    <link rel="stylesheet" href="/static/style.css?v=14">
+    <link rel="stylesheet" href="/static/style.css?v=15">
     <link rel="manifest" href="/manifest.webmanifest">
-    <meta name="theme-color" content="#1FB6A6">
+    <meta name="theme-color" content="#5980a6">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="Автобусы">
     <link rel="apple-touch-icon" href="/static/icons/apple-touch.png">
     <link rel="icon" href="/static/icons/favicon-32.png">
 </head>
 <body>
-<header class="topbar">
-    <a href="/" class="logo">📹 NVR Monitor <span class="ver" title="Версия приложения">v{{ app_version }}</span></a>
-    {% set _owner = request.session.get('is_owner') %}
-    {% set _caps = request.session.get('caps', []) %}
-    {% set _mon = _owner or 'monitoring' in _caps %}
-    <nav>
+{% set _owner = request.session.get('is_owner') %}
+{% set _caps = request.session.get('caps', []) %}
+{% set _mon = _owner or 'monitoring' in _caps %}
+<div class="shell">
+<aside class="sidebar">
+    <a href="/" class="brand"><span class="brand-sq"></span><span class="brand-name">NVR MONITOR</span></a>
+    <div class="brand-sub" title="Версия приложения">v{{ app_version }}</div>
+    <nav class="side-nav">
         {% if _mon %}
-        <a href="/">Дашборд</a>
+        <div class="nav-sec">Мониторинг</div>
+        <a href="/" data-nav="/">Дашборд</a>
         {% endif %}
-        {% if _owner or 'worklist' in _caps %}<a href="/worklist" class="nav-worklist">🛠 Доска проблем</a>{% endif %}
-        {% if _mon %}
-        <a href="/tv">TV</a>
-        <a href="/history">История</a>
-        <a href="/plan">План</a>
-        <a href="/firmware">Прошивки</a>
-        <a href="/calc">Хранилище</a>
+        {% if _owner or 'worklist' in _caps %}
+        <a href="/worklist" data-nav="/worklist">Доска проблем<span class="nav-count" id="nav-wl-count"></span></a>
         {% endif %}
-        {% if _owner or 'audit' in _caps %}<a href="/audit">Аудит</a>{% endif %}
-        {% if _owner or 'checkin' in _caps %}<a href="/checkin" class="nav-checkin">🏨 Заселения</a>{% endif %}
-        {% if _owner %}<a href="/users">Пользователи</a>{% endif %}
-        {% if _owner or 'backup' in _caps %}<a href="/backup">Бэкап</a>{% endif %}
-        {% if _owner or 'buses' in _caps %}<a href="/buses" class="nav-bus">🚌 Автобусы</a>{% endif %}
         {% if _mon %}
+        <a href="/tv" data-nav="/tv">TV-режим</a>
+        <a href="/history" data-nav="/history">История</a>
+        <a href="/plan" data-nav="/plan">План объекта</a>
+        <div class="nav-sec">Инфраструктура</div>
+        <a href="/firmware" data-nav="/firmware">Прошивки</a>
+        <a href="/calc" data-nav="/calc">Калькулятор хранилища</a>
         <a href="#" id="add-device-btn">+ Устройство</a>
-        <a href="#" id="bell" title="Системные уведомления">🔕</a>
+        <a href="#" id="bell-link" title="Системные уведомления"><span id="bell">🔕</span> Уведомления</a>
         {% endif %}
-        <a href="/logout">Выход</a>
+        {% if _owner or 'checkin' in _caps %}
+        <div class="nav-sec">Гостиницы</div>
+        <a href="/checkin" data-nav="/checkin">Заселения</a>
+        {% endif %}
+        {% if _owner or 'buses' in _caps %}
+        <div class="nav-sec">Автобусы · offline</div>
+        <a href="/buses" data-nav="/buses">Автобусы</a>
+        <a href="/disks" data-nav="/disks">Реестр дисков</a>
+        {% endif %}
+        {% if _owner or 'audit' in _caps or 'backup' in _caps %}
+        <div class="nav-sec">Администрирование</div>
+        {% if _owner %}<a href="/users" data-nav="/users">Пользователи</a>{% endif %}
+        {% if _owner or 'audit' in _caps %}<a href="/audit" data-nav="/audit">Аудит</a>{% endif %}
+        {% if _owner or 'backup' in _caps %}<a href="/backup" data-nav="/backup">Бэкап</a>{% endif %}
+        {% endif %}
     </nav>
-    <!-- Кнопка смены адреса сервера — видна только в нативном приложении -->
-    <a href="https://localhost/" id="app-server-btn"
-       title="Сменить адрес сервера"
-       style="display:none;font-size:20px;margin-left:12px">⚙</a>
-</header>
+    {% if _mon %}
+    <div class="side-rack" id="side-rack" hidden>
+        <div class="rack-cap" id="rack-cap">Парк NVR</div>
+        <svg id="rack-svg" fill="none" stroke-linejoin="round"></svg>
+        <div class="rack-legend" id="rack-legend"></div>
+    </div>
+    {% endif %}
+    <div class="side-foot" {% if not _mon %}style="margin-top:auto"{% endif %}>
+        <div class="duty">Дежурный</div>
+        <div class="duty-sub">{{ request.session.get('user') or 'admin' }}{% if _owner %} · владелец{% endif %}</div>
+        <!-- Кнопка смены адреса сервера — видна только в нативном приложении -->
+        <a href="https://localhost/" id="app-server-btn" title="Сменить адрес сервера" style="display:none">⚙ Сервер</a>
+        <a href="/logout">Выход →</a>
+    </div>
+</aside>
+<div class="content">
 <main class="container">
     {% block content %}{% endblock %}
 </main>
+</div>
+</div>
 
 <!-- Модал добавления устройства -->
 <div id="modal" class="modal hidden">
@@ -101,8 +127,9 @@
   <a href="/logout"><span class="ic">🚪</span>Выход</a>
 </nav>
 
-<script src="/static/app.js?v=7"></script>
-<script src="/static/notify.js?v=7"></script>
+<script src="/static/app.js?v=8"></script>
+<script src="/static/notify.js?v=8"></script>
+{% if _mon %}<script src="/static/iso.js?v=1"></script>{% endif %}
 <script>
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
   // Кнопка "⚙ Сервер" — только в нативной оболочке (метка в User-Agent)
@@ -110,10 +137,29 @@
     const b = document.getElementById("app-server-btn");
     if (b) b.style.display = "inline-block";
   }
-  // подсветка активной вкладки
+  // подсветка активной вкладки (низ, телефон)
   document.querySelectorAll(".tabbar a[data-path]").forEach((a) => {
     if (location.pathname === a.dataset.path || (a.dataset.path !== "/buses" && location.pathname.startsWith(a.dataset.path))) a.classList.add("active");
   });
+  // клик по всему пункту «Уведомления» — как клик по колокольчику (notify.js вешает обработчик на span)
+  (() => {
+    const link = document.getElementById("bell-link"), span = document.getElementById("bell");
+    if (link && span) link.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (e.target !== span) span.click();
+    });
+  })();
+  // активный пункт сайдбара: точное совпадение или самый длинный префикс
+  (() => {
+    const links = [...document.querySelectorAll(".side-nav a[data-nav]")];
+    let best = null;
+    for (const a of links) {
+      const p = a.dataset.nav;
+      const hit = p === "/" ? location.pathname === "/" : location.pathname.startsWith(p);
+      if (hit && (!best || p.length > best.dataset.nav.length)) best = a;
+    }
+    if (best) best.classList.add("active");
+  })();
 </script>
 {% block scripts %}{% endblock %}
 </body>
