@@ -1,4 +1,4 @@
-@import url('/static/fonts/fonts.css');  /* шрифты зашиты локально — работают без интернета */
+@import url('/static/fonts/fonts.css?v=16');  /* шрифты локально; ?v= сбрасывает кэш старого fonts.css */
 /* ============================================================================
    NVR Monitor — дизайн-система «Industry» (blueprint).
    Светлый технический «чертёж»: стальной акцент, Barlow Condensed в заголовках,
@@ -97,7 +97,11 @@ h3 { font-size: 17px; letter-spacing: .01em; margin: 18px 0 8px; }
 .shell { display: flex; min-height: 100vh; }
 .sidebar { width: 212px; flex: none; border-right: 1px solid var(--color-divider);
   padding: 22px 12px 18px; display: flex; flex-direction: column;
-  position: sticky; top: 0; height: 100vh; overflow: auto; }
+  position: sticky; top: 0; height: 100vh; overflow: auto;
+  scrollbar-width: thin; scrollbar-color: var(--color-neutral-300) transparent; }
+.sidebar::-webkit-scrollbar { width: 6px; }
+.sidebar::-webkit-scrollbar-thumb { background: var(--color-neutral-300); }
+.sidebar::-webkit-scrollbar-track { background: transparent; }
 .brand { display: flex; align-items: center; gap: 9px; padding: 0 8px; color: var(--color-text); }
 .brand:hover { color: var(--color-text); }
 .brand-sq { width: 12px; height: 12px; background: var(--color-accent); flex: none; }
