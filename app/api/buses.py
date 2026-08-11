@@ -30,6 +30,7 @@ from app.models import (
     AssetBatch,
     AssetStatus,
     Bus,
+    BusProblemLog,
     Disk,
     DiskLocation,
     DiskReview,
@@ -153,11 +154,37 @@ async def create_bus(data: schemas.BusCreate, session: AsyncSession = Depends(ge
     return {"id": bus.id}
 
 
+async def _open_problem_entry(session: AsyncSession, bus_id: int) -> BusProblemLog | None:
+    """Текущая (незакрытая) запись истории проблем автобуса."""
+    return (await session.execute(
+        select(BusProblemLog)
+        .where(BusProblemLog.bus_id == bus_id, BusProblemLog.closed_at.is_(None))
+        .order_by(BusProblemLog.id.desc())
+    )).scalars().first()
+
+
 @router.put("/api/buses/{bus_id}")
-async def update_bus(bus_id: int, data: schemas.BusUpdate, session: AsyncSession = Depends(get_session)):
+async def update_bus(bus_id: int, data: schemas.BusUpdate, request: Request,
+                     session: AsyncSession = Depends(get_session)):
     bus = await _bus(session, bus_id)
-    for k, v in data.model_dump(exclude_unset=True).items():
+    payload = data.model_dump(exclude_unset=True)
+    for k, v in payload.items():
         setattr(bus, k, v)
+    # История проблем: пометка открывает запись, снятие — закрывает,
+    # смена формулировки — закрывает старую и открывает новую.
+    if "has_problem" in payload or "problem_note" in payload:
+        user = request.session.get("user")
+        entry = await _open_problem_entry(session, bus_id)
+        if bus.has_problem:
+            if entry is None:
+                session.add(BusProblemLog(bus_id=bus_id, note=bus.problem_note, opened_by=user))
+            elif (bus.problem_note or None) != (entry.note or None):
+                entry.closed_at = utcnow()
+                entry.closed_by = user
+                session.add(BusProblemLog(bus_id=bus_id, note=bus.problem_note, opened_by=user))
+        elif entry is not None:
+            entry.closed_at = utcnow()
+            entry.closed_by = user
     await session.commit()
     return {"ok": True}
 
@@ -174,6 +201,8 @@ async def delete_bus(bus_id: int, session: AsyncSession = Depends(get_session)):
             d.status = DiskStatus.READY
             d.status_since = utcnow()
             d.location = DiskLocation.SHELF
+    # История проблем удалённого автобуса больше не нужна
+    await session.execute(delete(BusProblemLog).where(BusProblemLog.bus_id == bus.id))
     await session.delete(bus)
     await session.commit()
     return {"ok": True}
@@ -671,7 +700,15 @@ async def _problem_rows(session: AsyncSession) -> list[dict]:
         select(Bus).where(Bus.has_problem).order_by(Bus.route, Bus.bus_number)
     )).scalars())
     disks = {d.id: d for d in await _disks(session)}
-    return [{"bus": b, "disk": disks.get(b.installed_disk_id)} for b in buses]
+    # Сколько раз проблема отмечалась за всю историю — для динамики на листе.
+    counts: dict[int, int] = {}
+    for row in (await session.execute(select(BusProblemLog.bus_id))).scalars():
+        counts[row] = counts.get(row, 0) + 1
+    return [{
+        "bus": b, "disk": disks.get(b.installed_disk_id),
+        # проблемы, отмеченные до появления истории, в журнал не попали — минимум 1
+        "times": max(counts.get(b.id, 0), 1),
+    } for b in buses]
 
 
 @router.get("/buses/problems", response_class=HTMLResponse)
@@ -689,7 +726,8 @@ async def bus_problems_csv(session: AsyncSession = Depends(get_session)):
     rows = await _problem_rows(session)
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=";")
-    w.writerow(["Автобус", "Маршрут", "Модель DVR", "Где стоит", "Диск", "Диск с", "Проблема"])
+    w.writerow(["Автобус", "Маршрут", "Модель DVR", "Где стоит", "Диск", "Диск с",
+                "Проблема", "Раз отмечалась"])
     for r in rows:
         b, d = r["bus"], r["disk"]
         w.writerow([
@@ -697,6 +735,7 @@ async def bus_problems_csv(session: AsyncSession = Depends(get_session)):
             d.label if d else "нет диска",
             b.installed_since.strftime("%Y-%m-%d") if b.installed_since else "",
             b.problem_note or "проблема (без описания)",
+            r["times"],
         ])
     return StreamingResponse(iter(["﻿" + buf.getvalue()]),
                              media_type="text/csv; charset=utf-8",
@@ -959,6 +998,10 @@ async def bus_page(bus_id: int, request: Request, session: AsyncSession = Depend
         key=lambda d: (0 if d.assigned_bus_id == bus.id else 1, (d.label or "")),
     )
     history = await _swaplog(session, bus_id=bus_id)
+    problem_log = list((await session.execute(
+        select(BusProblemLog).where(BusProblemLog.bus_id == bus_id)
+        .order_by(BusProblemLog.id.desc()).limit(50)
+    )).scalars())
     # Оборудование автобуса: закреплённые регистраторы/камеры (не списанные)
     equipment = [
         a for a in (await session.execute(
@@ -970,6 +1013,7 @@ async def bus_page(bus_id: int, request: Request, session: AsyncSession = Depend
         "request": request, "bus": bus, "color": color, "reason": reason,
         "installed": by_id.get(bus.installed_disk_id) if bus.installed_disk_id else None,
         "assigned": assigned, "ready_disks": ready, "history": history,
+        "problem_log": problem_log,
         "disks_by_id": by_id, "equipment": equipment,
         "kinds": ASSET_KINDS, "asset_statuses": ASSET_STATUSES,
     })

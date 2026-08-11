@@ -467,3 +467,36 @@ async def test_bus_problems_report_and_csv(db):
         await c.put(f"/api/buses/{b1}", json={"has_problem": False, "problem_note": None})
         page = await c.get("/buses/problems")
         assert "Проблем нет" in page.text
+
+
+async def test_bus_problem_history(db):
+    """Пометки проблем копятся в истории: открытие, смена формулировки, снятие."""
+    from app.models import BusProblemLog
+
+    async with _client() as c:
+        bus = (await c.post("/api/buses", json={"bus_number": "И-1", "route": "9"})).json()["id"]
+        # отметили проблему → открылась запись
+        await c.put(f"/api/buses/{bus}", json={"has_problem": True, "problem_note": "шумит вентилятор"})
+        # сменили формулировку → старая закрылась, открылась новая
+        await c.put(f"/api/buses/{bus}", json={"has_problem": True, "problem_note": "не пишет канал 3"})
+        # сняли проблему → запись закрылась
+        await c.put(f"/api/buses/{bus}", json={"has_problem": False, "problem_note": None})
+
+    async with SessionLocal() as s:
+        log = (await s.execute(select(BusProblemLog).where(BusProblemLog.bus_id == bus)
+                               .order_by(BusProblemLog.id))).scalars().all()
+        assert len(log) == 2
+        assert log[0].note == "шумит вентилятор" and log[0].closed_at is not None
+        assert log[1].note == "не пишет канал 3" and log[1].closed_at is not None
+
+    async with _client() as c:
+        # история видна на странице автобуса
+        page = await c.get(f"/buses/{bus}")
+        assert "История проблем" in page.text
+        assert "шумит вентилятор" in page.text and "не пишет канал 3" in page.text
+
+        # повторная пометка: в сводке счётчик «Раз» учитывает всю историю
+        await c.put(f"/api/buses/{bus}", json={"has_problem": True, "problem_note": "опять канал 3"})
+        csv_r = await c.get("/api/buses/problems.csv")
+        row = next(line for line in csv_r.text.splitlines() if "И-1" in line)
+        assert row.rstrip().endswith(";3")

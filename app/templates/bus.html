@@ -77,6 +77,26 @@
     </tbody>
   </table>
 
+  <h2>История проблем</h2>
+  {% if problem_log %}
+  <table class="grid">
+    <thead><tr><th>Отмечена</th><th>Снята</th><th>Длилась</th><th>Проблема</th><th>Кто отметил / снял</th></tr></thead>
+    <tbody>
+    {% for p in problem_log %}
+      <tr>
+        <td class="muted">{{ p.opened_at | localtime('%d.%m.%Y %H:%M') }}</td>
+        <td>{% if p.closed_at %}<span class="muted">{{ p.closed_at | localtime('%d.%m.%Y %H:%M') }}</span>{% else %}<span class="badge err">открыта</span>{% endif %}</td>
+        <td>{% if p.closed_at %}{{ ((p.closed_at - p.opened_at).days) }} дн.{% else %}{{ p.opened_at | days_since }} дн.{% endif %}</td>
+        <td>{{ p.note or '—' }}</td>
+        <td class="muted">{{ p.opened_by or '—' }}{% if p.closed_by %} / {{ p.closed_by }}{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">Проблем по этому автобусу ещё не отмечали.</p>
+  {% endif %}
+
   <h2>История замен <a class="mini" href="/buses/swaplog?bus_id={{ bus.id }}" style="text-decoration:none">📜 полный журнал</a></h2>
   <table class="grid">
     <thead><tr><th>Дата</th><th>Снят</th><th>Установлен</th><th>Кто</th><th>Заметка</th></tr></thead>

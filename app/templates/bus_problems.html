@@ -17,6 +17,8 @@
   <p class="muted" style="margin-top:10px">
     Отмеченных проблем: <b>{{ rows|length }}</b> · лист сформирован {{ printed_at.strftime('%d.%m.%Y %H:%M') }}.
     Графа «Отметка об устранении» — для рукописных пометок на распечатке.
+    «Раз» — сколько раз проблема отмечалась за всю историю (повторные — акцентом);
+    полная история — на странице автобуса.
   </p>
 
   {% if rows %}
@@ -24,7 +26,9 @@
   <table class="grid">
     <thead><tr>
       <th style="width:30px">№</th><th>Автобус</th><th>Маршрут</th><th>Модель DVR</th>
-      <th>Где стоит</th><th>Диск</th><th>Проблема</th><th style="width:180px">Отметка об устранении</th>
+      <th>Где стоит</th><th>Диск</th><th>Проблема</th>
+      <th style="width:60px" title="Сколько раз проблема отмечалась за всю историю">Раз</th>
+      <th style="width:180px">Отметка об устранении</th>
     </tr></thead>
     <tbody>
     {% for r in rows %}
@@ -39,6 +43,7 @@
           {% else %}<span class="badge err">нет диска</span>{% endif %}
         </td>
         <td>{{ r.bus.problem_note or 'проблема (без описания)' }}</td>
+        <td {% if r.times > 1 %}style="color:var(--color-accent);font-weight:700"{% endif %}>{{ r.times }}</td>
         <td></td>
       </tr>
     {% endfor %}
