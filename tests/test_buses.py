@@ -500,3 +500,30 @@ async def test_bus_problem_history(db):
         csv_r = await c.get("/api/buses/problems.csv")
         row = next(line for line in csv_r.text.splitlines() if "И-1" in line)
         assert row.rstrip().endswith(";3")
+
+
+async def test_bus_problem_backfill(db):
+    """Проблемы, отмеченные до появления истории, подхватываются бэкфиллом при старте."""
+    from app.database import _backfill_bus_problem_log
+    from app.models import BusProblemLog
+
+    async with _client() as c:
+        bus = (await c.post("/api/buses", json={"bus_number": "Б-1"})).json()["id"]
+    # имитируем «старую» пометку — напрямую в БД, мимо API (история не писалась)
+    async with SessionLocal() as s:
+        b = (await s.execute(select(Bus).where(Bus.id == bus))).scalar_one()
+        b.has_problem = True
+        b.problem_note = "записи не полные"
+        await s.commit()
+
+    await _backfill_bus_problem_log()
+    await _backfill_bus_problem_log()  # повторный запуск дублей не плодит
+
+    async with SessionLocal() as s:
+        log = (await s.execute(select(BusProblemLog).where(BusProblemLog.bus_id == bus))).scalars().all()
+        assert len(log) == 1
+        assert log[0].note == "записи не полные" and log[0].closed_at is None
+
+    async with _client() as c:
+        page = await c.get(f"/buses/{bus}")
+        assert "записи не полные" in page.text and "История проблем" in page.text
