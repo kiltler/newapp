@@ -60,7 +60,10 @@
     </tbody>
   </table>
 
-  <h2>Оборудование автобуса <a class="mini" href="/assets" style="text-decoration:none">📦 склад</a></h2>
+  {# Оборудование/склад из карточки автобуса убрано по просьбе пользователя;
+     сам склад остаётся доступен по прямой ссылке /assets #}
+  {% if equipment %}
+  <h2>Оборудование автобуса</h2>
   <table class="grid">
     {% set asm = {'in_stock':'ok','deployed':'ok','faulty':'err','written_off':''} %}
     <thead><tr><th>Тип</th><th>Метка</th><th>Модель</th><th>Серийник</th><th>Статус</th></tr></thead>
@@ -73,9 +76,10 @@
         <td class="muted">{{ a.serial or '—' }}</td>
         <td><span class="badge {{ asm[a.status] }}">{{ asset_statuses[a.status] }}</span></td>
       </tr>
-    {% else %}<tr><td colspan="5" class="muted">Регистратор/камеры не закреплены. Закрепить — на странице «📦 Склад».</td></tr>{% endfor %}
+    {% endfor %}
     </tbody>
   </table>
+  {% endif %}
 
   <h2>История проблем</h2>
   {% if problem_log %}
