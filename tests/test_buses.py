@@ -527,3 +527,21 @@ async def test_bus_problem_backfill(db):
     async with _client() as c:
         page = await c.get(f"/buses/{bus}")
         assert "записи не полные" in page.text and "История проблем" in page.text
+
+
+async def test_bus_chronic_block(db):
+    """Автобус с 2+ пометками попадает в блок «Чаще всего болеют»."""
+    async with _client() as c:
+        b1 = (await c.post("/api/buses", json={"bus_number": "Х-1", "route": "3"})).json()["id"]
+        b2 = (await c.post("/api/buses", json={"bus_number": "Х-2", "route": "3"})).json()["id"]
+        # Х-1: дважды отмечали и снимали; Х-2 — один раз
+        for note in ("не пишет", "снова не пишет"):
+            await c.put(f"/api/buses/{b1}", json={"has_problem": True, "problem_note": note})
+            await c.put(f"/api/buses/{b1}", json={"has_problem": False, "problem_note": None})
+        await c.put(f"/api/buses/{b2}", json={"has_problem": True, "problem_note": "разово"})
+
+        page = (await c.get("/buses/problems")).text
+        assert "Чаще всего болеют" in page and "Х-1" in page
+        # Х-2 с одной пометкой в хронику не попадает (но есть в основном списке)
+        chronic_part = page.split("Чаще всего болеют")[1]
+        assert "Х-2" not in chronic_part

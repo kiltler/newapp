@@ -711,12 +711,36 @@ async def _problem_rows(session: AsyncSession) -> list[dict]:
     } for b in buses]
 
 
+async def _chronic_rows(session: AsyncSession, limit: int = 10) -> list[dict]:
+    """Топ «хронических» автобусов: проблема отмечалась 2+ раза за всю историю."""
+    stats: dict[int, dict] = {}
+    for bus_id, opened_at, closed_at in (await session.execute(
+        select(BusProblemLog.bus_id, BusProblemLog.opened_at, BusProblemLog.closed_at)
+    )).all():
+        s = stats.setdefault(bus_id, {"times": 0, "last": None, "open": False})
+        s["times"] += 1
+        if s["last"] is None or opened_at > s["last"]:
+            s["last"] = opened_at
+        if closed_at is None:
+            s["open"] = True
+    chronic_ids = [bid for bid, s in stats.items() if s["times"] >= 2]
+    if not chronic_ids:
+        return []
+    buses = {b.id: b for b in (await session.execute(
+        select(Bus).where(Bus.id.in_(chronic_ids)))).scalars()}
+    rows = [{"bus": buses[bid], **stats[bid]} for bid in chronic_ids if bid in buses]
+    rows.sort(key=lambda r: (-r["times"], r["bus"].bus_number))
+    return rows[:limit]
+
+
 @router.get("/buses/problems", response_class=HTMLResponse)
 async def bus_problems_page(request: Request, session: AsyncSession = Depends(get_session)):
     """Печатная сводка проблем: распечатать или сохранить в файл — интернет есть не везде."""
     rows = await _problem_rows(session)
+    chronic = await _chronic_rows(session)
     return templates.TemplateResponse("bus_problems.html", {
-        "request": request, "rows": rows, "printed_at": dt.datetime.now(),
+        "request": request, "rows": rows, "chronic": chronic,
+        "printed_at": dt.datetime.now(),
     })
 
 
