@@ -545,3 +545,19 @@ async def test_bus_chronic_block(db):
         # Х-2 с одной пометкой в хронику не попадает (но есть в основном списке)
         chronic_part = page.split("Чаще всего болеют")[1]
         assert "Х-2" not in chronic_part
+
+
+async def test_disk_qr_and_labels(db):
+    """QR-наклейки дисков: png-код и страница печати; ревизия содержит сканер."""
+    async with _client() as c:
+        d = (await c.post("/api/disks", json={"label": "QR-1", "type": "SSD"})).json()["id"]
+
+        qr = await c.get(f"/disks/{d}/qr.png")
+        assert qr.status_code == 200 and qr.headers["content-type"] == "image/png"
+        assert (await c.get("/disks/99999/qr.png")).status_code == 404
+
+        page = (await c.get("/disks/labels")).text
+        assert "QR-наклейки на диски" in page and "QR-1" in page
+
+        audit = (await c.get("/disks/audit")).text
+        assert "Сканировать" in audit and "Быстрый ввод" in audit

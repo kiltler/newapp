@@ -475,7 +475,12 @@ td.cal { display: table-cell; width: 22px; min-width: 22px; height: 18px; }
 .label img { width: 140px; height: 140px; margin: 0 auto; }
 .label-name { font-weight: 700; margin-top: 6px; }
 @media print { .noprint, .topbar, .tabbar { display: none !important; }
-  body { background: #fff; } .container { padding: 0; } }
+  body { background: #fff; } .container { padding: 0; }
+  /* таблицы на бумаге не скроллятся — раскрываем обёртку и разрешаем перенос */
+  .table-wrap { overflow: visible !important; }
+  table.grid { font-size: 11.5px; }
+  table.grid th, table.grid td { padding: 4px 6px; white-space: normal; word-break: break-word; }
+  a { border-bottom: none !important; } }
 
 /* ── мобильная карточка устройства ────────────────────────────────────── */
 .mobile { max-width: 640px; margin: 0 auto; padding: 12px; }

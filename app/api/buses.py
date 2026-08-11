@@ -627,6 +627,31 @@ async def replace_asset(asset_id: int, data: schemas.AssetReplace, session: Asyn
     return {"ok": True, "installed": new.label, "removed": old.label}
 
 
+@router.get("/disks/{disk_id}/qr.png")
+async def disk_qr(disk_id: int, request: Request, session: AsyncSession = Depends(get_session)):
+    """QR-код со ссылкой на паспорт диска (для наклейки на сам диск)."""
+    from fastapi.responses import Response
+
+    import qrcode
+
+    disk = (await session.execute(select(Disk).where(Disk.id == disk_id))).scalar_one_or_none()
+    if disk is None:
+        raise HTTPException(404, "Диск не найден")
+    base = str(request.base_url).rstrip("/")
+    img = qrcode.make(f"{base}/disks/{disk.id}/passport")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return Response(content=buf.getvalue(), media_type="image/png")
+
+
+@router.get("/disks/labels", response_class=HTMLResponse)
+async def disk_labels_page(request: Request, session: AsyncSession = Depends(get_session)):
+    """Печать QR-наклеек на диски (для ревизии сканированием)."""
+    disks = [d for d in await _disks(session) if d.status != DiskStatus.WRITTEN_OFF]
+    disks.sort(key=lambda d: d.label or "")
+    return templates.TemplateResponse("disk_labels.html", {"request": request, "disks": disks})
+
+
 @router.post("/api/disks/audit")
 async def disks_audit(data: schemas.AuditRequest, session: AsyncSession = Depends(get_session)):
     """Ревизия: отметить подтверждённые (физически найденные) диски."""
