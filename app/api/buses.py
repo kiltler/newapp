@@ -665,6 +665,44 @@ async def swaplog_csv(bus_id: int | None = None, disk_id: int | None = None,
                              headers={"Content-Disposition": "attachment; filename=swaplog.csv"})
 
 
+async def _problem_rows(session: AsyncSession) -> list[dict]:
+    """Автобусы с отмеченной проблемой (кнопка «проблема» на странице автобуса)."""
+    buses = list((await session.execute(
+        select(Bus).where(Bus.has_problem).order_by(Bus.route, Bus.bus_number)
+    )).scalars())
+    disks = {d.id: d for d in await _disks(session)}
+    return [{"bus": b, "disk": disks.get(b.installed_disk_id)} for b in buses]
+
+
+@router.get("/buses/problems", response_class=HTMLResponse)
+async def bus_problems_page(request: Request, session: AsyncSession = Depends(get_session)):
+    """Печатная сводка проблем: распечатать или сохранить в файл — интернет есть не везде."""
+    rows = await _problem_rows(session)
+    return templates.TemplateResponse("bus_problems.html", {
+        "request": request, "rows": rows, "printed_at": dt.datetime.now(),
+    })
+
+
+@router.get("/api/buses/problems.csv")
+async def bus_problems_csv(session: AsyncSession = Depends(get_session)):
+    """Выгрузка отмеченных проблем в CSV (Excel-совместимый, ;-разделитель)."""
+    rows = await _problem_rows(session)
+    buf = io.StringIO()
+    w = csv.writer(buf, delimiter=";")
+    w.writerow(["Автобус", "Маршрут", "Модель DVR", "Где стоит", "Диск", "Диск с", "Проблема"])
+    for r in rows:
+        b, d = r["bus"], r["disk"]
+        w.writerow([
+            b.bus_number, b.route or "", b.dvr_model or "", b.location or "",
+            d.label if d else "нет диска",
+            b.installed_since.strftime("%Y-%m-%d") if b.installed_since else "",
+            b.problem_note or "проблема (без описания)",
+        ])
+    return StreamingResponse(iter(["﻿" + buf.getvalue()]),
+                             media_type="text/csv; charset=utf-8",
+                             headers={"Content-Disposition": "attachment; filename=bus_problems.csv"})
+
+
 # ── Страницы ─────────────────────────────────────────────────────────────────────
 @router.get("/buses", response_class=HTMLResponse)
 async def buses_page(request: Request, q: str = "", sort: str = "status",

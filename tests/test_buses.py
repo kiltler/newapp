@@ -443,3 +443,27 @@ async def test_disk_bus_suggestion(db):
         # метка без совпадения — подсказки нет
         await c.post("/api/disks", json={"label": "ZZZ-1", "status": "ready"})
         assert "↳ ZZZ" not in (await c.get("/disks")).text
+
+
+async def test_bus_problems_report_and_csv(db):
+    """Отмеченные проблемы попадают в печатную сводку и CSV-выгрузку."""
+    async with _client() as c:
+        b1 = (await c.post("/api/buses", json={"bus_number": "П-1", "route": "5"})).json()["id"]
+        b2 = (await c.post("/api/buses", json={"bus_number": "П-2", "route": "5"})).json()["id"]
+        r = await c.put(f"/api/buses/{b1}", json={"has_problem": True, "problem_note": "не пишет звук"})
+        assert r.status_code == 200
+
+        page = await c.get("/buses/problems")
+        assert page.status_code == 200
+        assert "П-1" in page.text and "не пишет звук" in page.text
+        assert "П-2" not in page.text  # без проблемы — не в списке
+
+        csv_r = await c.get("/api/buses/problems.csv")
+        assert csv_r.status_code == 200
+        assert "П-1" in csv_r.text and "не пишет звук" in csv_r.text
+        assert "attachment" in csv_r.headers["content-disposition"]
+
+        # проблему сняли — сводка пустеет
+        await c.put(f"/api/buses/{b1}", json={"has_problem": False, "problem_note": None})
+        page = await c.get("/buses/problems")
+        assert "Проблем нет" in page.text
