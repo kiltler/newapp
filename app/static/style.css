@@ -622,6 +622,11 @@ tr.audit-stale { background: var(--color-accent-100); }
   letter-spacing: .05em; }
 .bcard-disk { margin-top: 10px; font-size: 14px; font-weight: 600; font-feature-settings: 'tnum' 1; }
 .bcard-disk b { color: var(--color-text); font-weight: 700; }
+a.bcard-num { display: inline-block; }
+a.bcard-num:hover { color: var(--color-accent-700); }
+.bcard-disks { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+  font-size: 13px; }
+.bcard-disks a.badge:hover { border-color: var(--color-accent); color: var(--color-accent-800); }
 .bcard-reason { margin-top: 6px; font-size: 13.5px;
   color: color-mix(in srgb, var(--color-text) 78%, transparent); }
 .bcard.b-red .bcard-reason { color: var(--color-accent-900); font-weight: 600; }

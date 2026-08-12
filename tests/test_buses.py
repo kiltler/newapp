@@ -200,11 +200,10 @@ async def test_settings_and_grouping(db):
         await c.post("/api/buses", json={"bus_number": "А1", "route": "5"})
         await c.post("/api/buses", json={"bus_number": "А2", "route": "5"})
         await c.post("/api/buses", json={"bus_number": "Б1", "route": "10"})
-        # пороги сохраняются и применяются
+        # пороги сохраняются через API (форма убрана из UI вместе с ротацией)
         r = await c.post("/api/buses/settings", json={"swap_days": 21, "review_days": 3})
         assert r.status_code == 200
-        page = (await c.get("/buses")).text
-        assert 'value="21"' in page and 'value="3"' in page  # подставились в форму
+        assert (await c.get("/buses")).status_code == 200
         # группировка по маршрутам
         grouped = (await c.get("/buses?sort=group")).text
         assert "Маршрут 5" in grouped and "Маршрут 10" in grouped
@@ -561,3 +560,28 @@ async def test_disk_qr_and_labels(db):
 
         audit = (await c.get("/disks/audit")).text
         assert "Сканировать" in audit and "Быстрый ввод" in audit
+
+
+async def test_buses_simplified_cards_and_analytics(db):
+    """Упрощённые карточки: закреплённые диски и проблема на карточке; аналитика."""
+    async with _client() as c:
+        bus = (await c.post("/api/buses", json={"bus_number": "УК-1", "route": "7"})).json()["id"]
+        await c.post("/api/disks", json={"label": "УК-1 (SSD)", "type": "SSD", "assigned_bus_id": bus})
+        await c.put(f"/api/buses/{bus}", json={"has_problem": True, "problem_note": "не пишет канал 2"})
+
+        page = (await c.get("/buses")).text
+        # диск-чип и текст проблемы прямо на карточке, кнопки отметки/снятия
+        assert "УК-1 (SSD)" in page and "не пишет канал 2" in page
+        assert "снять проблему" in page and "markProblem" in page
+
+        # страница автобуса: закрепление свободного диска на месте
+        free = (await c.post("/api/disks", json={"label": "СВ-1", "type": "SSD"})).json()["id"]
+        bpage = (await c.get(f"/buses/{bus}")).text
+        assert "Закрепить за автобусом" in bpage and "СВ-1" in bpage
+        r = await c.put(f"/api/disks/{free}", json={"assigned_bus_id": bus})
+        assert r.status_code == 200
+        assert "СВ-1" in (await c.get("/buses")).text  # чип появился на карточке
+
+        # аналитика: маршрут и месяц посчитаны
+        a = (await c.get("/buses/analytics")).text
+        assert "Аналитика проблем" in a and "марш. 7" in a and "По месяцам" in a
