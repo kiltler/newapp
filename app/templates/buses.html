@@ -3,30 +3,35 @@
 {% block content %}
 {% macro bcard(r) %}
   {# карточка: номер, закреплённые диски, проблема + кнопка отметки прямо здесь #}
-  <div class="bcard b-{{ r.color }}">
-    <div class="bcard-top">
-      <div style="flex:1;min-width:0">
+  <div class="bcard blueprint b-{{ r.color }}">
+    <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+    <div class="bcard-head">
+      <div style="min-width:0">
         <a class="bcard-num" href="/buses/{{ r.bus.id }}">{{ r.bus.bus_number }}</a>
-        <div style="margin-top:9px"><span class="badge muted">марш. {{ r.bus.route or '—' }}</span></div>
+        <div class="bcard-route">Маршрут {{ r.bus.route or '—' }}</div>
       </div>
-      {% if r.bus.has_problem %}<span class="badge err" style="flex:none">проблема{% if r.times > 1 %} · {{ r.times }}-й раз{% endif %}</span>
-      {% elif not r.assigned %}<span class="badge warn" style="flex:none">нет дисков</span>{% endif %}
+      {% if r.bus.has_problem %}<span class="badge err" style="flex:none">проблема{% if r.times > 1 %} · {{ r.times }}-й{% endif %}</span>
+      {% elif not r.assigned %}<span class="badge warn" style="flex:none">нет дисков</span>
+      {% else %}<span class="badge ok" style="flex:none">норма</span>{% endif %}
     </div>
+    <div class="bcard-cap">Закреплённые диски</div>
     <div class="bcard-disks">
       {% for d in r.assigned %}
-        <a class="badge ok" href="/disks/{{ d.id }}/passport" title="{{ d.type }}{% if d.capacity_gb %} · {{ d.capacity_gb }} ГБ{% endif %}">{{ d.label }}</a>
-      {% else %}<span class="muted">диски не закреплены</span>{% endfor %}
+        <a class="dchip {{ 'bad' if d.status == 'faulty' else '' }}" href="/disks/{{ d.id }}/passport"
+           title="{{ d.type }}{% if d.capacity_gb %} · {{ d.capacity_gb }} ГБ{% endif %}{% if d.status == 'faulty' %} · неисправен{% endif %}">{{ d.label }}</a>
+      {% else %}<span class="muted" style="font-size:13px">не закреплены</span>{% endfor %}
     </div>
     {% if r.bus.has_problem %}
       <div class="bcard-reason">{{ r.bus.problem_note or 'проблема (без описания)' }}</div>
     {% endif %}
-    <div style="display:flex;gap:8px;margin-top:12px">
+    <div class="bcard-foot">
       {% if r.bus.has_problem %}
         <button class="mini" onclick='markProblem({{ r.bus.id }}, true, {{ (r.bus.problem_note or "") | tojson }})'>изменить</button>
         <button class="mini" onclick="clearProblem({{ r.bus.id }})">снять проблему</button>
       {% else %}
         <button class="mini" onclick='markProblem({{ r.bus.id }}, false, "")'>отметить проблему</button>
       {% endif %}
+      <a class="bcard-open" href="/buses/{{ r.bus.id }}">карточка →</a>
     </div>
   </div>
 {% endmacro %}

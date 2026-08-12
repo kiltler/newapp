@@ -250,7 +250,7 @@ async def test_route_sort_order(db):
         r = await c.get("/buses?sort=route")
         body = r.text
         # маршрут 5 должен идти раньше маршрута 10 (натуральная сортировка)
-        assert body.index("марш. 5") < body.index("марш. 10")
+        assert body.index("Маршрут 5") < body.index("Маршрут 10")
 
 
 async def test_delete_disk(db):

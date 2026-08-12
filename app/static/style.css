@@ -601,10 +601,10 @@ td.cal { display: table-cell; width: 22px; min-width: 22px; height: 18px; }
 tr.audit-stale { background: var(--color-accent-100); }
 .loc-sel { padding: 6px 8px; font-size: 12px; min-height: 30px; }
 
-/* ── карточки автобусов (blueprint + изометрическая моделька) ─────────── */
-.blist { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
-.bcard { display: block; position: relative; background: #fff;
-  border: 1px solid var(--color-divider); border-radius: 0; padding: 16px 18px 18px;
+/* ── карточки автобусов (blueprint с угловыми метками) ────────────────── */
+.blist { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.bcard { display: flex; flex-direction: column; position: relative; background: #fff;
+  border: 1px solid var(--color-divider); border-radius: 0; padding: 18px 20px 14px;
   overflow: visible; text-decoration: none; color: var(--color-text); box-shadow: none;
   transition: border-color .12s; }
 .bcard::before { content: none; }
@@ -614,23 +614,40 @@ tr.audit-stale { background: var(--color-accent-100); }
 .bcard.b-red { border: 2px solid var(--color-accent); background: var(--color-accent-100); }
 .bcard.b-red:hover { background: var(--color-accent-100); }
 .bcard.b-orange, .bcard.b-yellow { border: 1.5px solid var(--color-accent); }
-.bcard-top { display: flex; align-items: flex-start; gap: 9px; }
-.bcard-num { font-family: var(--font-heading); font-size: 27px; font-weight: 700;
-  letter-spacing: .02em; line-height: 1; color: var(--color-text); }
-.bcard-route { margin-left: auto; color: color-mix(in srgb, var(--color-text) 72%, transparent);
-  font-size: 12px; font-weight: 600; white-space: nowrap; text-transform: uppercase;
-  letter-spacing: .05em; }
-.bcard-disk { margin-top: 10px; font-size: 14px; font-weight: 600; font-feature-settings: 'tnum' 1; }
-.bcard-disk b { color: var(--color-text); font-weight: 700; }
-a.bcard-num { display: inline-block; }
+/* на цветных карточках метки «+» не рисуем — рамка уже акцентная */
+.bcard.b-red > .corner, .bcard.b-yellow > .corner, .bcard.b-orange > .corner { display: none; }
+.bcard-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.bcard-num { display: inline-block; font-family: var(--font-heading); font-size: 28px;
+  font-weight: 700; letter-spacing: .02em; line-height: 1; color: var(--color-text); }
 a.bcard-num:hover { color: var(--color-accent-700); }
-.bcard-disks { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
-  font-size: 13px; }
-.bcard-disks a.badge:hover { border-color: var(--color-accent); color: var(--color-accent-800); }
-.bcard-reason { margin-top: 6px; font-size: 13.5px;
+.bcard-route { margin-top: 5px; font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .07em; color: color-mix(in srgb, var(--color-text) 65%, transparent); }
+.bcard-cap { margin-top: 16px; font-size: 10px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .08em; color: color-mix(in srgb, var(--color-text) 60%, transparent); }
+.bcard-disks { margin-top: 7px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+/* чип диска: квадрат-маркер + метка, tnum */
+.dchip { display: inline-flex; align-items: center; gap: 7px; padding: 3px 10px;
+  border: 1px solid var(--color-divider); background: #fff; font-size: 13px; font-weight: 600;
+  font-feature-settings: 'tnum' 1; color: var(--color-text); }
+.dchip::before { content: ""; width: 7px; height: 7px; flex: none; background: var(--color-accent-400); }
+.dchip:hover { border-color: var(--color-accent); color: var(--color-accent-800); }
+.dchip.bad { color: var(--color-accent-800); border-color: var(--color-accent); }
+.dchip.bad::before { background: var(--color-accent); }
+.bcard-reason { margin-top: 12px; font-size: 13.5px; line-height: 1.45;
   color: color-mix(in srgb, var(--color-text) 78%, transparent); }
 .bcard.b-red .bcard-reason { color: var(--color-accent-900); font-weight: 600; }
 .bcard.b-yellow .bcard-reason, .bcard.b-orange .bcard-reason { color: var(--color-accent-800); font-weight: 600; }
+/* низ карточки: действия прижаты книзу, у всех карточек одна высота (грид растягивает) */
+.bcard { min-height: 180px; }
+.bcard-foot { margin-top: auto; padding-top: 12px; display: flex; align-items: center; gap: 4px;
+  border-top: 1px solid var(--color-neutral-200); }
+.bcard-foot .mini { margin: 0; }
+.bcard > *:nth-last-child(2) { margin-bottom: 14px; }  /* воздух между контентом и футером */
+.bcard-open { margin-left: auto; font-size: 12.5px; font-weight: 600;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent); white-space: nowrap; }
+.bcard-open:hover { color: var(--color-accent-700); }
+.bcard.b-red .bcard-foot { border-top-color: color-mix(in srgb, var(--color-accent) 30%, transparent); }
+.bcard.b-red .dchip { background: transparent; }
 /* индикатор «срок диска» на карточке (вместо 3D-модельки) */
 .bcard-side { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
 .disk-meter { width: 142px; max-width: 100%; }
